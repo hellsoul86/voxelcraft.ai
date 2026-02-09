@@ -1,0 +1,22 @@
+protocol_version: "0.9"
+
+tick_rate_hz: 5
+tick_duration_ms: 200
+day_ticks: 6000
+
+chunk_size: [16, 16, 64]
+obs_radius: 7
+world_boundary_r: 4000
+
+rate_limits:
+  say_window_ticks: 50
+  say_max: 5
+  whisper_window_ticks: 50
+  whisper_max: 5
+  offer_trade_window_ticks: 50
+  offer_trade_max: 3
+  post_board_window_ticks: 600
+  post_board_max: 1
+
+snapshot_every_ticks: 3000
+

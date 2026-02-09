@@ -1,0 +1,16 @@
+{
+  "id": "road_segment",
+  "author": "system",
+  "version": "0.9",
+  "aabb": [[0,0,0],[1,1,5]],
+  "cost": [
+    {"item":"PLANK","count":5}
+  ],
+  "blocks": [
+    {"pos":[0,0,0],"block":"PLANK"},
+    {"pos":[0,0,1],"block":"PLANK"},
+    {"pos":[0,0,2],"block":"PLANK"},
+    {"pos":[0,0,3],"block":"PLANK"},
+    {"pos":[0,0,4],"block":"PLANK"}
+  ]
+}

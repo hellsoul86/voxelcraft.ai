@@ -1,0 +1,99 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "voxelcraft.ai/schemas/obs.schema.json",
+  "type": "object",
+  "required": ["type", "protocol_version", "tick", "agent_id", "world", "self", "inventory", "equipment", "local_rules", "voxels", "entities", "events", "tasks"],
+  "properties": {
+    "type": {"const": "OBS"},
+    "protocol_version": {"const": "0.9"},
+    "tick": {"type": "integer", "minimum": 0},
+    "agent_id": {"type": "string"},
+    "world": {
+      "type": "object",
+      "required": ["time_of_day", "weather", "season_day", "biome"],
+      "properties": {
+        "time_of_day": {"type": "number", "minimum": 0, "maximum": 1},
+        "weather": {"type": "string"},
+        "season_day": {"type": "integer", "minimum": 1},
+        "biome": {"type": "string"}
+      },
+      "additionalProperties": true
+    },
+    "self": {
+      "type": "object",
+      "required": ["pos", "yaw", "hp", "hunger", "stamina", "status"],
+      "properties": {
+        "pos": {"type": "array", "minItems": 3, "maxItems": 3, "items": {"type": "integer"}},
+        "yaw": {"type": "integer"},
+        "hp": {"type": "integer"},
+        "hunger": {"type": "integer"},
+        "stamina": {"type": "number"},
+        "status": {"type": "array", "items": {"type": "string"}}
+      },
+      "additionalProperties": true
+    },
+    "inventory": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["item", "count"],
+        "properties": {
+          "item": {"type": "string"},
+          "count": {"type": "integer"}
+        },
+        "additionalProperties": false
+      }
+    },
+    "equipment": {
+      "type": "object",
+      "required": ["main_hand", "armor"],
+      "properties": {
+        "main_hand": {"type": "string"},
+        "armor": {"type": "array", "items": {"type": "string"}}
+      },
+      "additionalProperties": true
+    },
+    "local_rules": {
+      "type": "object",
+      "required": ["permissions"],
+      "properties": {
+        "land_id": {"type": "string"},
+        "owner": {"type": "string"},
+        "permissions": {"type": "object"},
+        "tax": {"type": "object"}
+      },
+      "additionalProperties": true
+    },
+    "voxels": {
+      "type": "object",
+      "required": ["center", "radius", "encoding"],
+      "properties": {
+        "center": {"type": "array", "minItems": 3, "maxItems": 3, "items": {"type": "integer"}},
+        "radius": {"type": "integer", "minimum": 1},
+        "encoding": {"type": "string"},
+        "data": {"type": "string"},
+        "ops": {"type": "array"}
+      },
+      "additionalProperties": true
+    },
+    "entities": {"type": "array"},
+    "events": {"type": "array"},
+    "tasks": {"type": "array"},
+    "fun_score": {
+      "type": "object",
+      "required": ["novelty", "creation", "social", "influence", "narrative", "risk_rescue"],
+      "properties": {
+        "novelty": {"type": "integer"},
+        "creation": {"type": "integer"},
+        "social": {"type": "integer"},
+        "influence": {"type": "integer"},
+        "narrative": {"type": "integer"},
+        "risk_rescue": {"type": "integer"}
+      },
+      "additionalProperties": false
+    },
+    "public_boards": {"type": "array"},
+    "memory": {"type": "array"}
+  },
+  "additionalProperties": false
+}

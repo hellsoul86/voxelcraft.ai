@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "voxelcraft.ai/schemas/hello.schema.json",
+  "type": "object",
+  "required": ["type", "protocol_version", "agent_name", "capabilities"],
+  "properties": {
+    "type": {"const": "HELLO"},
+    "protocol_version": {"const": "0.9"},
+    "agent_name": {"type": "string", "minLength": 1},
+    "capabilities": {
+      "type": "object",
+      "properties": {
+        "delta_voxels": {"type": "boolean"},
+        "max_queue": {"type": "integer", "minimum": 1, "maximum": 64}
+      },
+      "additionalProperties": false
+    },
+    "auth": {
+      "type": "object",
+      "properties": {
+        "token": {"type": "string"}
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}
+

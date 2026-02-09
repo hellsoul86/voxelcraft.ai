@@ -1,0 +1,9 @@
+{
+  "id": "RUINS_GATE",
+  "category": "EXPLORATION",
+  "title": "遗迹开启",
+  "description": "限时开启遗迹入口，鼓励组队探索与文物展示。",
+  "base_weight": 0.2,
+  "params": {"duration_ticks": 6000}
+}
+

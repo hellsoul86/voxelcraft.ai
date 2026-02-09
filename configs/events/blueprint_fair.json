@@ -1,0 +1,9 @@
+{
+  "id": "BLUEPRINT_FAIR",
+  "category": "CULTURE",
+  "title": "蓝图开放日",
+  "description": "鼓励共享蓝图与工业标准形成。",
+  "base_weight": 0.15,
+  "params": {"duration_ticks": 6000}
+}
+

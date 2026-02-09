@@ -1,0 +1,53 @@
+[
+  {"id":"DIRT","kind":"BLOCK","place_as":"DIRT"},
+  {"id":"GRASS","kind":"BLOCK","place_as":"GRASS"},
+  {"id":"SAND","kind":"BLOCK","place_as":"SAND"},
+  {"id":"STONE","kind":"BLOCK","place_as":"STONE"},
+  {"id":"GRAVEL","kind":"BLOCK","place_as":"GRAVEL"},
+  {"id":"ICE","kind":"BLOCK","place_as":"ICE"},
+  {"id":"WATER","kind":"BLOCK","place_as":"WATER"},
+
+  {"id":"LOG","kind":"BLOCK","place_as":"LOG"},
+  {"id":"PLANK","kind":"BLOCK","place_as":"PLANK"},
+  {"id":"BRICK","kind":"BLOCK","place_as":"BRICK"},
+  {"id":"GLASS","kind":"BLOCK","place_as":"GLASS"},
+  {"id":"METAL_PLATE","kind":"BLOCK","place_as":"METAL_PLATE"},
+  {"id":"TORCH","kind":"BLOCK","place_as":"TORCH"},
+
+  {"id":"CRAFTING_BENCH","kind":"BLOCK","place_as":"CRAFTING_BENCH"},
+  {"id":"FURNACE","kind":"BLOCK","place_as":"FURNACE"},
+  {"id":"CHEST","kind":"BLOCK","place_as":"CHEST"},
+  {"id":"SIGN","kind":"BLOCK","place_as":"SIGN"},
+  {"id":"BULLETIN_BOARD","kind":"BLOCK","place_as":"BULLETIN_BOARD"},
+  {"id":"CLAIM_TOTEM","kind":"BLOCK","place_as":"CLAIM_TOTEM"},
+  {"id":"CONTRACT_TERMINAL","kind":"BLOCK","place_as":"CONTRACT_TERMINAL"},
+  {"id":"WIRE","kind":"BLOCK","place_as":"WIRE"},
+  {"id":"SWITCH","kind":"BLOCK","place_as":"SWITCH"},
+  {"id":"SENSOR","kind":"BLOCK","place_as":"SENSOR"},
+  {"id":"CONVEYOR","kind":"BLOCK","place_as":"CONVEYOR"},
+  {"id":"BATTERY","kind":"BLOCK","place_as":"BATTERY"},
+
+  {"id":"STICK","kind":"MATERIAL"},
+  {"id":"COAL","kind":"MATERIAL"},
+  {"id":"IRON_ORE","kind":"MATERIAL"},
+  {"id":"COPPER_ORE","kind":"MATERIAL"},
+  {"id":"CRYSTAL_SHARD","kind":"MATERIAL"},
+  {"id":"IRON_INGOT","kind":"MATERIAL"},
+  {"id":"COPPER_INGOT","kind":"MATERIAL"},
+
+  {"id":"BERRIES","kind":"FOOD","edible_hp":2},
+  {"id":"BREAD","kind":"FOOD","edible_hp":4},
+  {"id":"RAW_MEAT","kind":"FOOD","edible_hp":1},
+  {"id":"COOKED_MEAT","kind":"FOOD","edible_hp":6},
+
+  {"id":"WOOD_AXE","kind":"TOOL"},
+  {"id":"WOOD_PICKAXE","kind":"TOOL"},
+  {"id":"WOOD_SHOVEL","kind":"TOOL"},
+  {"id":"STONE_PICKAXE","kind":"TOOL"},
+  {"id":"STONE_AXE","kind":"TOOL"},
+  {"id":"STONE_SHOVEL","kind":"TOOL"},
+  {"id":"IRON_PICKAXE","kind":"TOOL"},
+  {"id":"IRON_AXE","kind":"TOOL"},
+  {"id":"IRON_SHOVEL","kind":"TOOL"}
+]
+

@@ -1,0 +1,40 @@
+[
+  {"id":"AIR","solid":false,"breakable":false},
+
+  {"id":"DIRT","solid":true,"breakable":true},
+  {"id":"GRASS","solid":true,"breakable":true},
+  {"id":"SAND","solid":true,"breakable":true},
+  {"id":"STONE","solid":true,"breakable":true},
+  {"id":"GRAVEL","solid":true,"breakable":true},
+
+  {"id":"WATER","solid":false,"breakable":false},
+  {"id":"ICE","solid":true,"breakable":true},
+
+  {"id":"COAL_ORE","solid":true,"breakable":true},
+  {"id":"IRON_ORE","solid":true,"breakable":true},
+  {"id":"COPPER_ORE","solid":true,"breakable":true},
+  {"id":"CRYSTAL_ORE","solid":true,"breakable":true},
+
+  {"id":"LOG","solid":true,"breakable":true},
+  {"id":"PLANK","solid":true,"breakable":true},
+  {"id":"BRICK","solid":true,"breakable":true},
+  {"id":"GLASS","solid":true,"breakable":true},
+  {"id":"METAL_PLATE","solid":true,"breakable":true},
+
+  {"id":"TORCH","solid":false,"breakable":true},
+
+  {"id":"CRAFTING_BENCH","solid":true,"breakable":true},
+  {"id":"FURNACE","solid":true,"breakable":true},
+  {"id":"CHEST","solid":true,"breakable":true},
+  {"id":"SIGN","solid":false,"breakable":true},
+  {"id":"BULLETIN_BOARD","solid":true,"breakable":true},
+  {"id":"CLAIM_TOTEM","solid":true,"breakable":true},
+  {"id":"CONTRACT_TERMINAL","solid":true,"breakable":true},
+
+  {"id":"WIRE","solid":false,"breakable":true},
+  {"id":"SWITCH","solid":true,"breakable":true},
+  {"id":"SENSOR","solid":true,"breakable":true},
+  {"id":"CONVEYOR","solid":true,"breakable":true},
+  {"id":"BATTERY","solid":true,"breakable":true}
+]
+

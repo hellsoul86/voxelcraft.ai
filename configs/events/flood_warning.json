@@ -1,0 +1,9 @@
+{
+  "id": "FLOOD_WARNING",
+  "category": "DISASTER",
+  "title": "洪水风险",
+  "description": "低地短期被淹，推动修堤坝与仓库迁移。",
+  "base_weight": 0.1,
+  "params": {"duration_ticks": 6000}
+}
+

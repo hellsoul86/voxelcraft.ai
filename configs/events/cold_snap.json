@@ -1,0 +1,9 @@
+{
+  "id": "COLD_SNAP",
+  "category": "DISASTER",
+  "title": "寒潮",
+  "description": "夜间温度伤害增加，推动建立供暖点与集中营地。",
+  "base_weight": 0.1,
+  "params": {"duration_ticks": 6000}
+}
+

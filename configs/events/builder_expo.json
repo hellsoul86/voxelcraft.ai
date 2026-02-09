@@ -1,0 +1,9 @@
+{
+  "id": "BUILDER_EXPO",
+  "category": "CULTURE",
+  "title": "建筑大赛",
+  "description": "主题建筑竞赛，推动公开展示与投票。",
+  "base_weight": 0.1,
+  "params": {"duration_ticks": 6000, "theme": "BRIDGE"}
+}
+

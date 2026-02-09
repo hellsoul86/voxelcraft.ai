@@ -1,0 +1,21 @@
+# Binaries
+bin/
+*.exe
+*.out
+
+# Go build cache
+/dist/
+
+# Runtime data
+/data/
+
+# Logs / snapshots (in case user changes data path)
+*.jsonl
+*.jsonl.zst
+*.snap
+*.snap.zst
+
+# Editors / OS
+.DS_Store
+.vscode/
+

@@ -1,0 +1,9 @@
+{
+  "id": "CIVIC_VOTE",
+  "category": "GOVERNANCE",
+  "title": "城邦选举/公投",
+  "description": "触发立法/公投流程，推动政治叙事。",
+  "base_weight": 0.12,
+  "params": {"duration_ticks": 6000}
+}
+

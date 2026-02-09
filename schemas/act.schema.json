@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "voxelcraft.ai/schemas/act.schema.json",
+  "type": "object",
+  "required": ["type", "protocol_version", "tick", "agent_id"],
+  "properties": {
+    "type": {"const": "ACT"},
+    "protocol_version": {"const": "0.9"},
+    "tick": {"type": "integer", "minimum": 0},
+    "agent_id": {"type": "string"},
+    "instants": {"type": "array"},
+    "tasks": {"type": "array"},
+    "cancel": {"type": "array", "items": {"type": "string"}}
+  },
+  "additionalProperties": false
+}
+

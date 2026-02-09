@@ -1,0 +1,9 @@
+{
+  "id": "MARKET_WEEK",
+  "category": "CULTURE",
+  "title": "市集周",
+  "description": "交易手续费降低，鼓励贸易、签约与商会形成。",
+  "base_weight": 0.25,
+  "params": {"duration_ticks": 6000}
+}
+

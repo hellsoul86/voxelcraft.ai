@@ -1,0 +1,9 @@
+{
+  "id": "DEEP_VEIN",
+  "category": "RESOURCE",
+  "title": "深矿脉",
+  "description": "铁/铜高产但伴随风险点（毒气/坍塌），鼓励工程协作。",
+  "base_weight": 0.15,
+  "params": {"duration_ticks": 9000}
+}
+

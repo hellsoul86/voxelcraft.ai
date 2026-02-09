@@ -1,0 +1,29 @@
+{
+  "templates": [
+    {
+      "id": "FINE_BREAK_PER_BLOCK",
+      "title": "领地破坏惩罚",
+      "description": "在领地内非法破坏方块时按每块罚款。",
+      "params": {"fine_item":"ITEM_ID","fine_per_block":"INT"}
+    },
+    {
+      "id": "MARKET_TAX",
+      "title": "市场税率",
+      "description": "在市场区交易时抽取税率。",
+      "params": {"market_tax":"FLOAT"}
+    },
+    {
+      "id": "CURFEW_NO_BUILD",
+      "title": "宵禁禁建",
+      "description": "指定时间窗内禁止在城内建造/破坏。",
+      "params": {"start_time":"FLOAT_0_1","end_time":"FLOAT_0_1"}
+    },
+    {
+      "id": "ACCESS_PASS_CORE",
+      "title": "核心区通行证",
+      "description": "进入核心区需要门票或成员身份。",
+      "params": {"ticket_item":"ITEM_ID","ticket_cost":"INT"}
+    }
+  ]
+}
+

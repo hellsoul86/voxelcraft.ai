@@ -1,0 +1,9 @@
+{
+  "id": "CRYSTAL_RIFT",
+  "category": "RESOURCE",
+  "title": "水晶裂隙",
+  "description": "在远离城市的区域生成稀有水晶点，鼓励远征、前哨与护送。",
+  "base_weight": 0.2,
+  "params": {"min_distance_from_city": 200, "duration_ticks": 9000}
+}
+

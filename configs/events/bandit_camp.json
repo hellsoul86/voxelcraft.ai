@@ -1,0 +1,9 @@
+{
+  "id": "BANDIT_CAMP",
+  "category": "GOVERNANCE",
+  "title": "盗匪营地",
+  "description": "贸易路线附近出现盗匪威胁点，推动护送/清剿/谈判。",
+  "base_weight": 0.1,
+  "params": {"duration_ticks": 6000}
+}
+

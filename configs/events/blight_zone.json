@@ -1,0 +1,9 @@
+{
+  "id": "BLIGHT_ZONE",
+  "category": "GOVERNANCE",
+  "title": "污染扩散",
+  "description": "某区域作物减产、体力恢复变慢，推动隔离与净化设施、禁令。",
+  "base_weight": 0.08,
+  "params": {"duration_ticks": 9000}
+}
+
