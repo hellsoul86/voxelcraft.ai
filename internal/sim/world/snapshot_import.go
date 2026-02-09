@@ -28,6 +28,7 @@ func (w *World) ImportSnapshot(s snapshot.SnapshotV1) error {
 	if w.cfg.DayTicks != s.DayTicks {
 		return fmt.Errorf("snapshot day_ticks mismatch: cfg=%d snap=%d", w.cfg.DayTicks, s.DayTicks)
 	}
+	// season_length_ticks is operational; the snapshot value is authoritative when present.
 	if w.cfg.ObsRadius != s.ObsRadius {
 		return fmt.Errorf("snapshot obs_radius mismatch: cfg=%d snap=%d", w.cfg.ObsRadius, s.ObsRadius)
 	}
@@ -35,11 +36,80 @@ func (w *World) ImportSnapshot(s snapshot.SnapshotV1) error {
 		return fmt.Errorf("snapshot boundary_r mismatch: cfg=%d snap=%d", w.cfg.BoundaryR, s.BoundaryR)
 	}
 
+	// Operational parameters: snapshot is authoritative when present.
+	if s.SnapshotEveryTicks > 0 {
+		w.cfg.SnapshotEveryTicks = s.SnapshotEveryTicks
+	}
+	if s.DirectorEveryTicks > 0 {
+		w.cfg.DirectorEveryTicks = s.DirectorEveryTicks
+	}
+	if s.SeasonLengthTicks > 0 {
+		w.cfg.SeasonLengthTicks = s.SeasonLengthTicks
+	}
+	if s.RateLimits.SayWindowTicks > 0 ||
+		s.RateLimits.SayMax > 0 ||
+		s.RateLimits.WhisperWindowTicks > 0 ||
+		s.RateLimits.WhisperMax > 0 ||
+		s.RateLimits.OfferTradeWindowTicks > 0 ||
+		s.RateLimits.OfferTradeMax > 0 ||
+		s.RateLimits.PostBoardWindowTicks > 0 ||
+		s.RateLimits.PostBoardMax > 0 {
+		w.cfg.RateLimits = RateLimitConfig{
+			SayWindowTicks:        s.RateLimits.SayWindowTicks,
+			SayMax:                s.RateLimits.SayMax,
+			WhisperWindowTicks:    s.RateLimits.WhisperWindowTicks,
+			WhisperMax:            s.RateLimits.WhisperMax,
+			OfferTradeWindowTicks: s.RateLimits.OfferTradeWindowTicks,
+			OfferTradeMax:         s.RateLimits.OfferTradeMax,
+			PostBoardWindowTicks:  s.RateLimits.PostBoardWindowTicks,
+			PostBoardMax:          s.RateLimits.PostBoardMax,
+		}
+	}
+	if s.LawNoticeTicks > 0 {
+		w.cfg.LawNoticeTicks = s.LawNoticeTicks
+	}
+	if s.LawVoteTicks > 0 {
+		w.cfg.LawVoteTicks = s.LawVoteTicks
+	}
+	if s.BlueprintAutoPullRange > 0 {
+		w.cfg.BlueprintAutoPullRange = s.BlueprintAutoPullRange
+	}
+	if s.BlueprintBlocksPerTick > 0 {
+		w.cfg.BlueprintBlocksPerTick = s.BlueprintBlocksPerTick
+	}
+	if s.AccessPassCoreRadius > 0 {
+		w.cfg.AccessPassCoreRadius = s.AccessPassCoreRadius
+	}
+	if len(s.MaintenanceCost) > 0 {
+		w.cfg.MaintenanceCost = map[string]int{}
+		for item, n := range s.MaintenanceCost {
+			if item != "" && n > 0 {
+				w.cfg.MaintenanceCost[item] = n
+			}
+		}
+		if len(w.cfg.MaintenanceCost) == 0 {
+			w.cfg.MaintenanceCost = nil
+		}
+	}
+	if s.FunDecayWindowTicks > 0 {
+		w.cfg.FunDecayWindowTicks = s.FunDecayWindowTicks
+	}
+	if s.FunDecayBase > 0 {
+		w.cfg.FunDecayBase = s.FunDecayBase
+	}
+	if s.StructureSurvivalTicks > 0 {
+		w.cfg.StructureSurvivalTicks = s.StructureSurvivalTicks
+	}
+	w.cfg.applyDefaults()
+
 	// Reset dynamic fields.
 	w.weather = s.Weather
 	w.weatherUntilTick = s.WeatherUntilTick
 	w.activeEventID = s.ActiveEventID
+	w.activeEventStart = s.ActiveEventStart
 	w.activeEventEnds = s.ActiveEventEnds
+	w.activeEventCenter = Vec3i{X: s.ActiveEventCenter[0], Y: s.ActiveEventCenter[1], Z: s.ActiveEventCenter[2]}
+	w.activeEventRadius = s.ActiveEventRadius
 
 	// Rebuild chunks.
 	store := NewChunkStore(w.chunks.gen)
@@ -93,12 +163,44 @@ func (w *World) ImportSnapshot(s snapshot.SnapshotV1) error {
 				aa.Inventory[item] = n
 			}
 		}
+		if len(a.Memory) > 0 {
+			aa.Memory = map[string]memoryEntry{}
+			for k, e := range a.Memory {
+				if k == "" {
+					continue
+				}
+				if e.ExpiryTick != 0 && s.Header.Tick >= e.ExpiryTick {
+					continue
+				}
+				aa.Memory[k] = memoryEntry{Value: e.Value, ExpiryTick: e.ExpiryTick}
+			}
+			if len(aa.Memory) == 0 {
+				aa.Memory = nil
+			}
+		}
+		if len(a.RateWindows) > 0 {
+			aa.rl = map[string]*rateWindow{}
+			for k, rw := range a.RateWindows {
+				if k == "" {
+					continue
+				}
+				if rw.Count <= 0 {
+					continue
+				}
+				aa.rl[k] = &rateWindow{StartTick: rw.StartTick, Count: rw.Count}
+			}
+			if len(aa.rl) == 0 {
+				aa.rl = nil
+			}
+		}
 		if a.MoveTask != nil {
 			aa.MoveTask = &tasks.MovementTask{
 				TaskID:      a.MoveTask.TaskID,
 				Kind:        tasks.Kind(a.MoveTask.Kind),
 				Target:      tasks.Vec3i{X: a.MoveTask.Target[0], Y: a.MoveTask.Target[1], Z: a.MoveTask.Target[2]},
 				Tolerance:   a.MoveTask.Tolerance,
+				TargetID:    a.MoveTask.TargetID,
+				Distance:    a.MoveTask.Distance,
 				StartPos:    tasks.Vec3i{X: a.MoveTask.StartPos[0], Y: a.MoveTask.StartPos[1], Z: a.MoveTask.StartPos[2]},
 				StartedTick: a.MoveTask.StartedTick,
 			}
@@ -249,6 +351,69 @@ func (w *World) ImportSnapshot(s snapshot.SnapshotV1) error {
 			}
 		}
 		w.containers[pos] = cc
+	}
+
+	// Item entities.
+	w.items = map[string]*ItemEntity{}
+	w.itemsAt = map[Vec3i][]string{}
+	var maxItem uint64
+	for _, it := range s.Items {
+		if it.EntityID == "" || it.Item == "" || it.Count <= 0 {
+			continue
+		}
+		if it.ExpiresTick != 0 && s.Header.Tick >= it.ExpiresTick {
+			continue
+		}
+		pos := Vec3i{X: it.Pos[0], Y: it.Pos[1], Z: it.Pos[2]}
+		e := &ItemEntity{
+			EntityID:    it.EntityID,
+			Pos:         pos,
+			Item:        it.Item,
+			Count:       it.Count,
+			CreatedTick: it.CreatedTick,
+			ExpiresTick: it.ExpiresTick,
+		}
+		w.items[e.EntityID] = e
+		w.itemsAt[pos] = append(w.itemsAt[pos], e.EntityID)
+		if n, ok := parseUintAfterPrefix("IT", e.EntityID); ok && n > maxItem {
+			maxItem = n
+		}
+	}
+	w.nextItemNum.Store(maxU64(maxItem, s.Counters.NextItem))
+
+	// Signs.
+	w.signs = map[Vec3i]*Sign{}
+	for _, ss := range s.Signs {
+		pos := Vec3i{X: ss.Pos[0], Y: ss.Pos[1], Z: ss.Pos[2]}
+		if w.blockName(w.chunks.GetBlock(pos)) != "SIGN" {
+			continue
+		}
+		w.signs[pos] = &Sign{
+			Pos:         pos,
+			Text:        ss.Text,
+			UpdatedTick: ss.UpdatedTick,
+			UpdatedBy:   ss.UpdatedBy,
+		}
+	}
+
+	// Conveyors.
+	w.conveyors = map[Vec3i]ConveyorMeta{}
+	for _, cv := range s.Conveyors {
+		pos := Vec3i{X: cv.Pos[0], Y: cv.Pos[1], Z: cv.Pos[2]}
+		if w.blockName(w.chunks.GetBlock(pos)) != "CONVEYOR" {
+			continue
+		}
+		w.conveyors[pos] = ConveyorMeta{DX: int8(cv.DX), DZ: int8(cv.DZ)}
+	}
+
+	// Switches.
+	w.switches = map[Vec3i]bool{}
+	for _, sv := range s.Switches {
+		pos := Vec3i{X: sv.Pos[0], Y: sv.Pos[1], Z: sv.Pos[2]}
+		if w.blockName(w.chunks.GetBlock(pos)) != "SWITCH" {
+			continue
+		}
+		w.switches[pos] = sv.On
 	}
 
 	// Trades.
@@ -433,6 +598,7 @@ func (w *World) ImportSnapshot(s snapshot.SnapshotV1) error {
 			BlueprintID:      ss.BlueprintID,
 			BuilderID:        ss.BuilderID,
 			Anchor:           Vec3i{X: ss.Anchor[0], Y: ss.Anchor[1], Z: ss.Anchor[2]},
+			Rotation:         normalizeRotation(ss.Rotation),
 			Min:              Vec3i{X: ss.Min[0], Y: ss.Min[1], Z: ss.Min[2]},
 			Max:              Vec3i{X: ss.Max[0], Y: ss.Max[1], Z: ss.Max[2]},
 			CompletedTick:    ss.CompletedTick,

@@ -140,7 +140,7 @@ func (a *Agent) TakeEvents() []protocol.Event {
 	return ev
 }
 
-func (a *Agent) RateLimitAllow(kind string, nowTick uint64, window uint64, max int) bool {
+func (a *Agent) RateLimitAllow(kind string, nowTick uint64, window uint64, max int) (ok bool, cooldownTicks uint64) {
 	w, ok := a.rl[kind]
 	if !ok {
 		w = &rateWindow{StartTick: nowTick, Window: window, Max: max}
@@ -148,12 +148,20 @@ func (a *Agent) RateLimitAllow(kind string, nowTick uint64, window uint64, max i
 	}
 	w.Window = window
 	w.Max = max
+	// Defensive: treat invalid windows as "allow" rather than panicking/diverging.
+	if w.Window == 0 || w.Max <= 0 {
+		return true, 0
+	}
 	if nowTick-w.StartTick >= w.Window {
 		w.StartTick = nowTick
 		w.Count = 0
 	}
 	w.Count++
-	return w.Count <= w.Max
+	if w.Count <= w.Max {
+		return true, 0
+	}
+	// Remaining ticks until the window resets (next tick >= StartTick+Window).
+	return false, (w.StartTick + w.Window) - nowTick
 }
 
 func (a *Agent) MemorySave(key, value string, ttlTicks int, nowTick uint64) {

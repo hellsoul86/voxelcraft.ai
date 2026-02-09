@@ -3,6 +3,7 @@ protocol_version: "0.9"
 tick_rate_hz: 5
 tick_duration_ms: 200
 day_ticks: 6000
+season_length_ticks: 42000
 
 chunk_size: [16, 16, 64]
 obs_radius: 7
@@ -19,4 +20,23 @@ rate_limits:
   post_board_max: 1
 
 snapshot_every_ticks: 3000
+director_every_ticks: 3000
 
+# Governance.
+law_notice_ticks: 3000
+law_vote_ticks: 3000
+
+# Blueprints.
+blueprint_auto_pull_range: 32
+blueprint_blocks_per_tick: 2
+
+# Claims/laws.
+access_pass_core_radius: 16
+claim_maintenance_cost:
+  IRON_INGOT: 1
+  COAL: 1
+
+# Fun-score tuning.
+fun_decay_window_ticks: 3000
+fun_decay_base: 0.70
+structure_survival_ticks: 3000

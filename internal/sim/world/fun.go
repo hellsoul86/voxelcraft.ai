@@ -9,15 +9,6 @@ import (
 	"voxelcraft.ai/internal/sim/catalogs"
 )
 
-const (
-	// Anti-exploit: repeated awards in a short window get exponentially less value.
-	funDecayWindowTicks = 3000 // ~10 minutes @ 5Hz
-	funDecayBase        = 0.70
-
-	// Creation anti-exploit: structures must survive before points are granted.
-	structureSurvivalTicks = 3000
-)
-
 type FunScore struct {
 	Novelty    int
 	Creation   int
@@ -37,6 +28,7 @@ type Structure struct {
 	BlueprintID string
 	BuilderID   string
 	Anchor      Vec3i
+	Rotation    int
 	Min         Vec3i
 	Max         Vec3i
 
@@ -74,7 +66,7 @@ func (w *World) systemFun(nowTick uint64) {
 			}
 
 			// Validate that the structure still exists and matches the blueprint.
-			if !w.checkBlueprintPlaced(s.BlueprintID, s.Anchor, 0) {
+			if !w.checkBlueprintPlaced(s.BlueprintID, s.Anchor, s.Rotation) {
 				delete(w.structures, id)
 				continue
 			}
@@ -113,7 +105,7 @@ func (w *World) systemFun(nowTick uint64) {
 			if s == nil {
 				continue
 			}
-			if !w.checkBlueprintPlaced(s.BlueprintID, s.Anchor, 0) {
+			if !w.checkBlueprintPlaced(s.BlueprintID, s.Anchor, s.Rotation) {
 				delete(w.structures, id)
 				continue
 			}
@@ -137,32 +129,59 @@ func (w *World) systemFun(nowTick uint64) {
 	}
 }
 
-func (w *World) registerStructure(nowTick uint64, builderID string, blueprintID string, anchor Vec3i) {
+func (w *World) registerStructure(nowTick uint64, builderID string, blueprintID string, anchor Vec3i, rotation int) {
 	w.funInit()
 	bp, ok := w.catalogs.Blueprints.ByID[blueprintID]
 	if !ok {
 		return
 	}
+	rot := normalizeRotation(rotation)
+
 	id := fmtStructureID(builderID, nowTick, blueprintID, anchor)
-	min := Vec3i{
-		X: anchor.X + bp.AABB[0][0],
-		Y: anchor.Y + bp.AABB[0][1],
-		Z: anchor.Z + bp.AABB[0][2],
-	}
-	max := Vec3i{
-		X: anchor.X + bp.AABB[1][0],
-		Y: anchor.Y + bp.AABB[1][1],
-		Z: anchor.Z + bp.AABB[1][2],
+
+	// Compute actual bounds from rotated block positions (rotation affects Min/Max).
+	min := Vec3i{X: anchor.X, Y: anchor.Y, Z: anchor.Z}
+	max := Vec3i{X: anchor.X, Y: anchor.Y, Z: anchor.Z}
+	if len(bp.Blocks) > 0 {
+		first := true
+		for _, b := range bp.Blocks {
+			off := rotateOffset(b.Pos, rot)
+			p := Vec3i{X: anchor.X + off[0], Y: anchor.Y + off[1], Z: anchor.Z + off[2]}
+			if first {
+				min, max = p, p
+				first = false
+				continue
+			}
+			if p.X < min.X {
+				min.X = p.X
+			}
+			if p.Y < min.Y {
+				min.Y = p.Y
+			}
+			if p.Z < min.Z {
+				min.Z = p.Z
+			}
+			if p.X > max.X {
+				max.X = p.X
+			}
+			if p.Y > max.Y {
+				max.Y = p.Y
+			}
+			if p.Z > max.Z {
+				max.Z = p.Z
+			}
+		}
 	}
 	w.structures[id] = &Structure{
 		StructureID:   id,
 		BlueprintID:   blueprintID,
 		BuilderID:     builderID,
 		Anchor:        anchor,
+		Rotation:      rot,
 		Min:           min,
 		Max:           max,
 		CompletedTick: nowTick,
-		AwardDueTick:  nowTick + structureSurvivalTicks,
+		AwardDueTick:  nowTick + uint64(w.cfg.StructureSurvivalTicks),
 		UsedBy:        map[string]uint64{},
 	}
 }
@@ -250,7 +269,7 @@ func (w *World) structureCreationScore(bp *catalogs.BlueprintDef, s *Structure, 
 		modules += 2
 	}
 
-	stable := w.structureStable(bp, s.Anchor)
+	stable := w.structureStable(bp, s.Anchor, s.Rotation)
 	stability := 0
 	if stable {
 		stability = 3
@@ -262,14 +281,16 @@ func (w *World) structureCreationScore(bp *catalogs.BlueprintDef, s *Structure, 
 	return base + complexity + modules + stability + usageBonus
 }
 
-func (w *World) structureStable(bp *catalogs.BlueprintDef, anchor Vec3i) bool {
+func (w *World) structureStable(bp *catalogs.BlueprintDef, anchor Vec3i, rotation int) bool {
 	if bp == nil || len(bp.Blocks) == 0 {
 		return true
 	}
+	rot := normalizeRotation(rotation)
 	positions := make([]Vec3i, 0, len(bp.Blocks))
 	index := map[Vec3i]int{}
 	for i, b := range bp.Blocks {
-		p := Vec3i{X: anchor.X + b.Pos[0], Y: anchor.Y + b.Pos[1], Z: anchor.Z + b.Pos[2]}
+		off := rotateOffset(b.Pos, rot)
+		p := Vec3i{X: anchor.X + off[0], Y: anchor.Y + off[1], Z: anchor.Z + off[2]}
 		positions = append(positions, p)
 		index[p] = i
 	}
@@ -424,13 +445,26 @@ func (w *World) funOnLawActive(proposer *Agent, nowTick uint64) {
 	}
 	w.addFun(proposer, nowTick, "INFLUENCE", "law_adopted", w.funDecay(proposer, "influence:law_adopted", 4, nowTick))
 	w.addFun(proposer, nowTick, "NARRATIVE", "law_adopted", w.funDecay(proposer, "narrative:law_adopted", 5, nowTick))
+	if w.activeEventID == "CIVIC_VOTE" && nowTick < w.activeEventEnds {
+		w.funOnWorldEventParticipation(proposer, w.activeEventID, nowTick)
+		w.addFun(proposer, nowTick, "NARRATIVE", "civic_vote_law", w.funDecay(proposer, "narrative:civic_vote_law", 6, nowTick))
+	}
 }
 
 func (w *World) funOnVote(a *Agent, nowTick uint64) {
 	if a == nil {
 		return
 	}
-	w.addFun(a, nowTick, "NARRATIVE", "vote", w.funDecay(a, "narrative:vote", 2, nowTick))
+	base := 2
+	key := "narrative:vote"
+	reason := "vote"
+	if w.activeEventID == "CIVIC_VOTE" && nowTick < w.activeEventEnds {
+		w.funOnWorldEventParticipation(a, w.activeEventID, nowTick)
+		base = 4
+		key = "narrative:civic_vote_vote"
+		reason = "civic_vote_vote"
+	}
+	w.addFun(a, nowTick, "NARRATIVE", reason, w.funDecay(a, key, base, nowTick))
 }
 
 func (w *World) funDecay(a *Agent, key string, base int, nowTick uint64) int {
@@ -442,12 +476,20 @@ func (w *World) funDecay(a *Agent, key string, base int, nowTick uint64) int {
 		dw = &funDecayWindow{StartTick: nowTick}
 		a.funDecay[key] = dw
 	}
-	if nowTick-dw.StartTick >= funDecayWindowTicks {
+	window := uint64(w.cfg.FunDecayWindowTicks)
+	if window == 0 {
+		window = 3000
+	}
+	if nowTick-dw.StartTick >= window {
 		dw.StartTick = nowTick
 		dw.Count = 0
 	}
 	dw.Count++
-	mult := math.Pow(funDecayBase, float64(dw.Count-1))
+	baseMult := w.cfg.FunDecayBase
+	if baseMult <= 0 || baseMult > 1.0 {
+		baseMult = 0.70
+	}
+	mult := math.Pow(baseMult, float64(dw.Count-1))
 	delta := int(math.Round(float64(base) * mult))
 	if delta <= 0 {
 		return 0

@@ -21,13 +21,133 @@ import (
 )
 
 type WorldConfig struct {
-	ID         string
-	TickRateHz int
-	DayTicks   int
-	ObsRadius  int
-	Height     int
-	Seed       int64
-	BoundaryR  int
+	ID                string
+	TickRateHz        int
+	DayTicks          int
+	SeasonLengthTicks int
+	ObsRadius         int
+	Height            int
+	Seed              int64
+	BoundaryR         int
+
+	// Operational parameters. These are included in snapshots for deterministic replay/resume.
+	SnapshotEveryTicks int
+	DirectorEveryTicks int
+	RateLimits         RateLimitConfig
+
+	// Governance.
+	LawNoticeTicks int
+	LawVoteTicks   int
+
+	// Blueprints.
+	BlueprintAutoPullRange int
+	BlueprintBlocksPerTick int
+
+	// Claims/laws.
+	AccessPassCoreRadius int
+	MaintenanceCost      map[string]int
+
+	// Fun-score.
+	FunDecayWindowTicks    int
+	FunDecayBase           float64
+	StructureSurvivalTicks int
+}
+
+type RateLimitConfig struct {
+	SayWindowTicks        int
+	SayMax                int
+	WhisperWindowTicks    int
+	WhisperMax            int
+	OfferTradeWindowTicks int
+	OfferTradeMax         int
+	PostBoardWindowTicks  int
+	PostBoardMax          int
+}
+
+func (c *WorldConfig) applyDefaults() {
+	if c.TickRateHz <= 0 {
+		c.TickRateHz = 5
+	}
+	if c.DayTicks <= 0 {
+		c.DayTicks = 6000
+	}
+	if c.SeasonLengthTicks <= 0 {
+		c.SeasonLengthTicks = c.DayTicks * 7
+	}
+	if c.ObsRadius <= 0 {
+		c.ObsRadius = 7
+	}
+	if c.Height <= 0 {
+		c.Height = 64
+	}
+	if c.BoundaryR <= 0 {
+		c.BoundaryR = 4000
+	}
+	if c.SnapshotEveryTicks <= 0 {
+		c.SnapshotEveryTicks = 3000
+	}
+	if c.DirectorEveryTicks <= 0 {
+		c.DirectorEveryTicks = 3000
+	}
+	c.RateLimits.applyDefaults()
+
+	if c.LawNoticeTicks <= 0 {
+		c.LawNoticeTicks = 3000
+	}
+	if c.LawVoteTicks <= 0 {
+		c.LawVoteTicks = 3000
+	}
+	if c.BlueprintAutoPullRange <= 0 {
+		c.BlueprintAutoPullRange = 32
+	}
+	if c.BlueprintBlocksPerTick <= 0 {
+		c.BlueprintBlocksPerTick = 2
+	}
+	if c.AccessPassCoreRadius <= 0 {
+		c.AccessPassCoreRadius = 16
+	}
+	if len(c.MaintenanceCost) == 0 {
+		c.MaintenanceCost = map[string]int{
+			"IRON_INGOT": 1,
+			"COAL":       1,
+		}
+	}
+	if c.FunDecayWindowTicks <= 0 {
+		c.FunDecayWindowTicks = 3000
+	}
+	if c.FunDecayBase <= 0 || c.FunDecayBase > 1.0 {
+		c.FunDecayBase = 0.70
+	}
+	if c.StructureSurvivalTicks <= 0 {
+		c.StructureSurvivalTicks = 3000
+	}
+}
+
+func (rl *RateLimitConfig) applyDefaults() {
+	if rl.SayWindowTicks <= 0 {
+		rl.SayWindowTicks = 50
+	}
+	if rl.SayMax <= 0 {
+		rl.SayMax = 5
+	}
+	if rl.WhisperWindowTicks <= 0 {
+		rl.WhisperWindowTicks = 50
+	}
+	if rl.WhisperMax <= 0 {
+		rl.WhisperMax = 5
+	}
+	if rl.OfferTradeWindowTicks <= 0 {
+		rl.OfferTradeWindowTicks = 50
+	}
+	if rl.OfferTradeMax <= 0 {
+		rl.OfferTradeMax = 3
+	}
+	if rl.PostBoardWindowTicks <= 0 {
+		rl.PostBoardWindowTicks = 600
+	}
+	if rl.PostBoardMax <= 0 {
+		rl.PostBoardMax = 1
+	}
 }
 
 type JoinRequest struct {
@@ -74,8 +194,13 @@ type World struct {
 
 	claims     map[string]*LandClaim
 	containers map[Vec3i]*Container
+	items      map[string]*ItemEntity
+	itemsAt    map[Vec3i][]string // pos -> item entity ids (in insertion order)
+	conveyors  map[Vec3i]ConveyorMeta
+	switches   map[Vec3i]bool
 	trades     map[string]*Trade
 	boards     map[string]*Board
+	signs      map[Vec3i]*Sign
 	contracts  map[string]*Contract
 	laws       map[string]*Law
 	orgs       map[string]*Organization
@@ -94,6 +219,7 @@ type World struct {
 	nextContractNum atomic.Uint64
 	nextLawNum      atomic.Uint64
 	nextOrgNum      atomic.Uint64
+	nextItemNum     atomic.Uint64
 
 	// Optional loggers (may be nil). Implemented in internal/persistence/*.
 	tickLogger  TickLogger
@@ -103,10 +229,13 @@ type World struct {
 	snapshotSink chan<- snapshot.SnapshotV1
 
 	// World director (MVP): a single active event + simple weather override.
-	weather          string
-	weatherUntilTick uint64
-	activeEventID    string
-	activeEventEnds  uint64
+	weather           string
+	weatherUntilTick  uint64
+	activeEventID     string
+	activeEventStart  uint64
+	activeEventEnds   uint64
+	activeEventCenter Vec3i
+	activeEventRadius int
 
 	stats *WorldStats
 
@@ -136,13 +265,14 @@ type RecordedAction struct {
 }
 
 type AuditEntry struct {
-	Tick   uint64 `json:"tick"`
-	Actor  string `json:"actor"`
-	Action string `json:"action"` // e.g. "SET_BLOCK"
-	Pos    [3]int `json:"pos"`
-	From   uint16 `json:"from"`
-	To     uint16 `json:"to"`
-	Reason string `json:"reason,omitempty"`
+	Tick    uint64         `json:"tick"`
+	Actor   string         `json:"actor"`
+	Action  string         `json:"action"` // e.g. "SET_BLOCK"
+	Pos     [3]int         `json:"pos"`
+	From    uint16         `json:"from"`
+	To      uint16         `json:"to"`
+	Reason  string         `json:"reason,omitempty"`
+	Details map[string]any `json:"details,omitempty"`
 }
 
 type clientState struct {
@@ -152,6 +282,8 @@ type clientState struct {
 }
 
 func New(cfg WorldConfig, cats *catalogs.Catalogs) (*World, error) {
+	cfg.applyDefaults()
+
 	// Resolve required block ids.
 	b := func(id string) (uint16, error) {
 		v, ok := cats.Blocks.Index[id]
@@ -196,8 +328,13 @@ func New(cfg WorldConfig, cats *catalogs.Catalogs) (*World, error) {
 		clients:    map[string]*clientState{},
 		claims:     map[string]*LandClaim{},
 		containers: map[Vec3i]*Container{},
+		items:      map[string]*ItemEntity{},
+		itemsAt:    map[Vec3i][]string{},
+		conveyors:  map[Vec3i]ConveyorMeta{},
+		switches:   map[Vec3i]bool{},
 		trades:     map[string]*Trade{},
 		boards:     map[string]*Board{},
+		signs:      map[Vec3i]*Sign{},
 		contracts:  map[string]*Contract{},
 		laws:       map[string]*Law{},
 		orgs:       map[string]*Organization{},
@@ -262,6 +399,7 @@ func (w *World) joinAgent(name string, delta bool, out chan []byte) JoinResponse
 	if name == "" {
 		name = "agent"
 	}
+	nowTick := w.tick.Load()
 
 	idNum := w.nextAgentNum.Add(1)
 	agentID := fmt.Sprintf("A%d", idNum)
@@ -283,9 +421,13 @@ func (w *World) joinAgent(name string, delta bool, out chan []byte) JoinResponse
 	a.Inventory["PLANK"] = 20
 	a.Inventory["COAL"] = 10
 	a.Inventory["STONE"] = 20
+	a.Inventory["BERRIES"] = 10
 
 	// Fun/novelty: first biome arrival.
-	w.funOnBiome(a, w.tick.Load())
+	w.funOnBiome(a, nowTick)
+
+	// If a world event is active, inform the joining agent immediately.
+	w.enqueueActiveEventForAgent(nowTick, a)
 
 	w.agents[agentID] = a
 	if out != nil {
@@ -318,6 +460,9 @@ func (w *World) joinAgent(name string, delta bool, out chan []byte) JoinResponse
 		},
 	}
 
+	tuningCat := w.tuningCatalogMsg()
+	welcome.Catalogs.TuningDigest = tuningCat.Digest
+
 	catalogMsgs := []protocol.CatalogMsg{
 		{
 			Type:            protocol.TypeCatalog,
@@ -337,6 +482,7 @@ func (w *World) joinAgent(name string, delta bool, out chan []byte) JoinResponse
 			TotalParts:      1,
 			Data:            w.catalogs.Items.Palette,
 		},
+		tuningCat,
 	}
 
 	return JoinResponse{Welcome: welcome, Catalogs: catalogMsgs}
@@ -386,6 +532,9 @@ func (w *World) handleAttach(req AttachRequest) {
 	newToken := fmt.Sprintf("resume_%s_%d", w.cfg.ID, time.Now().UnixNano())
 	a.ResumeToken = newToken
 
+	// If a world event is active, inform the resuming agent.
+	w.enqueueActiveEventForAgent(w.tick.Load(), a)
+
 	welcome := protocol.WelcomeMsg{
 		Type:            protocol.TypeWelcome,
 		ProtocolVersion: protocol.Version,
@@ -409,6 +558,9 @@ func (w *World) handleAttach(req AttachRequest) {
 		},
 	}
 
+	tuningCat := w.tuningCatalogMsg()
+	welcome.Catalogs.TuningDigest = tuningCat.Digest
+
 	catalogMsgs := []protocol.CatalogMsg{
 		{
 			Type:            protocol.TypeCatalog,
@@ -428,6 +580,7 @@ func (w *World) handleAttach(req AttachRequest) {
 			TotalParts:      1,
 			Data:            w.catalogs.Items.Palette,
 		},
+		tuningCat,
 	}
 
 	if req.Resp != nil {
@@ -441,6 +594,9 @@ func (w *World) handleLeave(agentID string) {
 
 func (w *World) step(joins []JoinRequest, leaves []string, actions []ActionEnvelope) {
 	nowTick := w.tick.Load()
+
+	// Season rollover happens at tick boundaries before processing joins/leaves/actions for this tick.
+	w.maybeSeasonRollover(nowTick)
 
 	// Apply leaves and joins deterministically at tick boundary.
 	recordedLeaves := make([]string, 0, len(leaves))
@@ -477,6 +633,7 @@ func (w *World) step(joins []JoinRequest, leaves []string, actions []ActionEnvel
 	// Systems: movement -> work -> environment (minimal) -> others (stub)
 	w.systemMovement(nowTick)
 	w.systemWork(nowTick)
+	w.systemConveyors(nowTick)
 	w.systemEnvironment(nowTick)
 	w.tickLaws(nowTick)
 	w.systemDirector(nowTick)
@@ -505,13 +662,16 @@ func (w *World) step(joins []JoinRequest, leaves []string, actions []ActionEnvel
 		_ = w.tickLogger.WriteTick(TickLogEntry{Tick: nowTick, Joins: recordedJoins, Leaves: recordedLeaves, Actions: recorded, Digest: digest})
 	}
 
-	// Snapshot every 3000 ticks (~10 minutes at 5Hz), starting after tick 0.
-	if w.snapshotSink != nil && nowTick != 0 && nowTick%3000 == 0 {
-		snap := w.ExportSnapshot(nowTick)
-		select {
-		case w.snapshotSink <- snap:
-		default:
-			// Drop snapshot if sink is backed up.
+	// Snapshot every N ticks (default 3000), starting after tick 0.
+	if w.snapshotSink != nil && nowTick != 0 && w.cfg.SnapshotEveryTicks > 0 {
+		every := uint64(w.cfg.SnapshotEveryTicks)
+		if every > 0 && nowTick%every == 0 {
+			snap := w.ExportSnapshot(nowTick)
+			select {
+			case w.snapshotSink <- snap:
+			default:
+				// Drop snapshot if sink is backed up.
+			}
 		}
 	}
 
@@ -562,8 +722,11 @@ func (w *World) applyAct(a *Agent, act protocol.ActMsg, nowTick uint64) {
 func (w *World) applyInstant(a *Agent, inst protocol.InstantReq, nowTick uint64) {
 	switch inst.Type {
 	case "SAY":
-		if !a.RateLimitAllow("SAY", nowTick, 50, 5) {
-			a.AddEvent(actionResult(nowTick, inst.ID, false, "E_RATE_LIMIT", "too many SAY"))
+		if ok, cd := a.RateLimitAllow("SAY", nowTick, uint64(w.cfg.RateLimits.SayWindowTicks), w.cfg.RateLimits.SayMax); !ok {
+			ev := actionResult(nowTick, inst.ID, false, "E_RATE_LIMIT", "too many SAY")
+			ev["cooldown_ticks"] = cd
+			ev["cooldown_until_tick"] = nowTick + cd
+			a.AddEvent(ev)
 			return
 		}
 		if inst.Text == "" {
@@ -578,8 +741,11 @@ func (w *World) applyInstant(a *Agent, inst protocol.InstantReq, nowTick uint64)
 		a.AddEvent(actionResult(nowTick, inst.ID, true, "", "ok"))
 
 	case "WHISPER":
-		if !a.RateLimitAllow("WHISPER", nowTick, 50, 5) {
-			a.AddEvent(actionResult(nowTick, inst.ID, false, "E_RATE_LIMIT", "too many WHISPER"))
+		if ok, cd := a.RateLimitAllow("WHISPER", nowTick, uint64(w.cfg.RateLimits.WhisperWindowTicks), w.cfg.RateLimits.WhisperMax); !ok {
+			ev := actionResult(nowTick, inst.ID, false, "E_RATE_LIMIT", "too many WHISPER")
+			ev["cooldown_ticks"] = cd
+			ev["cooldown_until_tick"] = nowTick + cd
+			a.AddEvent(ev)
 			return
 		}
 		if inst.To == "" || inst.Text == "" {
@@ -598,6 +764,52 @@ func (w *World) applyInstant(a *Agent, inst protocol.InstantReq, nowTick uint64)
 			"channel": "WHISPER",
 			"text":    inst.Text,
 		})
+		a.AddEvent(actionResult(nowTick, inst.ID, true, "", "ok"))
+
+	case "EAT":
+		if inst.ItemID == "" {
+			a.AddEvent(actionResult(nowTick, inst.ID, false, "E_BAD_REQUEST", "missing item_id"))
+			return
+		}
+		n := inst.Count
+		if n <= 0 {
+			n = 1
+		}
+		def, ok := w.catalogs.Items.Defs[inst.ItemID]
+		if !ok {
+			a.AddEvent(actionResult(nowTick, inst.ID, false, "E_INVALID_TARGET", "unknown item"))
+			return
+		}
+		if def.Kind != "FOOD" || def.EdibleHP <= 0 {
+			a.AddEvent(actionResult(nowTick, inst.ID, false, "E_BAD_REQUEST", "item not edible"))
+			return
+		}
+		if a.Inventory[inst.ItemID] < n {
+			a.AddEvent(actionResult(nowTick, inst.ID, false, "E_NO_RESOURCE", "missing food"))
+			return
+		}
+		for i := 0; i < n; i++ {
+			a.Inventory[inst.ItemID]--
+			if a.Inventory[inst.ItemID] <= 0 {
+				delete(a.Inventory, inst.ItemID)
+			}
+			a.HP += def.EdibleHP
+			if a.HP > 20 {
+				a.HP = 20
+			}
+			hg := def.EdibleHP * 2
+			if hg < 1 {
+				hg = 1
+			}
+			a.Hunger += hg
+			if a.Hunger > 20 {
+				a.Hunger = 20
+			}
+			a.StaminaMilli += def.EdibleHP * 50
+			if a.StaminaMilli > 1000 {
+				a.StaminaMilli = 1000
+			}
+		}
 		a.AddEvent(actionResult(nowTick, inst.ID, true, "", "ok"))
 
 	case "SAVE_MEMORY":
@@ -619,8 +831,11 @@ func (w *World) applyInstant(a *Agent, inst protocol.InstantReq, nowTick uint64)
 		a.AddEvent(actionResult(nowTick, inst.ID, true, "", fmt.Sprintf("loaded %d keys", len(kvs))))
 
 	case "OFFER_TRADE":
-		if !a.RateLimitAllow("OFFER_TRADE", nowTick, 50, 3) {
-			a.AddEvent(actionResult(nowTick, inst.ID, false, "E_RATE_LIMIT", "too many OFFER_TRADE"))
+		if ok, cd := a.RateLimitAllow("OFFER_TRADE", nowTick, uint64(w.cfg.RateLimits.OfferTradeWindowTicks), w.cfg.RateLimits.OfferTradeMax); !ok {
+			ev := actionResult(nowTick, inst.ID, false, "E_RATE_LIMIT", "too many OFFER_TRADE")
+			ev["cooldown_ticks"] = cd
+			ev["cooldown_until_tick"] = nowTick + cd
+			a.AddEvent(ev)
 			return
 		}
 		if _, perms := w.permissionsFor(a.ID, a.Pos); !perms["can_trade"] {
@@ -711,9 +926,36 @@ func (w *World) applyInstant(a *Agent, inst protocol.InstantReq, nowTick uint64)
 				}
 			}
 		}
+		// Event: Market Week temporarily reduces market tax.
+		if taxRate > 0 && w.activeEventID == "MARKET_WEEK" && nowTick < w.activeEventEnds {
+			taxRate *= 0.5
+		}
 		applyTransferWithTax(from.Inventory, a.Inventory, tr.Offer, taxSink, taxRate)
 		applyTransferWithTax(a.Inventory, from.Inventory, tr.Request, taxSink, taxRate)
 		delete(w.trades, inst.TradeID)
+
+		w.auditEvent(nowTick, a.ID, "TRADE", Vec3i{}, "ACCEPT_TRADE", map[string]any{
+			"trade_id":     tr.TradeID,
+			"from":         tr.From,
+			"to":           tr.To,
+			"offer":        encodeItemPairs(tr.Offer),
+			"request":      encodeItemPairs(tr.Request),
+			"tax_rate":     taxRate,
+			"tax_paid_off": encodeItemPairs(calcTax(tr.Offer, taxRate)),
+			"tax_paid_req": encodeItemPairs(calcTax(tr.Request, taxRate)),
+			"land_id": func() string {
+				if landFrom != nil {
+					return landFrom.LandID
+				}
+				return ""
+			}(),
+			"tax_to": func() string {
+				if landFrom != nil {
+					return landFrom.Owner
+				}
+				return ""
+			}(),
+		})
 
 		// Reputation: successful trade increases trade/social credit.
 		w.bumpRepTrade(from.ID, 2)
@@ -725,6 +967,14 @@ func (w *World) applyInstant(a *Agent, inst protocol.InstantReq, nowTick uint64)
 		}
 		w.funOnTrade(from, nowTick)
 		w.funOnTrade(a, nowTick)
+		if w.activeEventID == "MARKET_WEEK" && nowTick < w.activeEventEnds {
+			w.funOnWorldEventParticipation(from, w.activeEventID, nowTick)
+			w.funOnWorldEventParticipation(a, w.activeEventID, nowTick)
+			w.addFun(from, nowTick, "NARRATIVE", "market_week_trade", w.funDecay(from, "narrative:market_week_trade", 5, nowTick))
+			w.addFun(a, nowTick, "NARRATIVE", "market_week_trade", w.funDecay(a, "narrative:market_week_trade", 5, nowTick))
+			from.AddEvent(protocol.Event{"t": nowTick, "type": "EVENT_GOAL", "event_id": w.activeEventID, "kind": "TRADE"})
+			a.AddEvent(protocol.Event{"t": nowTick, "type": "EVENT_GOAL", "event_id": w.activeEventID, "kind": "TRADE"})
+		}
 
 		from.AddEvent(protocol.Event{"t": nowTick, "type": "TRADE_DONE", "trade_id": tr.TradeID, "with": a.ID})
 		a.AddEvent(protocol.Event{"t": nowTick, "type": "TRADE_DONE", "trade_id": tr.TradeID, "with": from.ID})
@@ -752,22 +1002,60 @@ func (w *World) applyInstant(a *Agent, inst protocol.InstantReq, nowTick uint64)
 		a.AddEvent(actionResult(nowTick, inst.ID, true, "", "declined"))
 
 	case "POST_BOARD":
-		if !a.RateLimitAllow("POST_BOARD", nowTick, 600, 1) {
-			a.AddEvent(actionResult(nowTick, inst.ID, false, "E_RATE_LIMIT", "too many POST_BOARD"))
+		if ok, cd := a.RateLimitAllow("POST_BOARD", nowTick, uint64(w.cfg.RateLimits.PostBoardWindowTicks), w.cfg.RateLimits.PostBoardMax); !ok {
+			ev := actionResult(nowTick, inst.ID, false, "E_RATE_LIMIT", "too many POST_BOARD")
+			ev["cooldown_ticks"] = cd
+			ev["cooldown_until_tick"] = nowTick + cd
+			a.AddEvent(ev)
 			return
 		}
-		if inst.BoardID == "" || inst.Title == "" || inst.Body == "" {
-			a.AddEvent(actionResult(nowTick, inst.ID, false, "E_BAD_REQUEST", "missing board_id/title/body"))
+		boardID := strings.TrimSpace(inst.BoardID)
+		if strings.TrimSpace(inst.TargetID) != "" {
+			boardID = strings.TrimSpace(inst.TargetID)
+		}
+		if boardID == "" || inst.Title == "" || inst.Body == "" {
+			a.AddEvent(actionResult(nowTick, inst.ID, false, "E_BAD_REQUEST", "missing board_id/target_id/title/body"))
 			return
 		}
 		if len(inst.Title) > 80 || len(inst.Body) > 2000 {
 			a.AddEvent(actionResult(nowTick, inst.ID, false, "E_BAD_REQUEST", "post too large"))
 			return
 		}
-		b := w.boards[inst.BoardID]
+
+		// Physical bulletin boards are addressed by id "BULLETIN_BOARD@x,y,z" and require proximity.
+		physical := false
+		var postPos Vec3i
+		if typ, pos, ok := parseContainerID(boardID); ok {
+			if typ != "BULLETIN_BOARD" {
+				a.AddEvent(actionResult(nowTick, inst.ID, false, "E_BAD_REQUEST", "invalid board target"))
+				return
+			}
+			if w.blockName(w.chunks.GetBlock(pos)) != "BULLETIN_BOARD" {
+				a.AddEvent(actionResult(nowTick, inst.ID, false, "E_INVALID_TARGET", "bulletin board not found"))
+				return
+			}
+			if Manhattan(a.Pos, pos) > 3 {
+				a.AddEvent(actionResult(nowTick, inst.ID, false, "E_BLOCKED", "too far"))
+				return
+			}
+			// Posting in claimed land may be restricted by allow_trade for visitors.
+			if land := w.landAt(pos); land != nil && !w.isLandMember(a.ID, land) && !land.Flags.AllowTrade {
+				a.AddEvent(actionResult(nowTick, inst.ID, false, "E_NO_PERMISSION", "posting not allowed here"))
+				return
+			}
+			physical = true
+			postPos = pos
+			boardID = boardIDAt(pos) // canonicalize
+		}
+
+		b := w.boards[boardID]
 		if b == nil {
-			b = &Board{BoardID: inst.BoardID}
-			w.boards[inst.BoardID] = b
+			if physical {
+				b = w.ensureBoard(postPos)
+			} else {
+				b = &Board{BoardID: boardID}
+				w.boards[boardID] = b
+			}
 		}
 		postID := w.newPostID()
 		b.Posts = append(b.Posts, BoardPost{
@@ -777,7 +1065,171 @@ func (w *World) applyInstant(a *Agent, inst protocol.InstantReq, nowTick uint64)
 			Body:   inst.Body,
 			Tick:   nowTick,
 		})
+		w.auditEvent(nowTick, a.ID, "BOARD_POST", postPos, "POST_BOARD", map[string]any{
+			"board_id": boardID,
+			"post_id":  postID,
+			"title":    inst.Title,
+		})
 		a.AddEvent(protocol.Event{"t": nowTick, "type": "ACTION_RESULT", "ref": inst.ID, "ok": true, "post_id": postID})
+
+	case "SEARCH_BOARD":
+		boardID := strings.TrimSpace(inst.BoardID)
+		if strings.TrimSpace(inst.TargetID) != "" {
+			boardID = strings.TrimSpace(inst.TargetID)
+		}
+		query := strings.TrimSpace(inst.Text)
+		if boardID == "" || query == "" {
+			a.AddEvent(actionResult(nowTick, inst.ID, false, "E_BAD_REQUEST", "missing board_id/target_id/text"))
+			return
+		}
+		if len(query) > 120 {
+			a.AddEvent(actionResult(nowTick, inst.ID, false, "E_BAD_REQUEST", "query too large"))
+			return
+		}
+
+		limit := inst.Limit
+		if limit <= 0 {
+			limit = 20
+		}
+		if limit > 50 {
+			limit = 50
+		}
+
+		// Physical bulletin boards are addressed by id "BULLETIN_BOARD@x,y,z" and require proximity.
+		if typ, pos, ok := parseContainerID(boardID); ok && typ == "BULLETIN_BOARD" {
+			if w.blockName(w.chunks.GetBlock(pos)) != "BULLETIN_BOARD" {
+				a.AddEvent(actionResult(nowTick, inst.ID, false, "E_INVALID_TARGET", "bulletin board not found"))
+				return
+			}
+			if Manhattan(a.Pos, pos) > 3 {
+				a.AddEvent(actionResult(nowTick, inst.ID, false, "E_BLOCKED", "too far"))
+				return
+			}
+			boardID = boardIDAt(pos) // canonicalize
+			if w.boards[boardID] == nil {
+				w.ensureBoard(pos)
+			}
+		}
+
+		b := w.boards[boardID]
+		if b == nil {
+			a.AddEvent(actionResult(nowTick, inst.ID, false, "E_INVALID_TARGET", "board not found"))
+			return
+		}
+
+		q := strings.ToLower(query)
+		results := make([]map[string]any, 0, limit)
+		// Newest first.
+		for i := len(b.Posts) - 1; i >= 0 && len(results) < limit; i-- {
+			p := b.Posts[i]
+			if q == "" {
+				continue
+			}
+			if strings.Contains(strings.ToLower(p.Title), q) || strings.Contains(strings.ToLower(p.Body), q) {
+				body := p.Body
+				if len(body) > 400 {
+					body = body[:400]
+				}
+				results = append(results, map[string]any{
+					"post_id": p.PostID,
+					"author":  p.Author,
+					"title":   p.Title,
+					"body":    body,
+					"tick":    p.Tick,
+				})
+			}
+		}
+		a.AddEvent(protocol.Event{
+			"t":           nowTick,
+			"type":        "BOARD_SEARCH",
+			"board_id":    boardID,
+			"query":       query,
+			"total_posts": len(b.Posts),
+			"results":     results,
+		})
+		a.AddEvent(actionResult(nowTick, inst.ID, true, "", "ok"))
+
+	case "SET_SIGN":
+		target := strings.TrimSpace(inst.TargetID)
+		if target == "" {
+			a.AddEvent(actionResult(nowTick, inst.ID, false, "E_BAD_REQUEST", "missing target_id"))
+			return
+		}
+		typ, pos, ok := parseContainerID(target)
+		if !ok || typ != "SIGN" {
+			a.AddEvent(actionResult(nowTick, inst.ID, false, "E_BAD_REQUEST", "invalid sign target"))
+			return
+		}
+		if w.blockName(w.chunks.GetBlock(pos)) != "SIGN" {
+			a.AddEvent(actionResult(nowTick, inst.ID, false, "E_INVALID_TARGET", "sign not found"))
+			return
+		}
+		if Manhattan(a.Pos, pos) > 3 {
+			a.AddEvent(actionResult(nowTick, inst.ID, false, "E_BLOCKED", "too far"))
+			return
+		}
+		if len(inst.Text) > 200 {
+			a.AddEvent(actionResult(nowTick, inst.ID, false, "E_BAD_REQUEST", "text too large"))
+			return
+		}
+		if !w.canBuildAt(a.ID, pos, nowTick) {
+			w.bumpRepLaw(a.ID, -1)
+			if w.stats != nil {
+				w.stats.RecordDenied(nowTick)
+			}
+			a.AddEvent(actionResult(nowTick, inst.ID, false, "E_NO_PERMISSION", "sign edit denied"))
+			return
+		}
+
+		s := w.ensureSign(pos)
+		s.Text = inst.Text
+		s.UpdatedTick = nowTick
+		s.UpdatedBy = a.ID
+		w.auditEvent(nowTick, a.ID, "SIGN_SET", pos, "SET_SIGN", map[string]any{
+			"sign_id":     signIDAt(pos),
+			"text":        inst.Text,
+			"text_length": len(inst.Text),
+		})
+		a.AddEvent(actionResult(nowTick, inst.ID, true, "", "ok"))
+
+	case "TOGGLE_SWITCH":
+		target := strings.TrimSpace(inst.TargetID)
+		if target == "" {
+			a.AddEvent(actionResult(nowTick, inst.ID, false, "E_BAD_REQUEST", "missing target_id"))
+			return
+		}
+		typ, pos, ok := parseContainerID(target)
+		if !ok || typ != "SWITCH" {
+			a.AddEvent(actionResult(nowTick, inst.ID, false, "E_BAD_REQUEST", "invalid switch target"))
+			return
+		}
+		if w.blockName(w.chunks.GetBlock(pos)) != "SWITCH" {
+			a.AddEvent(actionResult(nowTick, inst.ID, false, "E_INVALID_TARGET", "switch not found"))
+			return
+		}
+		if Manhattan(a.Pos, pos) > 3 {
+			a.AddEvent(actionResult(nowTick, inst.ID, false, "E_BLOCKED", "too far"))
+			return
+		}
+		if !w.canBuildAt(a.ID, pos, nowTick) {
+			w.bumpRepLaw(a.ID, -1)
+			if w.stats != nil {
+				w.stats.RecordDenied(nowTick)
+			}
+			a.AddEvent(actionResult(nowTick, inst.ID, false, "E_NO_PERMISSION", "switch toggle denied"))
+			return
+		}
+		if w.switches == nil {
+			w.switches = map[Vec3i]bool{}
+		}
+		on := !w.switches[pos]
+		w.switches[pos] = on
+		w.auditEvent(nowTick, a.ID, "SWITCH_TOGGLE", pos, "TOGGLE_SWITCH", map[string]any{
+			"switch_id": switchIDAt(pos),
+			"on":        on,
+		})
+		a.AddEvent(protocol.Event{"t": nowTick, "type": "SWITCH", "switch_id": switchIDAt(pos), "pos": pos.ToArray(), "on": on})
+		a.AddEvent(actionResult(nowTick, inst.ID, true, "", "ok"))
 
 	case "CLAIM_OWED":
 		// Claim owed items from a terminal container to self.
@@ -880,9 +1332,21 @@ func (w *World) applyInstant(a *Agent, inst protocol.InstantReq, nowTick uint64)
 			}
 			c.BlueprintID = inst.BlueprintID
 			c.Anchor = Vec3i{X: inst.Anchor[0], Y: inst.Anchor[1], Z: inst.Anchor[2]}
-			c.Rotation = inst.Rotation
+			c.Rotation = normalizeRotation(inst.Rotation)
 		}
 		w.contracts[cid] = c
+		w.auditEvent(nowTick, a.ID, "CONTRACT_POST", term.Pos, "POST_CONTRACT", map[string]any{
+			"contract_id":   cid,
+			"terminal_id":   term.ID(),
+			"kind":          kind,
+			"requirements":  encodeItemPairs(req),
+			"reward":        encodeItemPairs(reward),
+			"deposit":       encodeItemPairs(deposit),
+			"deadline_tick": deadline,
+			"blueprint_id":  c.BlueprintID,
+			"anchor":        c.Anchor.ToArray(),
+			"rotation":      c.Rotation,
+		})
 		a.AddEvent(protocol.Event{"t": nowTick, "type": "ACTION_RESULT", "ref": inst.ID, "ok": true, "contract_id": cid})
 
 	case "ACCEPT_CONTRACT":
@@ -938,6 +1402,14 @@ func (w *World) applyInstant(a *Agent, inst protocol.InstantReq, nowTick uint64)
 		c.Deposit = reqDep
 		c.Acceptor = a.ID
 		c.State = ContractAccepted
+		w.auditEvent(nowTick, a.ID, "CONTRACT_ACCEPT", term.Pos, "ACCEPT_CONTRACT", map[string]any{
+			"contract_id": c.ContractID,
+			"terminal_id": term.ID(),
+			"kind":        c.Kind,
+			"poster":      c.Poster,
+			"acceptor":    c.Acceptor,
+			"deposit":     encodeItemPairs(c.Deposit),
+		})
 		a.AddEvent(actionResult(nowTick, inst.ID, true, "", "accepted"))
 
 	case "SUBMIT_CONTRACT":
@@ -1007,6 +1479,13 @@ func (w *World) applyInstant(a *Agent, inst protocol.InstantReq, nowTick uint64)
 			a.Inventory[item] += n
 		}
 		c.State = ContractCompleted
+		w.auditEvent(nowTick, a.ID, "CONTRACT_COMPLETE", term.Pos, "SUBMIT_CONTRACT", map[string]any{
+			"contract_id": c.ContractID,
+			"terminal_id": term.ID(),
+			"kind":        c.Kind,
+			"poster":      c.Poster,
+			"acceptor":    c.Acceptor,
+		})
 		a.AddEvent(actionResult(nowTick, inst.ID, true, "", "completed"))
 
 	case "SET_PERMISSIONS":
@@ -1107,6 +1586,12 @@ func (w *World) applyInstant(a *Agent, inst protocol.InstantReq, nowTick uint64)
 			Treasury:    map[string]int{},
 		}
 		a.OrgID = orgID
+		w.auditEvent(nowTick, a.ID, "ORG_CREATE", a.Pos, "CREATE_ORG", map[string]any{
+			"org_id":   orgID,
+			"org_kind": string(k),
+			"org_name": name,
+			"leader":   a.ID,
+		})
 		a.AddEvent(protocol.Event{"t": nowTick, "type": "ACTION_RESULT", "ref": inst.ID, "ok": true, "org_id": orgID})
 
 	case "JOIN_ORG":
@@ -1128,6 +1613,11 @@ func (w *World) applyInstant(a *Agent, inst protocol.InstantReq, nowTick uint64)
 		}
 		org.Members[a.ID] = OrgMember
 		a.OrgID = org.OrgID
+		w.auditEvent(nowTick, a.ID, "ORG_JOIN", a.Pos, "JOIN_ORG", map[string]any{
+			"org_id":   org.OrgID,
+			"member":   a.ID,
+			"org_kind": string(org.Kind),
+		})
 		a.AddEvent(actionResult(nowTick, inst.ID, true, "", "ok"))
 
 	case "ORG_DEPOSIT":
@@ -1156,6 +1646,11 @@ func (w *World) applyInstant(a *Agent, inst protocol.InstantReq, nowTick uint64)
 			org.Treasury = map[string]int{}
 		}
 		org.Treasury[inst.ItemID] += inst.Count
+		w.auditEvent(nowTick, a.ID, "ORG_DEPOSIT", a.Pos, "ORG_DEPOSIT", map[string]any{
+			"org_id": org.OrgID,
+			"item":   inst.ItemID,
+			"count":  inst.Count,
+		})
 		a.AddEvent(actionResult(nowTick, inst.ID, true, "", "ok"))
 
 	case "ORG_WITHDRAW":
@@ -1181,6 +1676,11 @@ func (w *World) applyInstant(a *Agent, inst protocol.InstantReq, nowTick uint64)
 			delete(org.Treasury, inst.ItemID)
 		}
 		a.Inventory[inst.ItemID] += inst.Count
+		w.auditEvent(nowTick, a.ID, "ORG_WITHDRAW", a.Pos, "ORG_WITHDRAW", map[string]any{
+			"org_id": org.OrgID,
+			"item":   inst.ItemID,
+			"count":  inst.Count,
+		})
 		a.AddEvent(actionResult(nowTick, inst.ID, true, "", "ok"))
 
 	case "LEAVE_ORG":
@@ -1363,6 +1863,8 @@ func (w *World) applyInstant(a *Agent, inst protocol.InstantReq, nowTick uint64)
 			title = tmpl.Title
 		}
 		lawID := w.newLawID()
+		notice := uint64(w.cfg.LawNoticeTicks)
+		vote := uint64(w.cfg.LawVoteTicks)
 		law := &Law{
 			LawID:          lawID,
 			LandID:         land.LandID,
@@ -1371,14 +1873,30 @@ func (w *World) applyInstant(a *Agent, inst protocol.InstantReq, nowTick uint64)
 			Params:         params,
 			ProposedBy:     a.ID,
 			ProposedTick:   nowTick,
-			NoticeEndsTick: nowTick + 3000,
-			VoteEndsTick:   nowTick + 6000,
+			NoticeEndsTick: nowTick + notice,
+			VoteEndsTick:   nowTick + notice + vote,
 			Status:         LawNotice,
 			Votes:          map[string]string{},
 		}
 		w.laws[lawID] = law
 		w.broadcastLawEvent(nowTick, "PROPOSED", law, "")
+		w.auditEvent(nowTick, a.ID, "LAW_PROPOSE", land.Anchor, "PROPOSE_LAW", map[string]any{
+			"law_id":        lawID,
+			"land_id":       land.LandID,
+			"template_id":   inst.TemplateID,
+			"title":         title,
+			"notice_ends":   law.NoticeEndsTick,
+			"vote_ends":     law.VoteEndsTick,
+			"params":        law.Params,
+			"proposed_by":   a.ID,
+			"proposed_tick": nowTick,
+		})
 		a.AddEvent(protocol.Event{"t": nowTick, "type": "ACTION_RESULT", "ref": inst.ID, "ok": true, "law_id": lawID})
+		if w.activeEventID == "CIVIC_VOTE" && nowTick < w.activeEventEnds {
+			w.funOnWorldEventParticipation(a, w.activeEventID, nowTick)
+			w.addFun(a, nowTick, "NARRATIVE", "civic_vote_propose", w.funDecay(a, "narrative:civic_vote_propose", 6, nowTick))
+			a.AddEvent(protocol.Event{"t": nowTick, "type": "EVENT_GOAL", "event_id": w.activeEventID, "kind": "PROPOSE_LAW", "law_id": lawID})
+		}
 
 	case "VOTE":
 		if inst.LawID == "" || inst.Choice == "" {
@@ -1421,6 +1939,15 @@ func (w *World) applyInstant(a *Agent, inst protocol.InstantReq, nowTick uint64)
 		}
 		law.Votes[a.ID] = choice
 		w.funOnVote(a, nowTick)
+		w.auditEvent(nowTick, a.ID, "LAW_VOTE", land.Anchor, "VOTE", map[string]any{
+			"law_id":   law.LawID,
+			"land_id":  law.LandID,
+			"choice":   choice,
+			"voter_id": a.ID,
+		})
+		if w.activeEventID == "CIVIC_VOTE" && nowTick < w.activeEventEnds {
+			a.AddEvent(protocol.Event{"t": nowTick, "type": "EVENT_GOAL", "event_id": w.activeEventID, "kind": "VOTE", "law_id": law.LawID})
+		}
 		a.AddEvent(actionResult(nowTick, inst.ID, true, "", "ok"))
 
 	default:
@@ -1457,6 +1984,45 @@ func (w *World) applyTaskReq(a *Agent, tr protocol.TaskReq, nowTick uint64) {
 			"task_id": taskID,
 		})
 
+	case "FOLLOW":
+		if a.MoveTask != nil {
+			a.AddEvent(actionResult(nowTick, tr.ID, false, "E_CONFLICT", "movement task slot occupied"))
+			return
+		}
+		if tr.TargetID == "" {
+			a.AddEvent(actionResult(nowTick, tr.ID, false, "E_BAD_REQUEST", "missing target_id"))
+			return
+		}
+		dist := tr.Distance
+		if dist <= 0 {
+			dist = 2.0
+		}
+		if dist > 32 {
+			dist = 32
+		}
+		target, ok := w.followTargetPos(tr.TargetID)
+		if !ok {
+			a.AddEvent(actionResult(nowTick, tr.ID, false, "E_INVALID_TARGET", "target not found"))
+			return
+		}
+		taskID := w.newTaskID()
+		a.MoveTask = &tasks.MovementTask{
+			TaskID:      taskID,
+			Kind:        tasks.KindFollow,
+			Target:      v3ToTask(target),
+			TargetID:    tr.TargetID,
+			Distance:    dist,
+			StartPos:    tasks.Vec3i{X: a.Pos.X, Y: a.Pos.Y, Z: a.Pos.Z},
+			StartedTick: nowTick,
+		}
+		a.AddEvent(protocol.Event{
+			"t":       nowTick,
+			"type":    "ACTION_RESULT",
+			"ref":     tr.ID,
+			"ok":      true,
+			"task_id": taskID,
+		})
+
 	case "MINE":
 		if a.WorkTask != nil {
 			a.AddEvent(actionResult(nowTick, tr.ID, false, "E_CONFLICT", "work task slot occupied"))
@@ -1469,6 +2035,28 @@ func (w *World) applyTaskReq(a *Agent, tr protocol.TaskReq, nowTick uint64) {
 			BlockPos:    tasks.Vec3i{X: tr.BlockPos[0], Y: tr.BlockPos[1], Z: tr.BlockPos[2]},
 			StartedTick: nowTick,
 			WorkTicks:   0,
+		}
+		a.AddEvent(protocol.Event{"t": nowTick, "type": "ACTION_RESULT", "ref": tr.ID, "ok": true, "task_id": taskID})
+
+	case "GATHER":
+		if a.WorkTask != nil {
+			a.AddEvent(actionResult(nowTick, tr.ID, false, "E_CONFLICT", "work task slot occupied"))
+			return
+		}
+		if tr.TargetID == "" {
+			a.AddEvent(actionResult(nowTick, tr.ID, false, "E_BAD_REQUEST", "missing target_id"))
+			return
+		}
+		if w.items[tr.TargetID] == nil {
+			a.AddEvent(actionResult(nowTick, tr.ID, false, "E_INVALID_TARGET", "item entity not found"))
+			return
+		}
+		taskID := w.newTaskID()
+		a.WorkTask = &tasks.WorkTask{
+			TaskID:      taskID,
+			Kind:        tasks.KindGather,
+			TargetID:    tr.TargetID,
+			StartedTick: nowTick,
 		}
 		a.AddEvent(protocol.Event{"t": nowTick, "type": "ACTION_RESULT", "ref": tr.ID, "ok": true, "task_id": taskID})
 
@@ -1653,7 +2241,7 @@ func (w *World) applyTaskReq(a *Agent, tr protocol.TaskReq, nowTick uint64) {
 			Kind:        tasks.KindBuildBlueprint,
 			BlueprintID: tr.BlueprintID,
 			Anchor:      tasks.Vec3i{X: tr.Anchor[0], Y: tr.Anchor[1], Z: tr.Anchor[2]},
-			Rotation:    tr.Rotation,
+			Rotation:    normalizeRotation(tr.Rotation),
 			BuildIndex:  0,
 			StartedTick: nowTick,
 		}
@@ -1670,18 +2258,60 @@ func (w *World) systemMovement(nowTick uint64) {
 		if mt == nil {
 			continue
 		}
-		if mt.Kind != tasks.KindMoveTo {
+		var target Vec3i
+		switch mt.Kind {
+		case tasks.KindMoveTo:
+			target = v3FromTask(mt.Target)
+			if Manhattan(a.Pos, target) <= 1 {
+				a.Pos = Vec3i{X: target.X, Y: w.surfaceY(target.X, target.Z), Z: target.Z}
+				w.recordStructureUsage(a.ID, a.Pos, nowTick)
+				w.funOnBiome(a, nowTick)
+				a.MoveTask = nil
+				a.AddEvent(protocol.Event{"t": nowTick, "type": "TASK_DONE", "task_id": mt.TaskID, "kind": string(mt.Kind)})
+				continue
+			}
+
+		case tasks.KindFollow:
+			t, ok := w.followTargetPos(mt.TargetID)
+			if !ok {
+				a.MoveTask = nil
+				a.AddEvent(protocol.Event{"t": nowTick, "type": "TASK_FAIL", "task_id": mt.TaskID, "code": "E_INVALID_TARGET", "message": "follow target not found"})
+				continue
+			}
+			mt.Target = v3ToTask(t)
+			target = t
+
+			want := int(math.Ceil(mt.Distance))
+			if want < 1 {
+				want = 1
+			}
+			if distXZ(a.Pos, target) <= want {
+				// Stay close; keep task active until canceled.
+				continue
+			}
+
+		default:
 			continue
 		}
-		target := v3FromTask(mt.Target)
-		if Manhattan(a.Pos, target) <= 1 {
-			a.Pos = Vec3i{X: target.X, Y: w.surfaceY(target.X, target.Z), Z: target.Z}
-			w.recordStructureUsage(a.ID, a.Pos, nowTick)
-			w.funOnBiome(a, nowTick)
-			a.MoveTask = nil
-			a.AddEvent(protocol.Event{"t": nowTick, "type": "TASK_DONE", "task_id": mt.TaskID, "kind": string(mt.Kind)})
+
+		// Storm slows travel but should not deadlock tasks.
+		if w.weather == "STORM" && nowTick%2 == 1 {
 			continue
 		}
+
+		// Event hazard: flood zones slow travel.
+		if w.activeEventID == "FLOOD_WARNING" && w.activeEventRadius > 0 && nowTick < w.activeEventEnds {
+			if distXZ(a.Pos, w.activeEventCenter) <= w.activeEventRadius && nowTick%3 == 1 {
+				continue
+			}
+		}
+
+		// Moving costs stamina; if too tired, wait and recover.
+		const moveCost = 8
+		if a.StaminaMilli < moveCost {
+			continue
+		}
+		a.StaminaMilli -= moveCost
 
 		next := a.Pos
 		// Prefer X then Z steps (deterministic).
@@ -1697,9 +2327,9 @@ func (w *World) systemMovement(nowTick uint64) {
 		next.Y = w.surfaceY(next.X, next.Z)
 
 		// Land core access pass (law): charge ticket on core entry for non-members.
-		if toLand := w.landAt(next); toLand != nil && toLand.AccessPassEnabled && toLand.CoreContains(next) && !w.isLandMember(a.ID, toLand) {
+		if toLand := w.landAt(next); toLand != nil && toLand.AccessPassEnabled && w.landCoreContains(toLand, next) && !w.isLandMember(a.ID, toLand) {
 			fromLand := w.landAt(a.Pos)
-			entering := fromLand == nil || fromLand.LandID != toLand.LandID || !toLand.CoreContains(a.Pos)
+			entering := fromLand == nil || fromLand.LandID != toLand.LandID || !w.landCoreContains(toLand, a.Pos)
 			if entering {
 				item := strings.TrimSpace(toLand.AccessTicketItem)
 				cost := toLand.AccessTicketCost
@@ -1736,8 +2366,8 @@ func (w *World) systemMovement(nowTick uint64) {
 			}
 		}
 
-		// Basic collision: need head/feet air.
-		if w.chunks.GetBlock(Vec3i{X: next.X, Y: next.Y, Z: next.Z}) != w.chunks.gen.Air {
+		// Basic collision: treat solid blocks as blocking; allow non-solid (e.g. water/torch/wire).
+		if w.blockSolid(w.chunks.GetBlock(Vec3i{X: next.X, Y: next.Y, Z: next.Z})) {
 			a.MoveTask = nil
 			a.AddEvent(protocol.Event{"t": nowTick, "type": "TASK_FAIL", "task_id": mt.TaskID, "code": "E_BLOCKED", "message": "blocked"})
 			continue
@@ -1758,6 +2388,8 @@ func (w *World) systemWork(nowTick uint64) {
 		switch wt.Kind {
 		case tasks.KindMine:
 			w.tickMine(a, wt, nowTick)
+		case tasks.KindGather:
+			w.tickGather(a, wt, nowTick)
 		case tasks.KindPlace:
 			w.tickPlace(a, wt, nowTick)
 		case tasks.KindOpen:
@@ -1821,6 +2453,15 @@ func (w *World) tickMine(a *Agent, wt *tasks.WorkTask, nowTick uint64) {
 		a.AddEvent(protocol.Event{"t": nowTick, "type": "TASK_FAIL", "task_id": wt.TaskID, "code": "E_INVALID_TARGET", "message": "no block"})
 		return
 	}
+	blockName := w.blockName(b)
+
+	// Mining costs stamina; if too tired, wait and recover.
+	const mineCost = 15
+	if a.StaminaMilli < mineCost {
+		return
+	}
+	a.StaminaMilli -= mineCost
+
 	wt.WorkTicks++
 	if wt.WorkTicks < 10 {
 		return
@@ -1828,7 +2469,7 @@ func (w *World) tickMine(a *Agent, wt *tasks.WorkTask, nowTick uint64) {
 
 	// Break block -> AIR, add a very simplified drop.
 	// If the block is a container/terminal, handle inventory safely.
-	if blockName := w.blockName(b); blockName != "" {
+	if blockName != "" {
 		switch blockName {
 		case "CHEST", "FURNACE", "CONTRACT_TERMINAL":
 			c := w.containers[pos]
@@ -1856,6 +2497,14 @@ func (w *World) tickMine(a *Agent, wt *tasks.WorkTask, nowTick uint64) {
 				}
 				w.removeContainer(pos)
 			}
+		case "BULLETIN_BOARD":
+			w.removeBoard(pos)
+		case "SIGN":
+			w.removeSign(nowTick, a.ID, pos, "MINE")
+		case "CONVEYOR":
+			w.removeConveyor(nowTick, a.ID, pos, "MINE")
+		case "SWITCH":
+			w.removeSwitch(nowTick, a.ID, pos, "MINE")
 		}
 	}
 
@@ -1866,6 +2515,33 @@ func (w *World) tickMine(a *Agent, wt *tasks.WorkTask, nowTick uint64) {
 	if item != "" {
 		a.Inventory[item]++
 	}
+	w.onMinedBlockDuringEvent(a, pos, blockName, nowTick)
+	a.WorkTask = nil
+	a.AddEvent(protocol.Event{"t": nowTick, "type": "TASK_DONE", "task_id": wt.TaskID, "kind": string(wt.Kind)})
+}
+
+func (w *World) tickGather(a *Agent, wt *tasks.WorkTask, nowTick uint64) {
+	id := wt.TargetID
+	if id == "" {
+		a.WorkTask = nil
+		a.AddEvent(protocol.Event{"t": nowTick, "type": "TASK_FAIL", "task_id": wt.TaskID, "code": "E_BAD_REQUEST", "message": "missing target_id"})
+		return
+	}
+	e := w.items[id]
+	if e == nil || e.Item == "" || e.Count <= 0 {
+		a.WorkTask = nil
+		a.AddEvent(protocol.Event{"t": nowTick, "type": "TASK_FAIL", "task_id": wt.TaskID, "code": "E_INVALID_TARGET", "message": "item entity not found"})
+		return
+	}
+	if Manhattan(a.Pos, e.Pos) > 2 {
+		a.WorkTask = nil
+		a.AddEvent(protocol.Event{"t": nowTick, "type": "TASK_FAIL", "task_id": wt.TaskID, "code": "E_BLOCKED", "message": "too far"})
+		return
+	}
+
+	a.Inventory[e.Item] += e.Count
+	w.removeItemEntity(nowTick, a.ID, id, "GATHER")
+
 	a.WorkTask = nil
 	a.AddEvent(protocol.Event{"t": nowTick, "type": "TASK_DONE", "task_id": wt.TaskID, "kind": string(wt.Kind)})
 }
@@ -1907,6 +2583,10 @@ func (w *World) tickPlace(a *Agent, wt *tasks.WorkTask, nowTick uint64) {
 	w.chunks.SetBlock(pos, bid)
 	w.auditSetBlock(nowTick, a.ID, pos, w.chunks.gen.Air, bid, "PLACE")
 	w.ensureContainerForPlacedBlock(pos, blockName)
+	if blockName == "CONVEYOR" {
+		dx, dz := yawToDir(a.Yaw)
+		w.ensureConveyor(pos, dx, dz)
+	}
 
 	a.WorkTask = nil
 	a.AddEvent(protocol.Event{"t": nowTick, "type": "TASK_DONE", "task_id": wt.TaskID, "kind": string(wt.Kind)})
@@ -1915,6 +2595,88 @@ func (w *World) tickPlace(a *Agent, wt *tasks.WorkTask, nowTick uint64) {
 func (w *World) tickOpen(a *Agent, wt *tasks.WorkTask, nowTick uint64) {
 	c := w.getContainerByID(wt.TargetID)
 	if c == nil {
+		// Fallback: allow OPEN on bulletin boards ("BULLETIN_BOARD@x,y,z") to read posts.
+		if typ, pos, ok := parseContainerID(wt.TargetID); ok && typ == "BULLETIN_BOARD" {
+			if w.blockName(w.chunks.GetBlock(pos)) != "BULLETIN_BOARD" {
+				a.WorkTask = nil
+				a.AddEvent(protocol.Event{"t": nowTick, "type": "TASK_FAIL", "task_id": wt.TaskID, "code": "E_INVALID_TARGET", "message": "board not found"})
+				return
+			}
+			if Manhattan(a.Pos, pos) > 3 {
+				a.WorkTask = nil
+				a.AddEvent(protocol.Event{"t": nowTick, "type": "TASK_FAIL", "task_id": wt.TaskID, "code": "E_BLOCKED", "message": "too far"})
+				return
+			}
+			bid := boardIDAt(pos)
+			b := w.boards[bid]
+			if b == nil {
+				b = w.ensureBoard(pos)
+			}
+
+			// Return up to the 20 newest posts.
+			posts := make([]map[string]any, 0, 20)
+			start := 0
+			if n := len(b.Posts); n > 20 {
+				start = n - 20
+			}
+			for i := start; i < len(b.Posts); i++ {
+				p := b.Posts[i]
+				posts = append(posts, map[string]any{
+					"post_id": p.PostID,
+					"author":  p.Author,
+					"title":   p.Title,
+					"body":    p.Body,
+					"tick":    p.Tick,
+				})
+			}
+			a.AddEvent(protocol.Event{
+				"t":           nowTick,
+				"type":        "BOARD",
+				"board_id":    bid,
+				"pos":         pos.ToArray(),
+				"total_posts": len(b.Posts),
+				"posts":       posts,
+			})
+			a.WorkTask = nil
+			a.AddEvent(protocol.Event{"t": nowTick, "type": "TASK_DONE", "task_id": wt.TaskID, "kind": string(wt.Kind)})
+			return
+		}
+
+		// Fallback: allow OPEN on signs ("SIGN@x,y,z") to read text.
+		if typ, pos, ok := parseContainerID(wt.TargetID); ok && typ == "SIGN" {
+			if w.blockName(w.chunks.GetBlock(pos)) != "SIGN" {
+				a.WorkTask = nil
+				a.AddEvent(protocol.Event{"t": nowTick, "type": "TASK_FAIL", "task_id": wt.TaskID, "code": "E_INVALID_TARGET", "message": "sign not found"})
+				return
+			}
+			if Manhattan(a.Pos, pos) > 3 {
+				a.WorkTask = nil
+				a.AddEvent(protocol.Event{"t": nowTick, "type": "TASK_FAIL", "task_id": wt.TaskID, "code": "E_BLOCKED", "message": "too far"})
+				return
+			}
+			s := w.signs[pos]
+			text := ""
+			updatedTick := uint64(0)
+			updatedBy := ""
+			if s != nil {
+				text = s.Text
+				updatedTick = s.UpdatedTick
+				updatedBy = s.UpdatedBy
+			}
+			a.AddEvent(protocol.Event{
+				"t":            nowTick,
+				"type":         "SIGN",
+				"sign_id":      signIDAt(pos),
+				"pos":          pos.ToArray(),
+				"text":         text,
+				"updated_tick": updatedTick,
+				"updated_by":   updatedBy,
+			})
+			a.WorkTask = nil
+			a.AddEvent(protocol.Event{"t": nowTick, "type": "TASK_DONE", "task_id": wt.TaskID, "kind": string(wt.Kind)})
+			return
+		}
+
 		a.WorkTask = nil
 		a.AddEvent(protocol.Event{"t": nowTick, "type": "TASK_FAIL", "task_id": wt.TaskID, "code": "E_INVALID_TARGET", "message": "container not found"})
 		return
@@ -1944,6 +2706,7 @@ func (w *World) tickOpen(a *Agent, wt *tasks.WorkTask, nowTick uint64) {
 		ev["contracts"] = w.contractSummariesForTerminal(c.Pos)
 	}
 	a.AddEvent(ev)
+	w.onContainerOpenedDuringEvent(a, c, nowTick)
 
 	a.WorkTask = nil
 	a.AddEvent(protocol.Event{"t": nowTick, "type": "TASK_DONE", "task_id": wt.TaskID, "kind": string(wt.Kind)})
@@ -2027,6 +2790,20 @@ func (w *World) tickTransfer(a *Agent, wt *tasks.WorkTask, nowTick uint64) {
 	} else {
 		a.Inventory[item] += n
 	}
+
+	// Audit the transfer for dispute resolution.
+	ap := a.Pos
+	if dstC != nil {
+		ap = dstC.Pos
+	} else if srcC != nil {
+		ap = srcC.Pos
+	}
+	w.auditEvent(nowTick, a.ID, "TRANSFER", ap, "TRANSFER", map[string]any{
+		"src":   srcID,
+		"dst":   dstID,
+		"item":  item,
+		"count": n,
+	})
 
 	a.WorkTask = nil
 	a.AddEvent(protocol.Event{"t": nowTick, "type": "TASK_DONE", "task_id": wt.TaskID, "kind": string(wt.Kind)})
@@ -2132,15 +2909,17 @@ func (w *World) tickSmelt(a *Agent, wt *tasks.WorkTask, nowTick uint64) {
 func (w *World) tickBuildBlueprint(a *Agent, wt *tasks.WorkTask, nowTick uint64) {
 	bp := w.catalogs.Blueprints.ByID[wt.BlueprintID]
 	anchor := v3FromTask(wt.Anchor)
+	rot := normalizeRotation(wt.Rotation)
 
 	// On first tick, validate cost.
 	if wt.BuildIndex == 0 && wt.WorkTicks == 0 {
 		// Preflight: space + permission check so we don't consume materials and then fail immediately.
 		for _, p := range bp.Blocks {
+			off := rotateOffset(p.Pos, rot)
 			pos := Vec3i{
-				X: anchor.X + p.Pos[0],
-				Y: anchor.Y + p.Pos[1],
-				Z: anchor.Z + p.Pos[2],
+				X: anchor.X + off[0],
+				Y: anchor.Y + off[1],
+				Z: anchor.Z + off[2],
 			}
 			if !w.canBuildAt(a.ID, pos, nowTick) {
 				a.WorkTask = nil
@@ -2176,14 +2955,19 @@ func (w *World) tickBuildBlueprint(a *Agent, wt *tasks.WorkTask, nowTick uint64)
 		}
 	}
 
-	// Place up to 2 blocks per tick.
+	// Place up to N blocks per tick (default 2).
 	placed := 0
-	for placed < 2 && wt.BuildIndex < len(bp.Blocks) {
+	limit := w.cfg.BlueprintBlocksPerTick
+	if limit <= 0 {
+		limit = 2
+	}
+	for placed < limit && wt.BuildIndex < len(bp.Blocks) {
 		p := bp.Blocks[wt.BuildIndex]
+		off := rotateOffset(p.Pos, rot)
 		pos := Vec3i{
-			X: anchor.X + p.Pos[0],
-			Y: anchor.Y + p.Pos[1],
-			Z: anchor.Z + p.Pos[2],
+			X: anchor.X + off[0],
+			Y: anchor.Y + off[1],
+			Z: anchor.Z + off[2],
 		}
 		bid, ok := w.catalogs.Blocks.Index[p.Block]
 		if !ok {
@@ -2217,42 +3001,263 @@ func (w *World) tickBuildBlueprint(a *Agent, wt *tasks.WorkTask, nowTick uint64)
 		if w.stats != nil {
 			w.stats.RecordBlueprintComplete(nowTick)
 		}
-		w.registerStructure(nowTick, a.ID, wt.BlueprintID, anchor)
+		w.registerStructure(nowTick, a.ID, wt.BlueprintID, anchor, rot)
 		w.funOnBlueprintComplete(a, nowTick)
+		// Event-specific build bonuses.
+		if w.activeEventID != "" && nowTick < w.activeEventEnds {
+			switch w.activeEventID {
+			case "BUILDER_EXPO":
+				w.addFun(a, nowTick, "CREATION", "builder_expo", w.funDecay(a, "creation:builder_expo", 8, nowTick))
+				a.AddEvent(protocol.Event{"t": nowTick, "type": "EVENT_GOAL", "event_id": w.activeEventID, "kind": "EXPO_BUILD", "blueprint_id": wt.BlueprintID})
+			case "BLUEPRINT_FAIR":
+				w.addFun(a, nowTick, "INFLUENCE", "blueprint_fair", w.funDecay(a, "influence:blueprint_fair", 6, nowTick))
+				a.AddEvent(protocol.Event{"t": nowTick, "type": "EVENT_GOAL", "event_id": w.activeEventID, "kind": "FAIR_BUILD", "blueprint_id": wt.BlueprintID})
+			}
+		}
 		a.WorkTask = nil
 		a.AddEvent(protocol.Event{"t": nowTick, "type": "TASK_DONE", "task_id": wt.TaskID, "kind": string(wt.Kind)})
 	}
 }
 
 func (w *World) systemEnvironment(nowTick uint64) {
-	// Soft survival MVP: hunger decreases slowly; stamina recovers slowly.
+	agents := w.sortedAgents()
+
+	// Soft survival: hunger ticks down slowly; low hunger reduces stamina recovery.
 	if nowTick%200 == 0 { // ~40s at 5Hz
-		for _, a := range w.agents {
+		for _, a := range agents {
+			if a == nil {
+				continue
+			}
 			if a.Hunger > 0 {
 				a.Hunger--
+				// Event hazard: blight zones increase hunger drain.
+				if w.activeEventID == "BLIGHT_ZONE" && w.activeEventRadius > 0 && nowTick < w.activeEventEnds &&
+					distXZ(a.Pos, w.activeEventCenter) <= w.activeEventRadius {
+					a.Hunger--
+					if a.Hunger < 0 {
+						a.Hunger = 0
+					}
+				}
+			} else {
+				// Starvation pressure (slow, non-lethal alone unless ignored).
+				if a.HP > 0 {
+					a.HP--
+					a.AddEvent(protocol.Event{"t": nowTick, "type": "DAMAGE", "kind": "STARVATION", "hp": a.HP})
+				}
 			}
 		}
 	}
-	for _, a := range w.agents {
-		if a.StaminaMilli < 1000 {
-			a.StaminaMilli += 2
+
+	// Weather hazards (minimal): cold snaps hurt at night unless near a torch.
+	if w.weather == "COLD" && nowTick%50 == 0 { // ~10s
+		t := w.timeOfDay(nowTick)
+		isNight := t < 0.25 || t > 0.75
+		if isNight {
+			for _, a := range agents {
+				if a == nil || a.HP <= 0 {
+					continue
+				}
+				if w.nearBlock(a.Pos, "TORCH", 3) {
+					continue
+				}
+				a.HP--
+				a.AddEvent(protocol.Event{"t": nowTick, "type": "DAMAGE", "kind": "COLD", "hp": a.HP})
+			}
+		}
+	}
+
+	// Event hazard: bandit camp is safer in groups.
+	banditZoneCount := 0
+	if w.activeEventID == "BANDIT_CAMP" && w.activeEventRadius > 0 && nowTick < w.activeEventEnds {
+		for _, a := range agents {
+			if a == nil || a.HP <= 0 {
+				continue
+			}
+			if distXZ(a.Pos, w.activeEventCenter) <= w.activeEventRadius {
+				banditZoneCount++
+			}
+		}
+	}
+
+	for _, a := range agents {
+		if a == nil {
+			continue
+		}
+
+		// Stamina recovery: faster when fed, slower during storms/cold.
+		rec := 2
+		if w.weather == "STORM" {
+			rec = 1
+		}
+		if w.weather == "COLD" {
+			rec = 1
+		}
+		if a.Hunger == 0 {
+			rec = 0
+		} else if a.Hunger < 5 && rec > 1 {
+			rec = 1
+		}
+
+		// Event hazards.
+		if w.activeEventID != "" && w.activeEventRadius > 0 && nowTick < w.activeEventEnds &&
+			distXZ(a.Pos, w.activeEventCenter) <= w.activeEventRadius {
+			switch w.activeEventID {
+			case "BLIGHT_ZONE":
+				rec = 0
+			case "FLOOD_WARNING":
+				if rec > 1 {
+					rec = 1
+				}
+			}
+		}
+
+		// Bandit camp damage: when alone, take periodic hits.
+		if w.activeEventID == "BANDIT_CAMP" && w.activeEventRadius > 0 && nowTick < w.activeEventEnds &&
+			nowTick%50 == 0 && banditZoneCount > 0 && banditZoneCount < 2 &&
+			distXZ(a.Pos, w.activeEventCenter) <= w.activeEventRadius && a.HP > 0 {
+			a.HP--
+			a.AddEvent(protocol.Event{"t": nowTick, "type": "DAMAGE", "kind": "BANDIT", "hp": a.HP})
+		}
+
+		if a.StaminaMilli < 1000 && rec > 0 {
+			a.StaminaMilli += rec
 			if a.StaminaMilli > 1000 {
 				a.StaminaMilli = 1000
 			}
 		}
+
+		// Downed -> respawn.
+		if a.HP <= 0 {
+			w.respawnAgent(nowTick, a, "DOWNED")
+		}
 	}
+
+	// Cleanup: despawn expired dropped items (rate-limited to keep per-tick work low).
+	if nowTick%50 == 0 {
+		w.cleanupExpiredItemEntities(nowTick)
+	}
+}
+
+func (w *World) respawnAgent(nowTick uint64, a *Agent, reason string) {
+	if a == nil {
+		return
+	}
+
+	// Cancel ongoing tasks.
+	a.MoveTask = nil
+	a.WorkTask = nil
+
+	// Drop ~30% of each stack (deterministic) at the downed position.
+	dropPos := a.Pos
+	lost := map[string]int{}
+	if len(a.Inventory) > 0 {
+		keys := make([]string, 0, len(a.Inventory))
+		for k, n := range a.Inventory {
+			if k != "" && n > 0 {
+				keys = append(keys, k)
+			}
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			n := a.Inventory[k]
+			d := (n * 3) / 10
+			if d <= 0 {
+				continue
+			}
+			a.Inventory[k] -= d
+			if a.Inventory[k] <= 0 {
+				delete(a.Inventory, k)
+			}
+			lost[k] = d
+		}
+		if len(lost) == 0 {
+			// Ensure at least something is lost if inventory is non-empty.
+			for _, k := range keys {
+				if a.Inventory[k] > 0 {
+					a.Inventory[k]--
+					if a.Inventory[k] <= 0 {
+						delete(a.Inventory, k)
+					}
+					lost[k] = 1
+					break
+				}
+			}
+		}
+	}
+
+	// Spawn dropped items as world item entities.
+	if len(lost) > 0 {
+		keys := make([]string, 0, len(lost))
+		for k := range lost {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			n := lost[k]
+			if n <= 0 {
+				continue
+			}
+			_ = w.spawnItemEntity(nowTick, a.ID, dropPos, k, n, "RESPAWN_DROP")
+		}
+	}
+
+	// Respawn at a stable spawn point near origin.
+	n := agentNum(a.ID)
+	spawnXZ := n * 2
+	spawnX := spawnXZ
+	spawnZ := -spawnXZ
+	y := w.surfaceY(spawnX, spawnZ)
+	a.Pos = Vec3i{X: spawnX, Y: y, Z: spawnZ}
+	a.Yaw = 0
+
+	a.HP = 20
+	a.Hunger = 10
+	a.StaminaMilli = 1000
+
+	ev := protocol.Event{
+		"t":        nowTick,
+		"type":     "RESPAWN",
+		"reason":   reason,
+		"pos":      a.Pos.ToArray(),
+		"drop_pos": dropPos.ToArray(),
+	}
+	if len(lost) > 0 {
+		ev["lost"] = encodeItemPairs(lost)
+	}
+	a.AddEvent(ev)
+}
+
+func agentNum(agentID string) int {
+	if len(agentID) < 2 || agentID[0] != 'A' {
+		return 0
+	}
+	n := 0
+	for i := 1; i < len(agentID); i++ {
+		c := agentID[i]
+		if c < '0' || c > '9' {
+			return 0
+		}
+		n = n*10 + int(c-'0')
+	}
+	return n
 }
 
 func (w *World) buildObs(a *Agent, cl *clientState, nowTick uint64) protocol.ObsMsg {
 	// Voxel cube
 	center := a.Pos
 	r := w.cfg.ObsRadius
+	sensorBlock, hasSensor := w.catalogs.Blocks.Index["SENSOR"]
+	sensorsNear := make([]Vec3i, 0, 4)
 	curr := make([]uint16, 0, (2*r+1)*(2*r+1)*(2*r+1))
 	for dy := -r; dy <= r; dy++ {
 		for dz := -r; dz <= r; dz++ {
 			for dx := -r; dx <= r; dx++ {
-				b := w.chunks.GetBlock(Vec3i{X: center.X + dx, Y: center.Y + dy, Z: center.Z + dz})
+				p := Vec3i{X: center.X + dx, Y: center.Y + dy, Z: center.Z + dz}
+				b := w.chunks.GetBlock(p)
 				curr = append(curr, b)
+				if hasSensor && b == sensorBlock {
+					sensorsNear = append(sensorsNear, p)
+				}
 			}
 		}
 	}
@@ -2298,16 +3303,43 @@ func (w *World) buildObs(a *Agent, cl *clientState, nowTick uint64) protocol.Obs
 
 	tasksObs := make([]protocol.TaskObs, 0, 2)
 	if a.MoveTask != nil {
-		target := v3FromTask(a.MoveTask.Target)
-		start := v3FromTask(a.MoveTask.StartPos)
-		eta := Manhattan(a.Pos, target)
-		tasksObs = append(tasksObs, protocol.TaskObs{
-			TaskID:   a.MoveTask.TaskID,
-			Kind:     string(a.MoveTask.Kind),
-			Progress: taskProgress(start, a.Pos, target),
-			Target:   target.ToArray(),
-			EtaTicks: eta,
-		})
+		mt := a.MoveTask
+		target := v3FromTask(mt.Target)
+		if mt.Kind == tasks.KindFollow {
+			if t, ok := w.followTargetPos(mt.TargetID); ok {
+				target = t
+			}
+			want := int(math.Ceil(mt.Distance))
+			if want < 1 {
+				want = 1
+			}
+			d := distXZ(a.Pos, target)
+			prog := 0.0
+			if d <= want {
+				prog = 1.0
+			}
+			eta := d - want
+			if eta < 0 {
+				eta = 0
+			}
+			tasksObs = append(tasksObs, protocol.TaskObs{
+				TaskID:   mt.TaskID,
+				Kind:     string(mt.Kind),
+				Progress: prog,
+				Target:   target.ToArray(),
+				EtaTicks: eta,
+			})
+		} else {
+			start := v3FromTask(mt.StartPos)
+			eta := Manhattan(a.Pos, target)
+			tasksObs = append(tasksObs, protocol.TaskObs{
+				TaskID:   mt.TaskID,
+				Kind:     string(mt.Kind),
+				Progress: taskProgress(start, a.Pos, target),
+				Target:   target.ToArray(),
+				EtaTicks: eta,
+			})
+		}
 	}
 	if a.WorkTask != nil {
 		tasksObs = append(tasksObs, protocol.TaskObs{
@@ -2341,12 +3373,109 @@ func (w *World) buildObs(a *Agent, cl *clientState, nowTick uint64) protocol.Obs
 			ents = append(ents, protocol.EntityObs{ID: c.ID(), Type: c.Type, Pos: c.Pos.ToArray()})
 		}
 	}
+	if len(w.boards) > 0 {
+		boardIDs := make([]string, 0, len(w.boards))
+		for id := range w.boards {
+			typ, pos, ok := parseContainerID(id)
+			if !ok || typ != "BULLETIN_BOARD" {
+				continue
+			}
+			if Manhattan(pos, a.Pos) > 16 {
+				continue
+			}
+			boardIDs = append(boardIDs, id)
+		}
+		sort.Strings(boardIDs)
+		for _, id := range boardIDs {
+			typ, pos, ok := parseContainerID(id)
+			if !ok || typ != "BULLETIN_BOARD" {
+				continue
+			}
+			ents = append(ents, protocol.EntityObs{ID: id, Type: "BULLETIN_BOARD", Pos: pos.ToArray()})
+		}
+	}
+	if len(w.signs) > 0 {
+		for _, p := range w.sortedSignPositionsNear(a.Pos, 16) {
+			s := w.signs[p]
+			tags := []string{}
+			if s != nil && strings.TrimSpace(s.Text) != "" {
+				tags = append(tags, "has_text")
+			}
+			ents = append(ents, protocol.EntityObs{ID: signIDAt(p), Type: "SIGN", Pos: p.ToArray(), Tags: tags})
+		}
+	}
+	if len(w.conveyors) > 0 {
+		for _, p := range w.sortedConveyorPositionsNear(a.Pos, 16) {
+			m := w.conveyors[p]
+			tags := []string{"dir:" + conveyorDirTag(m)}
+			ents = append(ents, protocol.EntityObs{ID: conveyorIDAt(p), Type: "CONVEYOR", Pos: p.ToArray(), Tags: tags})
+		}
+	}
+	if len(w.switches) > 0 {
+		for _, p := range w.sortedSwitchPositionsNear(a.Pos, 16) {
+			state := "off"
+			if w.switches[p] {
+				state = "on"
+			}
+			ents = append(ents, protocol.EntityObs{ID: switchIDAt(p), Type: "SWITCH", Pos: p.ToArray(), Tags: []string{"state:" + state}})
+		}
+	}
+	if len(sensorsNear) > 0 {
+		sort.Slice(sensorsNear, func(i, j int) bool {
+			if sensorsNear[i].X != sensorsNear[j].X {
+				return sensorsNear[i].X < sensorsNear[j].X
+			}
+			if sensorsNear[i].Y != sensorsNear[j].Y {
+				return sensorsNear[i].Y < sensorsNear[j].Y
+			}
+			return sensorsNear[i].Z < sensorsNear[j].Z
+		})
+		for _, p := range sensorsNear {
+			state := "off"
+			if w.sensorOn(p) {
+				state = "on"
+			}
+			ents = append(ents, protocol.EntityObs{ID: containerID("SENSOR", p), Type: "SENSOR", Pos: p.ToArray(), Tags: []string{"state:" + state}})
+		}
+	}
+	if len(w.items) > 0 {
+		itemIDs := make([]string, 0, len(w.items))
+		for id, e := range w.items {
+			if e == nil || e.Item == "" || e.Count <= 0 {
+				continue
+			}
+			if Manhattan(e.Pos, a.Pos) > 16 {
+				continue
+			}
+			itemIDs = append(itemIDs, id)
+		}
+		sort.Strings(itemIDs)
+		for _, id := range itemIDs {
+			e := w.items[id]
+			if e == nil || e.Item == "" || e.Count <= 0 {
+				continue
+			}
+			ents = append(ents, protocol.EntityObs{
+				ID:    e.EntityID,
+				Type:  "ITEM",
+				Pos:   e.Pos.ToArray(),
+				Item:  e.Item,
+				Count: e.Count,
+			})
+		}
+	}
 
 	// Public boards (global, MVP).
 	publicBoards := make([]protocol.BoardObs, 0, len(w.boards))
 	if len(w.boards) > 0 {
 		boardIDs := make([]string, 0, len(w.boards))
 		for id := range w.boards {
+			// For physical boards, only include nearby boards in OBS to keep payloads small.
+			if typ, pos, ok := parseContainerID(id); ok && typ == "BULLETIN_BOARD" {
+				if Manhattan(pos, a.Pos) > 32 {
+					continue
+				}
+			}
 			boardIDs = append(boardIDs, id)
 		}
 		sort.Strings(boardIDs)
@@ -2393,6 +3522,24 @@ func (w *World) buildObs(a *Agent, cl *clientState, nowTick uint64) protocol.Obs
 		localRules.Tax = map[string]float64{"market": 0.0}
 	}
 
+	status := make([]string, 0, 4)
+	if a.Hunger == 0 {
+		status = append(status, "STARVING")
+	} else if a.Hunger < 5 {
+		status = append(status, "HUNGRY")
+	}
+	if a.StaminaMilli < 200 {
+		status = append(status, "TIRED")
+	}
+	if w.weather == "STORM" {
+		status = append(status, "STORM")
+	} else if w.weather == "COLD" {
+		status = append(status, "COLD")
+	}
+	if len(status) == 0 {
+		status = append(status, "NONE")
+	}
+
 	obs := protocol.ObsMsg{
 		Type:            protocol.TypeObs,
 		ProtocolVersion: protocol.Version,
@@ -2412,7 +3559,7 @@ func (w *World) buildObs(a *Agent, cl *clientState, nowTick uint64) protocol.Obs
 			HP:      a.HP,
 			Hunger:  a.Hunger,
 			Stamina: float64(a.StaminaMilli) / 1000.0,
-			Status:  []string{"NONE"},
+			Status:  status,
 			Reputation: protocol.ReputationObs{
 				Trade:  float64(a.RepTrade) / 1000.0,
 				Build:  float64(a.RepBuild) / 1000.0,
@@ -2459,6 +3606,19 @@ func (w *World) sortedAgents() []*Agent {
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out
+}
+
+func (w *World) followTargetPos(targetID string) (Vec3i, bool) {
+	if targetID == "" {
+		return Vec3i{}, false
+	}
+	if a := w.agents[targetID]; a != nil {
+		return a.Pos, true
+	}
+	if c := w.getContainerByID(targetID); c != nil {
+		return c.Pos, true
+	}
+	return Vec3i{}, false
 }
 
 func (w *World) newTaskID() string {
@@ -2572,6 +3732,18 @@ func (w *World) blockName(b uint16) string {
 	return w.catalogs.Blocks.Palette[b]
 }
 
+func (w *World) blockSolid(b uint16) bool {
+	name := w.blockName(b)
+	if name == "" {
+		return true
+	}
+	def, ok := w.catalogs.Blocks.Defs[name]
+	if !ok {
+		return true
+	}
+	return def.Solid
+}
+
 func (w *World) auditSetBlock(tick uint64, actor string, pos Vec3i, from, to uint16, reason string) {
 	if w.auditLogger == nil {
 		return
@@ -2587,6 +3759,20 @@ func (w *World) auditSetBlock(tick uint64, actor string, pos Vec3i, from, to uin
 	})
 }
 
+func (w *World) auditEvent(tick uint64, actor string, action string, pos Vec3i, reason string, details map[string]any) {
+	if w.auditLogger == nil {
+		return
+	}
+	_ = w.auditLogger.WriteAudit(AuditEntry{
+		Tick:    tick,
+		Actor:   actor,
+		Action:  action,
+		Pos:     pos.ToArray(),
+		Reason:  reason,
+		Details: details,
+	})
+}
+
 func (w *World) stateDigest(nowTick uint64) string {
 	h := sha256.New()
 	var tmp [8]byte
@@ -2598,7 +3784,17 @@ func (w *World) stateDigest(nowTick uint64) string {
 	binary.LittleEndian.PutUint64(tmp[:], w.weatherUntilTick)
 	h.Write(tmp[:])
 	h.Write([]byte(w.activeEventID))
+	binary.LittleEndian.PutUint64(tmp[:], w.activeEventStart)
+	h.Write(tmp[:])
 	binary.LittleEndian.PutUint64(tmp[:], w.activeEventEnds)
+	h.Write(tmp[:])
+	binary.LittleEndian.PutUint64(tmp[:], uint64(int64(w.activeEventCenter.X)))
+	h.Write(tmp[:])
+	binary.LittleEndian.PutUint64(tmp[:], uint64(int64(w.activeEventCenter.Y)))
+	h.Write(tmp[:])
+	binary.LittleEndian.PutUint64(tmp[:], uint64(int64(w.activeEventCenter.Z)))
+	h.Write(tmp[:])
+	binary.LittleEndian.PutUint64(tmp[:], uint64(w.activeEventRadius))
 	h.Write(tmp[:])
 
 	// Chunks (sorted keys).
@@ -2791,6 +3987,151 @@ func (w *World) stateDigest(nowTick uint64) string {
 		}
 	}
 
+	// Item entities (sorted).
+	if len(w.items) > 0 {
+		itemIDs := make([]string, 0, len(w.items))
+		for id, e := range w.items {
+			if e == nil || e.Item == "" || e.Count <= 0 {
+				continue
+			}
+			itemIDs = append(itemIDs, id)
+		}
+		sort.Strings(itemIDs)
+		binary.LittleEndian.PutUint64(tmp[:], uint64(len(itemIDs)))
+		h.Write(tmp[:])
+		for _, id := range itemIDs {
+			e := w.items[id]
+			if e == nil || e.Item == "" || e.Count <= 0 {
+				continue
+			}
+			h.Write([]byte(id))
+			binary.LittleEndian.PutUint64(tmp[:], uint64(int64(e.Pos.X)))
+			h.Write(tmp[:])
+			binary.LittleEndian.PutUint64(tmp[:], uint64(int64(e.Pos.Y)))
+			h.Write(tmp[:])
+			binary.LittleEndian.PutUint64(tmp[:], uint64(int64(e.Pos.Z)))
+			h.Write(tmp[:])
+			h.Write([]byte(e.Item))
+			binary.LittleEndian.PutUint64(tmp[:], uint64(e.Count))
+			h.Write(tmp[:])
+			binary.LittleEndian.PutUint64(tmp[:], e.CreatedTick)
+			h.Write(tmp[:])
+			binary.LittleEndian.PutUint64(tmp[:], e.ExpiresTick)
+			h.Write(tmp[:])
+		}
+	} else {
+		binary.LittleEndian.PutUint64(tmp[:], 0)
+		h.Write(tmp[:])
+	}
+
+	// Signs (sorted by pos).
+	if len(w.signs) > 0 {
+		posKeys := make([]Vec3i, 0, len(w.signs))
+		for p, s := range w.signs {
+			if s == nil {
+				continue
+			}
+			posKeys = append(posKeys, p)
+		}
+		sort.Slice(posKeys, func(i, j int) bool {
+			if posKeys[i].X != posKeys[j].X {
+				return posKeys[i].X < posKeys[j].X
+			}
+			if posKeys[i].Y != posKeys[j].Y {
+				return posKeys[i].Y < posKeys[j].Y
+			}
+			return posKeys[i].Z < posKeys[j].Z
+		})
+		binary.LittleEndian.PutUint64(tmp[:], uint64(len(posKeys)))
+		h.Write(tmp[:])
+		for _, p := range posKeys {
+			s := w.signs[p]
+			if s == nil {
+				continue
+			}
+			binary.LittleEndian.PutUint64(tmp[:], uint64(int64(p.X)))
+			h.Write(tmp[:])
+			binary.LittleEndian.PutUint64(tmp[:], uint64(int64(p.Y)))
+			h.Write(tmp[:])
+			binary.LittleEndian.PutUint64(tmp[:], uint64(int64(p.Z)))
+			h.Write(tmp[:])
+			h.Write([]byte(s.Text))
+			binary.LittleEndian.PutUint64(tmp[:], s.UpdatedTick)
+			h.Write(tmp[:])
+			h.Write([]byte(s.UpdatedBy))
+		}
+	} else {
+		binary.LittleEndian.PutUint64(tmp[:], 0)
+		h.Write(tmp[:])
+	}
+
+	// Conveyors (sorted by pos).
+	if len(w.conveyors) > 0 {
+		posKeys := make([]Vec3i, 0, len(w.conveyors))
+		for p := range w.conveyors {
+			posKeys = append(posKeys, p)
+		}
+		sort.Slice(posKeys, func(i, j int) bool {
+			if posKeys[i].X != posKeys[j].X {
+				return posKeys[i].X < posKeys[j].X
+			}
+			if posKeys[i].Y != posKeys[j].Y {
+				return posKeys[i].Y < posKeys[j].Y
+			}
+			return posKeys[i].Z < posKeys[j].Z
+		})
+		binary.LittleEndian.PutUint64(tmp[:], uint64(len(posKeys)))
+		h.Write(tmp[:])
+		for _, p := range posKeys {
+			m := w.conveyors[p]
+			binary.LittleEndian.PutUint64(tmp[:], uint64(int64(p.X)))
+			h.Write(tmp[:])
+			binary.LittleEndian.PutUint64(tmp[:], uint64(int64(p.Y)))
+			h.Write(tmp[:])
+			binary.LittleEndian.PutUint64(tmp[:], uint64(int64(p.Z)))
+			h.Write(tmp[:])
+			binary.LittleEndian.PutUint64(tmp[:], uint64(int64(m.DX)))
+			h.Write(tmp[:])
+			binary.LittleEndian.PutUint64(tmp[:], uint64(int64(m.DZ)))
+			h.Write(tmp[:])
+		}
+	} else {
+		binary.LittleEndian.PutUint64(tmp[:], 0)
+		h.Write(tmp[:])
+	}
+
+	// Switches (sorted by pos).
+	if len(w.switches) > 0 {
+		posKeys := make([]Vec3i, 0, len(w.switches))
+		for p := range w.switches {
+			posKeys = append(posKeys, p)
+		}
+		sort.Slice(posKeys, func(i, j int) bool {
+			if posKeys[i].X != posKeys[j].X {
+				return posKeys[i].X < posKeys[j].X
+			}
+			if posKeys[i].Y != posKeys[j].Y {
+				return posKeys[i].Y < posKeys[j].Y
+			}
+			return posKeys[i].Z < posKeys[j].Z
+		})
+		binary.LittleEndian.PutUint64(tmp[:], uint64(len(posKeys)))
+		h.Write(tmp[:])
+		for _, p := range posKeys {
+			on := w.switches[p]
+			binary.LittleEndian.PutUint64(tmp[:], uint64(int64(p.X)))
+			h.Write(tmp[:])
+			binary.LittleEndian.PutUint64(tmp[:], uint64(int64(p.Y)))
+			h.Write(tmp[:])
+			binary.LittleEndian.PutUint64(tmp[:], uint64(int64(p.Z)))
+			h.Write(tmp[:])
+			h.Write([]byte{boolByte(on)})
+		}
+	} else {
+		binary.LittleEndian.PutUint64(tmp[:], 0)
+		h.Write(tmp[:])
+	}
+
 	// Contracts (sorted).
 	contractIDs := make([]string, 0, len(w.contracts))
 	for id := range w.contracts {
@@ -2886,6 +4227,8 @@ func (w *World) stateDigest(nowTick uint64) string {
 		binary.LittleEndian.PutUint64(tmp[:], uint64(int64(s.Anchor.Y)))
 		h.Write(tmp[:])
 		binary.LittleEndian.PutUint64(tmp[:], uint64(int64(s.Anchor.Z)))
+		h.Write(tmp[:])
+		binary.LittleEndian.PutUint64(tmp[:], uint64(s.Rotation))
 		h.Write(tmp[:])
 		binary.LittleEndian.PutUint64(tmp[:], uint64(int64(s.Min.X)))
 		h.Write(tmp[:])
@@ -3040,6 +4383,9 @@ func (w *World) stateDigest(nowTick uint64) string {
 			h.Write(tmp[:])
 			binary.LittleEndian.PutUint64(tmp[:], math.Float64bits(mt.Tolerance))
 			h.Write(tmp[:])
+			h.Write([]byte(mt.TargetID))
+			binary.LittleEndian.PutUint64(tmp[:], math.Float64bits(mt.Distance))
+			h.Write(tmp[:])
 			binary.LittleEndian.PutUint64(tmp[:], uint64(int64(mt.StartPos.X)))
 			h.Write(tmp[:])
 			binary.LittleEndian.PutUint64(tmp[:], uint64(int64(mt.StartPos.Y)))
@@ -3143,6 +4489,8 @@ func workProgress(wt *tasks.WorkTask) float64 {
 	switch wt.Kind {
 	case tasks.KindMine:
 		return float64(wt.WorkTicks) / 10.0
+	case tasks.KindGather:
+		return 0
 	case tasks.KindPlace:
 		return 0
 	case tasks.KindCraft:
@@ -3269,6 +4617,33 @@ func applyTransferWithTax(src, dst map[string]int, items map[string]int, taxSink
 			taxSink[item] += tax
 		}
 	}
+}
+
+func calcTax(items map[string]int, taxRate float64) map[string]int {
+	if taxRate <= 0 || len(items) == 0 {
+		return nil
+	}
+	if taxRate > 1 {
+		taxRate = 1
+	}
+	out := map[string]int{}
+	for item, c := range items {
+		if c <= 0 {
+			continue
+		}
+		tax := int(float64(c) * taxRate) // floor
+		if tax <= 0 {
+			continue
+		}
+		if tax > c {
+			tax = c
+		}
+		out[item] = tax
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 func stacksToMap(stacks []protocol.ItemStack) map[string]int {

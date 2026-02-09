@@ -7,11 +7,6 @@ import (
 	"voxelcraft.ai/internal/protocol"
 )
 
-const (
-	maintenanceIron = 1
-	maintenanceCoal = 1
-)
-
 func (w *World) tickClaimsMaintenance(nowTick uint64) {
 	if w.cfg.DayTicks <= 0 || len(w.claims) == 0 {
 		return
@@ -71,13 +66,18 @@ func (w *World) payMaintenance(c *LandClaim) bool {
 		return false
 	}
 
+	cost := w.cfg.MaintenanceCost
+	if len(cost) == 0 {
+		// Defensive default (should be set by cfg.applyDefaults).
+		cost = map[string]int{"IRON_INGOT": 1, "COAL": 1}
+	}
+
 	// Prefer org treasury if claim is owned by an org id.
 	if org := w.orgByID(owner); org != nil {
-		if org.Treasury["IRON_INGOT"] < maintenanceIron || org.Treasury["COAL"] < maintenanceCoal {
+		if org.Treasury == nil || !hasItems(org.Treasury, cost) {
 			return false
 		}
-		org.Treasury["IRON_INGOT"] -= maintenanceIron
-		org.Treasury["COAL"] -= maintenanceCoal
+		deductItems(org.Treasury, cost)
 		return true
 	}
 
@@ -85,10 +85,18 @@ func (w *World) payMaintenance(c *LandClaim) bool {
 	if a == nil {
 		return false
 	}
-	if a.Inventory["IRON_INGOT"] < maintenanceIron || a.Inventory["COAL"] < maintenanceCoal {
+	if !hasItems(a.Inventory, cost) {
 		return false
 	}
-	a.Inventory["IRON_INGOT"] -= maintenanceIron
-	a.Inventory["COAL"] -= maintenanceCoal
+	deductItems(a.Inventory, cost)
 	return true
+}
+
+func deductItems(inv map[string]int, cost map[string]int) {
+	for item, c := range cost {
+		inv[item] -= c
+		if inv[item] <= 0 {
+			delete(inv, item)
+		}
+	}
 }

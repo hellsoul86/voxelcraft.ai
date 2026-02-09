@@ -4,6 +4,15 @@ func (w *World) ensureContainerForPlacedBlock(pos Vec3i, blockName string) {
 	switch blockName {
 	case "CHEST", "FURNACE", "CONTRACT_TERMINAL":
 		w.ensureContainer(pos, blockName)
+	case "BULLETIN_BOARD":
+		w.ensureBoard(pos)
+	case "SIGN":
+		w.ensureSign(pos)
+	case "CONVEYOR":
+		// Blueprint placements don't have a notion of placement yaw yet, so default to +X.
+		w.ensureConveyor(pos, 1, 0)
+	case "SWITCH":
+		w.ensureSwitch(pos, false)
 	}
 }
 

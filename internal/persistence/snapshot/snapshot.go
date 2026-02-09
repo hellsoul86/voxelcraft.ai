@@ -23,30 +23,67 @@ type SnapshotV1 struct {
 	Seed      int64 `json:"seed"`
 	TickRate  int   `json:"tick_rate_hz"`
 	DayTicks  int   `json:"day_ticks"`
+	SeasonLengthTicks int `json:"season_length_ticks,omitempty"`
 	ObsRadius int   `json:"obs_radius"`
 	Height    int   `json:"height"`
 	BoundaryR int   `json:"boundary_r"`
 
-	Weather          string `json:"weather"`
-	WeatherUntilTick uint64 `json:"weather_until_tick"`
-	ActiveEventID    string `json:"active_event_id"`
-	ActiveEventEnds  uint64 `json:"active_event_ends_tick"`
+	// Operational parameters (captured for deterministic replay/resume).
+	SnapshotEveryTicks int          `json:"snapshot_every_ticks,omitempty"`
+	DirectorEveryTicks int          `json:"director_every_ticks,omitempty"`
+	RateLimits         RateLimitsV1 `json:"rate_limits,omitempty"`
 
-	Chunks     []ChunkV1     `json:"chunks"`
-	Agents     []AgentV1     `json:"agents"`
-	Claims     []ClaimV1     `json:"claims"`
-	Containers []ContainerV1 `json:"containers"`
-	Trades     []TradeV1     `json:"trades"`
-	Boards     []BoardV1     `json:"boards"`
-	Contracts  []ContractV1  `json:"contracts"`
-	Laws       []LawV1       `json:"laws"`
-	Orgs       []OrgV1       `json:"orgs"`
+	LawNoticeTicks int `json:"law_notice_ticks,omitempty"`
+	LawVoteTicks   int `json:"law_vote_ticks,omitempty"`
+
+	BlueprintAutoPullRange int `json:"blueprint_auto_pull_range,omitempty"`
+	BlueprintBlocksPerTick int `json:"blueprint_blocks_per_tick,omitempty"`
+
+	AccessPassCoreRadius int            `json:"access_pass_core_radius,omitempty"`
+	MaintenanceCost      map[string]int `json:"maintenance_cost,omitempty"`
+
+	FunDecayWindowTicks    int     `json:"fun_decay_window_ticks,omitempty"`
+	FunDecayBase           float64 `json:"fun_decay_base,omitempty"`
+	StructureSurvivalTicks int     `json:"structure_survival_ticks,omitempty"`
+
+	Weather           string `json:"weather"`
+	WeatherUntilTick  uint64 `json:"weather_until_tick"`
+	ActiveEventID     string `json:"active_event_id"`
+	ActiveEventStart  uint64 `json:"active_event_start_tick,omitempty"`
+	ActiveEventEnds   uint64 `json:"active_event_ends_tick"`
+	ActiveEventCenter [3]int `json:"active_event_center,omitempty"`
+	ActiveEventRadius int    `json:"active_event_radius,omitempty"`
+
+	Chunks     []ChunkV1      `json:"chunks"`
+	Agents     []AgentV1      `json:"agents"`
+	Claims     []ClaimV1      `json:"claims"`
+	Containers []ContainerV1  `json:"containers"`
+	Items      []ItemEntityV1 `json:"items,omitempty"`
+	Signs      []SignV1       `json:"signs,omitempty"`
+	Conveyors  []ConveyorV1   `json:"conveyors,omitempty"`
+	Switches   []SwitchV1     `json:"switches,omitempty"`
+	Trades     []TradeV1      `json:"trades"`
+	Boards     []BoardV1      `json:"boards"`
+	Contracts  []ContractV1   `json:"contracts"`
+	Laws       []LawV1        `json:"laws"`
+	Orgs       []OrgV1        `json:"orgs"`
 
 	Structures []StructureV1 `json:"structures,omitempty"`
 
 	Stats *StatsV1 `json:"stats,omitempty"`
 
 	Counters CountersV1 `json:"counters"`
+}
+
+type RateLimitsV1 struct {
+	SayWindowTicks        int `json:"say_window_ticks,omitempty"`
+	SayMax                int `json:"say_max,omitempty"`
+	WhisperWindowTicks    int `json:"whisper_window_ticks,omitempty"`
+	WhisperMax            int `json:"whisper_max,omitempty"`
+	OfferTradeWindowTicks int `json:"offer_trade_window_ticks,omitempty"`
+	OfferTradeMax         int `json:"offer_trade_max,omitempty"`
+	PostBoardWindowTicks  int `json:"post_board_window_ticks,omitempty"`
+	PostBoardMax          int `json:"post_board_max,omitempty"`
 }
 
 type CountersV1 struct {
@@ -58,6 +95,7 @@ type CountersV1 struct {
 	NextContract uint64 `json:"next_contract"`
 	NextLaw      uint64 `json:"next_law"`
 	NextOrg      uint64 `json:"next_org"`
+	NextItem     uint64 `json:"next_item"`
 }
 
 type ChunkV1 struct {
@@ -89,6 +127,9 @@ type AgentV1 struct {
 	FunRiskRescue int            `json:"fun_risk_rescue"`
 	Inventory     map[string]int `json:"inventory"`
 
+	Memory      map[string]MemoryEntryV1 `json:"memory,omitempty"`
+	RateWindows map[string]RateWindowV1  `json:"rate_windows,omitempty"`
+
 	SeenBiomes  []string              `json:"seen_biomes,omitempty"`
 	SeenRecipes []string              `json:"seen_recipes,omitempty"`
 	SeenEvents  []string              `json:"seen_events,omitempty"`
@@ -96,6 +137,16 @@ type AgentV1 struct {
 
 	MoveTask *MovementTaskV1 `json:"move_task,omitempty"`
 	WorkTask *WorkTaskV1     `json:"work_task,omitempty"`
+}
+
+type MemoryEntryV1 struct {
+	Value      string `json:"value"`
+	ExpiryTick uint64 `json:"expiry_tick,omitempty"`
+}
+
+type RateWindowV1 struct {
+	StartTick uint64 `json:"start_tick"`
+	Count     int    `json:"count"`
 }
 
 type FunDecayV1 struct {
@@ -108,6 +159,8 @@ type MovementTaskV1 struct {
 	Kind        string  `json:"kind"`
 	Target      [3]int  `json:"target"`
 	Tolerance   float64 `json:"tolerance"`
+	TargetID    string  `json:"target_id,omitempty"`
+	Distance    float64 `json:"distance,omitempty"`
 	StartPos    [3]int  `json:"start_pos"`
 	StartedTick uint64  `json:"started_tick"`
 }
@@ -174,6 +227,33 @@ type ContainerV1 struct {
 	Inventory map[string]int            `json:"inventory"`
 	Reserved  map[string]int            `json:"reserved"`
 	Owed      map[string]map[string]int `json:"owed"`
+}
+
+type ItemEntityV1 struct {
+	EntityID    string `json:"entity_id"`
+	Pos         [3]int `json:"pos"`
+	Item        string `json:"item"`
+	Count       int    `json:"count"`
+	CreatedTick uint64 `json:"created_tick"`
+	ExpiresTick uint64 `json:"expires_tick"`
+}
+
+type SignV1 struct {
+	Pos         [3]int `json:"pos"`
+	Text        string `json:"text"`
+	UpdatedTick uint64 `json:"updated_tick,omitempty"`
+	UpdatedBy   string `json:"updated_by,omitempty"`
+}
+
+type ConveyorV1 struct {
+	Pos [3]int `json:"pos"`
+	DX  int    `json:"dx"`
+	DZ  int    `json:"dz"`
+}
+
+type SwitchV1 struct {
+	Pos [3]int `json:"pos"`
+	On  bool   `json:"on"`
 }
 
 type TradeV1 struct {
@@ -244,6 +324,7 @@ type StructureV1 struct {
 	BlueprintID string `json:"blueprint_id"`
 	BuilderID   string `json:"builder_id"`
 	Anchor      [3]int `json:"anchor"`
+	Rotation    int    `json:"rotation,omitempty"`
 	Min         [3]int `json:"min"`
 	Max         [3]int `json:"max"`
 

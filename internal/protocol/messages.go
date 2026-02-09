@@ -44,6 +44,7 @@ type CatalogDigests struct {
 	BlueprintsDigest   string    `json:"blueprints_digest"`
 	LawTemplatesDigest string    `json:"law_templates_digest"`
 	EventsDigest       string    `json:"events_digest"`
+	TuningDigest       string    `json:"tuning_digest,omitempty"`
 }
 
 type DigestRef struct {

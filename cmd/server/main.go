@@ -15,20 +15,25 @@ import (
 	"syscall"
 	"time"
 
+	"voxelcraft.ai/internal/persistence/archive"
+	"voxelcraft.ai/internal/persistence/indexdb"
 	persistlog "voxelcraft.ai/internal/persistence/log"
 	"voxelcraft.ai/internal/persistence/snapshot"
 	"voxelcraft.ai/internal/sim/catalogs"
+	"voxelcraft.ai/internal/sim/tuning"
 	"voxelcraft.ai/internal/sim/world"
 	"voxelcraft.ai/internal/transport/ws"
 )
 
 func main() {
 	var (
-		addr      = flag.String("addr", ":8080", "http listen address")
-		worldID   = flag.String("world", "world_1", "world id")
-		seed      = flag.Int64("seed", 1337, "world seed (used only when starting a fresh world)")
-		configDir = flag.String("configs", "./configs", "config directory")
-		dataDir   = flag.String("data", "./data", "runtime data directory")
+		addr       = flag.String("addr", ":8080", "http listen address")
+		worldID    = flag.String("world", "world_1", "world id")
+		seed       = flag.Int64("seed", 1337, "world seed (used only when starting a fresh world)")
+		configDir  = flag.String("configs", "./configs", "config directory")
+		dataDir    = flag.String("data", "./data", "runtime data directory")
+		tuningPath = flag.String("tuning", "", "path to tuning.yaml (default: <configs>/tuning.yaml)")
+		disableDB  = flag.Bool("disable_db", false, "disable sqlite indexing (tick/audit + catalogs + snapshot metadata)")
 
 		snapPath   = flag.String("snapshot", "", "path to snapshot to load (optional)")
 		loadLatest = flag.Bool("load_latest_snapshot", true, "load latest snapshot from data dir if present (when -snapshot is empty)")
@@ -45,12 +50,51 @@ func main() {
 	worldDir := filepath.Join(*dataDir, "worlds", *worldID)
 	_ = os.MkdirAll(worldDir, 0o755)
 
+	tp := strings.TrimSpace(*tuningPath)
+	if tp == "" {
+		tp = filepath.Join(*configDir, "tuning.yaml")
+	}
+
+	// Optional: read-model index db (does not affect sim determinism).
+	var idx *indexdb.SQLiteIndex
+	if !*disableDB {
+		dbPath := filepath.Join(worldDir, "index", "world.sqlite")
+		var err error
+		idx, err = indexdb.OpenSQLite(dbPath)
+		if err != nil {
+			logger.Fatalf("open index db: %v", err)
+		}
+		defer idx.Close()
+	}
+
 	// Create world (fresh or resumed from snapshot).
 	var w *world.World
 	snapshotToLoad := strings.TrimSpace(*snapPath)
 	if snapshotToLoad == "" && *loadLatest {
 		snapshotToLoad = latestSnapshot(worldDir)
 	}
+
+	// Load tuning (required for fresh world; optional for snapshot resumes).
+	tune, tuneErr := tuning.Load(tp)
+	if tuneErr != nil {
+		if snapshotToLoad == "" {
+			logger.Fatalf("load tuning: %v", tuneErr)
+		}
+		// Resume fallback: snapshot should contain the effective tuning; allow missing file.
+		if os.IsNotExist(tuneErr) {
+			logger.Printf("tuning not found (%s); using defaults", tp)
+			tune = tuning.Defaults()
+		} else {
+			logger.Fatalf("load tuning: %v", tuneErr)
+		}
+	}
+
+	if idx != nil {
+		if err := idx.UpsertCatalogs(*configDir, cats, tune); err != nil {
+			logger.Printf("index db: upsert catalogs: %v", err)
+		}
+	}
+
 	if snapshotToLoad != "" {
 		snap, err := snapshot.ReadSnapshot(snapshotToLoad)
 		if err != nil {
@@ -60,13 +104,35 @@ func main() {
 			logger.Fatalf("snapshot world id mismatch: flag=%s snap=%s", *worldID, snap.Header.WorldID)
 		}
 		w, err = world.New(world.WorldConfig{
-			ID:         *worldID,
-			TickRateHz: snap.TickRate,
-			DayTicks:   snap.DayTicks,
-			ObsRadius:  snap.ObsRadius,
-			Height:     snap.Height,
-			Seed:       snap.Seed,
-			BoundaryR:  snap.BoundaryR,
+			ID:                 *worldID,
+			TickRateHz:         snap.TickRate,
+			DayTicks:           snap.DayTicks,
+			SeasonLengthTicks:  tune.SeasonLengthTicks,
+			ObsRadius:          snap.ObsRadius,
+			Height:             snap.Height,
+			Seed:               snap.Seed,
+			BoundaryR:          snap.BoundaryR,
+			SnapshotEveryTicks: tune.SnapshotEveryTicks,
+			DirectorEveryTicks: tune.DirectorEveryTicks,
+			RateLimits: world.RateLimitConfig{
+				SayWindowTicks:        tune.RateLimits.SayWindowTicks,
+				SayMax:                tune.RateLimits.SayMax,
+				WhisperWindowTicks:    tune.RateLimits.WhisperWindowTicks,
+				WhisperMax:            tune.RateLimits.WhisperMax,
+				OfferTradeWindowTicks: tune.RateLimits.OfferTradeWindowTicks,
+				OfferTradeMax:         tune.RateLimits.OfferTradeMax,
+				PostBoardWindowTicks:  tune.RateLimits.PostBoardWindowTicks,
+				PostBoardMax:          tune.RateLimits.PostBoardMax,
+			},
+			LawNoticeTicks:         tune.LawNoticeTicks,
+			LawVoteTicks:           tune.LawVoteTicks,
+			BlueprintAutoPullRange: tune.BlueprintAutoPullRange,
+			BlueprintBlocksPerTick: tune.BlueprintBlocksPerTick,
+			AccessPassCoreRadius:   tune.AccessPassCoreRadius,
+			MaintenanceCost:        tune.ClaimMaintenanceCost,
+			FunDecayWindowTicks:    tune.FunDecayWindowTicks,
+			FunDecayBase:           tune.FunDecayBase,
+			StructureSurvivalTicks: tune.StructureSurvivalTicks,
 		}, cats)
 		if err != nil {
 			logger.Fatalf("world: %v", err)
@@ -77,13 +143,35 @@ func main() {
 		logger.Printf("resumed from snapshot=%s tick=%d", filepath.Base(snapshotToLoad), w.CurrentTick())
 	} else {
 		w, err = world.New(world.WorldConfig{
-			ID:         *worldID,
-			TickRateHz: 5,
-			DayTicks:   6000,
-			ObsRadius:  7,
-			Height:     64,
-			Seed:       *seed,
-			BoundaryR:  4000,
+			ID:                 *worldID,
+			TickRateHz:         tune.TickRateHz,
+			DayTicks:           tune.DayTicks,
+			SeasonLengthTicks:  tune.SeasonLengthTicks,
+			ObsRadius:          tune.ObsRadius,
+			Height:             tune.ChunkSize[2],
+			Seed:               *seed,
+			BoundaryR:          tune.WorldBoundaryR,
+			SnapshotEveryTicks: tune.SnapshotEveryTicks,
+			DirectorEveryTicks: tune.DirectorEveryTicks,
+			RateLimits: world.RateLimitConfig{
+				SayWindowTicks:        tune.RateLimits.SayWindowTicks,
+				SayMax:                tune.RateLimits.SayMax,
+				WhisperWindowTicks:    tune.RateLimits.WhisperWindowTicks,
+				WhisperMax:            tune.RateLimits.WhisperMax,
+				OfferTradeWindowTicks: tune.RateLimits.OfferTradeWindowTicks,
+				OfferTradeMax:         tune.RateLimits.OfferTradeMax,
+				PostBoardWindowTicks:  tune.RateLimits.PostBoardWindowTicks,
+				PostBoardMax:          tune.RateLimits.PostBoardMax,
+			},
+			LawNoticeTicks:         tune.LawNoticeTicks,
+			LawVoteTicks:           tune.LawVoteTicks,
+			BlueprintAutoPullRange: tune.BlueprintAutoPullRange,
+			BlueprintBlocksPerTick: tune.BlueprintBlocksPerTick,
+			AccessPassCoreRadius:   tune.AccessPassCoreRadius,
+			MaintenanceCost:        tune.ClaimMaintenanceCost,
+			FunDecayWindowTicks:    tune.FunDecayWindowTicks,
+			FunDecayBase:           tune.FunDecayBase,
+			StructureSurvivalTicks: tune.StructureSurvivalTicks,
 		}, cats)
 		if err != nil {
 			logger.Fatalf("world: %v", err)
@@ -97,8 +185,8 @@ func main() {
 	auditLog := persistlog.NewAuditLogger(worldDir)
 	defer tickLog.Close()
 	defer auditLog.Close()
-	w.SetTickLogger(tickLog)
-	w.SetAuditLogger(auditLog)
+	w.SetTickLogger(multiTickLogger{a: tickLog, b: idx})
+	w.SetAuditLogger(multiAuditLogger{a: auditLog, b: idx})
 
 	// Snapshot writer.
 	snapCh := make(chan snapshot.SnapshotV1, 2)
@@ -112,6 +200,18 @@ func main() {
 				path := filepath.Join(worldDir, "snapshots", fmt.Sprintf("%d.snap.zst", snap.Header.Tick))
 				if err := snapshot.WriteSnapshot(path, snap); err != nil {
 					logger.Printf("snapshot write: %v", err)
+				} else if idx != nil {
+					idx.RecordSnapshot(path, snap)
+					if season, archivedPath, ok, err := archive.ArchiveSeasonSnapshot(worldDir, path, snap); err != nil {
+						logger.Printf("archive season snapshot: %v", err)
+					} else if ok {
+						idx.RecordSeason(season, snap.Header.Tick, archivedPath, snap.Seed)
+					}
+				} else {
+					// Archive even when index db is disabled.
+					if _, _, _, err := archive.ArchiveSeasonSnapshot(worldDir, path, snap); err != nil {
+						logger.Printf("archive season snapshot: %v", err)
+					}
 				}
 			}
 		}
@@ -199,4 +299,34 @@ func latestSnapshot(worldDir string) string {
 		}
 	}
 	return best
+}
+
+type multiTickLogger struct {
+	a world.TickLogger
+	b world.TickLogger
+}
+
+func (m multiTickLogger) WriteTick(entry world.TickLogEntry) error {
+	if m.a != nil {
+		_ = m.a.WriteTick(entry)
+	}
+	if m.b != nil {
+		_ = m.b.WriteTick(entry)
+	}
+	return nil
+}
+
+type multiAuditLogger struct {
+	a world.AuditLogger
+	b world.AuditLogger
+}
+
+func (m multiAuditLogger) WriteAudit(entry world.AuditEntry) error {
+	if m.a != nil {
+		_ = m.a.WriteAudit(entry)
+	}
+	if m.b != nil {
+		_ = m.b.WriteAudit(entry)
+	}
+	return nil
 }

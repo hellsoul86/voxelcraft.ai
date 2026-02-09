@@ -96,6 +96,14 @@ func (w *World) tickContracts(nowTick uint64) {
 					}
 				}
 				c.State = ContractFailed
+				w.auditEvent(nowTick, "WORLD", "CONTRACT_EXPIRE", terminal.Pos, "CONTRACT_TIMEOUT", map[string]any{
+					"contract_id": c.ContractID,
+					"kind":        c.Kind,
+					"poster":      c.Poster,
+					"acceptor":    c.Acceptor,
+					"state":       string(c.State),
+					"reward":      encodeItemPairs(c.Reward),
+				})
 			}
 			continue
 		}
@@ -129,6 +137,15 @@ func (w *World) tickContracts(nowTick uint64) {
 			}
 			c.State = ContractFailed
 			w.addLawPenalty(c.Acceptor, "CONTRACT_TIMEOUT")
+			w.auditEvent(nowTick, "WORLD", "CONTRACT_FAIL", terminal.Pos, "CONTRACT_TIMEOUT", map[string]any{
+				"contract_id": c.ContractID,
+				"kind":        c.Kind,
+				"poster":      c.Poster,
+				"acceptor":    c.Acceptor,
+				"state":       string(c.State),
+				"reward":      encodeItemPairs(c.Reward),
+				"deposit":     encodeItemPairs(c.Deposit),
+			})
 			continue
 		}
 
@@ -174,6 +191,16 @@ func (w *World) tickContracts(nowTick uint64) {
 				}
 				c.State = ContractCompleted
 				w.addTradeCredit(nowTick, c.Acceptor, c.Poster, c.Kind)
+				w.auditEvent(nowTick, c.Acceptor, "CONTRACT_COMPLETE", terminal.Pos, "AUTO_COMPLETE", map[string]any{
+					"contract_id":  c.ContractID,
+					"kind":         c.Kind,
+					"poster":       c.Poster,
+					"acceptor":     c.Acceptor,
+					"state":        string(c.State),
+					"requirements": encodeItemPairs(c.Requirements),
+					"reward":       encodeItemPairs(c.Reward),
+					"deposit":      encodeItemPairs(c.Deposit),
+				})
 			}
 		case "BUILD":
 			// Validate structure roughly by checking all blueprint blocks at anchor.
@@ -205,13 +232,25 @@ func (w *World) tickContracts(nowTick uint64) {
 				}
 				c.State = ContractCompleted
 				w.addBuildCredit(nowTick, c.Acceptor, c.Poster, c.Kind)
+				w.auditEvent(nowTick, c.Acceptor, "CONTRACT_COMPLETE", terminal.Pos, "AUTO_COMPLETE", map[string]any{
+					"contract_id":  c.ContractID,
+					"kind":         c.Kind,
+					"poster":       c.Poster,
+					"acceptor":     c.Acceptor,
+					"state":        string(c.State),
+					"blueprint_id": c.BlueprintID,
+					"anchor":       c.Anchor.ToArray(),
+					"rotation":     c.Rotation,
+					"reward":       encodeItemPairs(c.Reward),
+					"deposit":      encodeItemPairs(c.Deposit),
+				})
 			}
 		}
 	}
 }
 
 func (w *World) checkBlueprintPlaced(id string, anchor Vec3i, rotation int) bool {
-	_ = rotation // MVP currently ignores rotation.
+	rot := normalizeRotation(rotation)
 	bp, ok := w.catalogs.Blueprints.ByID[id]
 	if !ok {
 		return false
@@ -221,7 +260,8 @@ func (w *World) checkBlueprintPlaced(id string, anchor Vec3i, rotation int) bool
 		if !ok {
 			return false
 		}
-		pos := Vec3i{X: anchor.X + b.Pos[0], Y: anchor.Y + b.Pos[1], Z: anchor.Z + b.Pos[2]}
+		off := rotateOffset(b.Pos, rot)
+		pos := Vec3i{X: anchor.X + off[0], Y: anchor.Y + off[1], Z: anchor.Z + off[2]}
 		if w.chunks.GetBlock(pos) != want {
 			return false
 		}

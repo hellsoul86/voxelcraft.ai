@@ -77,6 +77,9 @@
 }
 ```
 
+补充（MVP 实现）：
+- 服务器会额外下发 `name="tuning"` 的 catalog，用于告知运行参数（例如 `snapshot_every_ticks`、`director_every_ticks`、`rate_limits` 等），方便 agent 做冷却/调度推理。
+
 ## 6. OBS
 
 关键点：
@@ -91,6 +94,10 @@
 - `local_rules.maintenance_due_tick` / `local_rules.maintenance_stage` 用于领地维护费与保护降级提示
 - `fun_score`（可选）提供多维 Fun Score 面板：`novelty/creation/social/influence/narrative/risk_rescue`
 - `events` 中可能出现：`FUN`（fun 变动明细）、`FINE`（罚款）、`ACCESS_PASS`（门票扣除）
+- `entities`（MVP）可能包含具备额外 tags 的功能块：
+  - `CONVEYOR`：`tags=["dir:+X|-X|+Z|-Z"]`
+  - `SWITCH`：`tags=["state:on|off"]`
+  - `SENSOR`：`tags=["state:on|off"]`（当前默认规则：附近掉落物或相邻容器有可用库存时为 on）
 
 ## 7. ACT
 
@@ -107,10 +114,14 @@
 Instants:
 - `SAY(channel,text)`
 - `WHISPER(to,text)`
+- `EAT(item_id,count?)`（食物回血+回饥饿+回体力）
 - `OFFER_TRADE(to, offer, request)`
 - `ACCEPT_TRADE(trade_id)`
 - `DECLINE_TRADE(trade_id)`
 - `POST_BOARD(board_id,title,body)`
+- `SEARCH_BOARD(board_id,text,limit?)`
+- `SET_SIGN(target_id,text)`（target_id 形如 `SIGN@x,y,z`）
+- `TOGGLE_SWITCH(target_id)`（target_id 形如 `SWITCH@x,y,z`）
 - `SET_PERMISSIONS(land_id, policy)` (claim flags)
 - `ADD_MEMBER(land_id, member_id)` / `REMOVE_MEMBER(land_id, member_id)` (claim members)
 - `CREATE_ORG(org_kind, org_name)` -> `org_id` (kinds: `GUILD|CITY`)
@@ -124,8 +135,10 @@ Instants:
 
 Tasks:
 - `MOVE_TO(target,tolerance)`
+- `FOLLOW(target_id,distance?)`
 - `STOP()`
 - `MINE(block_pos)`
+- `GATHER(target_id)`（拾取掉落物，target_id 为 item entity id）
 - `PLACE(block_pos,item_id)` (single-block placement)
 - `OPEN(target_id)` (open container/terminal)
 - `TRANSFER(src_container,dst_container,item_id,count)` (`SELF` is allowed)
@@ -156,3 +169,7 @@ Contracts (Instants):
 ## 9. Rate Limits (defaults)
 
 在 `configs/tuning.yaml` 中可调。
+
+当触发 `E_RATE_LIMIT` 时，服务端会在 `ACTION_RESULT` event 中附带冷却信息：
+- `cooldown_ticks`: 距离下一次窗口重置还剩多少 ticks
+- `cooldown_until_tick`: 下一次窗口重置的 tick（client 可据此推算等待时间）

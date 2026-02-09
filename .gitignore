@@ -14,8 +14,9 @@ bin/
 *.jsonl.zst
 *.snap
 *.snap.zst
+*.sqlite
+*.db
 
 # Editors / OS
 .DS_Store
 .vscode/
-

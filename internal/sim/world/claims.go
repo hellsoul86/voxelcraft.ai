@@ -50,9 +50,15 @@ func (c *LandClaim) Contains(pos Vec3i) bool {
 	return dx <= c.Radius && dz <= c.Radius
 }
 
-func (c *LandClaim) CoreRadius() int {
-	// MVP default: fixed core radius, capped by land radius.
-	r := 16
+func (w *World) landCoreRadius(c *LandClaim) int {
+	// MVP default: fixed core radius (configurable), capped by land radius.
+	if c == nil {
+		return 0
+	}
+	r := w.cfg.AccessPassCoreRadius
+	if r <= 0 {
+		r = 16
+	}
 	if c.Radius < r {
 		r = c.Radius
 	}
@@ -62,9 +68,9 @@ func (c *LandClaim) CoreRadius() int {
 	return r
 }
 
-func (c *LandClaim) CoreContains(pos Vec3i) bool {
-	r := c.CoreRadius()
-	if r <= 0 {
+func (w *World) landCoreContains(c *LandClaim, pos Vec3i) bool {
+	r := w.landCoreRadius(c)
+	if r <= 0 || c == nil {
 		return false
 	}
 	dx := pos.X - c.Anchor.X

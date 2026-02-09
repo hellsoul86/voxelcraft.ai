@@ -51,11 +51,11 @@
         "recipes_digest": {"type": "string"},
         "blueprints_digest": {"type": "string"},
         "law_templates_digest": {"type": "string"},
-        "events_digest": {"type": "string"}
+        "events_digest": {"type": "string"},
+        "tuning_digest": {"type": "string"}
       },
       "additionalProperties": false
     }
   },
   "additionalProperties": false
 }
-

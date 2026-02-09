@@ -118,6 +118,17 @@ func (w *World) tickLaws(nowTick uint64) {
 				if yes > no {
 					if err := w.activateLaw(nowTick, law); err != nil {
 						law.Status = LawRejected
+						if land := w.claims[law.LandID]; land != nil {
+							w.auditEvent(nowTick, "WORLD", "LAW_REJECTED", land.Anchor, "ACTIVATE_FAILED", map[string]any{
+								"law_id":      law.LawID,
+								"land_id":     law.LandID,
+								"template_id": law.TemplateID,
+								"title":       law.Title,
+								"yes":         yes,
+								"no":          no,
+								"message":     err.Error(),
+							})
+						}
 						w.broadcastLawEvent(nowTick, "REJECTED", law, err.Error())
 						continue
 					}
@@ -125,9 +136,30 @@ func (w *World) tickLaws(nowTick uint64) {
 						w.funOnLawActive(proposer, nowTick)
 					}
 					law.Status = LawActive
+					if land := w.claims[law.LandID]; land != nil {
+						w.auditEvent(nowTick, "WORLD", "LAW_ACTIVE", land.Anchor, "VOTE_PASSED", map[string]any{
+							"law_id":      law.LawID,
+							"land_id":     law.LandID,
+							"template_id": law.TemplateID,
+							"title":       law.Title,
+							"yes":         yes,
+							"no":          no,
+							"params":      law.Params,
+						})
+					}
 					w.broadcastLawEvent(nowTick, "ACTIVE", law, "")
 				} else {
 					law.Status = LawRejected
+					if land := w.claims[law.LandID]; land != nil {
+						w.auditEvent(nowTick, "WORLD", "LAW_REJECTED", land.Anchor, "VOTE_FAILED", map[string]any{
+							"law_id":      law.LawID,
+							"land_id":     law.LandID,
+							"template_id": law.TemplateID,
+							"title":       law.Title,
+							"yes":         yes,
+							"no":          no,
+						})
+					}
 					w.broadcastLawEvent(nowTick, "REJECTED", law, "vote failed")
 				}
 			}

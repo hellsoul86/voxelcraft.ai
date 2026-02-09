@@ -1,0 +1,23 @@
+{
+  "id": "stone_wall_segment",
+  "author": "system",
+  "version": "0.9",
+  "aabb": [[0,0,0],[1,2,5]],
+  "cost": [
+    {"item":"STONE","count":10}
+  ],
+  "blocks": [
+    {"pos":[0,0,0],"block":"STONE"},
+    {"pos":[0,0,1],"block":"STONE"},
+    {"pos":[0,0,2],"block":"STONE"},
+    {"pos":[0,0,3],"block":"STONE"},
+    {"pos":[0,0,4],"block":"STONE"},
+
+    {"pos":[0,1,0],"block":"STONE"},
+    {"pos":[0,1,1],"block":"STONE"},
+    {"pos":[0,1,2],"block":"STONE"},
+    {"pos":[0,1,3],"block":"STONE"},
+    {"pos":[0,1,4],"block":"STONE"}
+  ]
+}
+

@@ -12,6 +12,10 @@ Run server:
 go run ./cmd/server -addr :8080 -world world_1 -seed 1337
 ```
 
+Runtime tuning:
+- Defaults live in `configs/tuning.yaml`
+- Override path via `-tuning /path/to/tuning.yaml`
+
 Resume from snapshots:
 - By default the server will load the latest snapshot under `data/worlds/<world>/snapshots/` if present.
 - To start fresh: `-load_latest_snapshot=false`
@@ -30,7 +34,8 @@ Endpoints:
 Persistence (defaults under `./data`):
 - tick log: `data/worlds/<world>/events/*.jsonl.zst`
 - audit log: `data/worlds/<world>/audit/*.jsonl.zst`
-- snapshots: `data/worlds/<world>/snapshots/*.snap.zst` (every 3000 ticks)
+- snapshots: `data/worlds/<world>/snapshots/*.snap.zst` (every `snapshot_every_ticks`, default 3000)
+- sqlite index (read model): `data/worlds/<world>/index/world.sqlite` (can be disabled via `-disable_db`)
 
 Admin tools:
 - Rollback a region using audit logs (offline):  

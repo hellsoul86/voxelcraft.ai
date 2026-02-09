@@ -90,6 +90,10 @@ type EntityObs struct {
 	Pos            [3]int   `json:"pos"`
 	Tags           []string `json:"tags,omitempty"`
 	ReputationHint float64  `json:"reputation_hint,omitempty"`
+
+	// Optional payload for specialized entity types (e.g. "ITEM").
+	Item  string `json:"item,omitempty"`
+	Count int    `json:"count,omitempty"`
 }
 
 type Event map[string]interface{}

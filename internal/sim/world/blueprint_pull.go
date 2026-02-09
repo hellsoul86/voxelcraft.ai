@@ -7,8 +7,6 @@ import (
 	"voxelcraft.ai/internal/sim/catalogs"
 )
 
-const blueprintAutoPullRange = 32
-
 type containerCand struct {
 	pos  Vec3i
 	typ  string
@@ -33,7 +31,7 @@ func (w *World) blueprintStorageCandidates(agentID string, anchor Vec3i) []conta
 			continue
 		}
 		d := Manhattan(pos, anchor)
-		if d > blueprintAutoPullRange {
+		if w.cfg.BlueprintAutoPullRange > 0 && d > w.cfg.BlueprintAutoPullRange {
 			continue
 		}
 

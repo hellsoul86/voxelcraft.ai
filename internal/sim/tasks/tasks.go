@@ -4,7 +4,9 @@ type Kind string
 
 const (
 	KindMoveTo         Kind = "MOVE_TO"
+	KindFollow         Kind = "FOLLOW"
 	KindMine           Kind = "MINE"
+	KindGather         Kind = "GATHER"
 	KindPlace          Kind = "PLACE"
 	KindOpen           Kind = "OPEN"
 	KindTransfer       Kind = "TRANSFER"
@@ -18,6 +20,8 @@ type MovementTask struct {
 	Kind        Kind
 	Target      Vec3i
 	Tolerance   float64
+	TargetID    string  // FOLLOW: entity/agent id
+	Distance    float64 // FOLLOW: desired distance
 	StartPos    Vec3i
 	StartedTick uint64
 }

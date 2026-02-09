@@ -36,6 +36,40 @@ func (w *World) ExportSnapshot(nowTick uint64) snapshot.SnapshotV1 {
 			}
 		}
 
+		var mem map[string]snapshot.MemoryEntryV1
+		if len(a.Memory) > 0 {
+			mem = map[string]snapshot.MemoryEntryV1{}
+			for k, e := range a.Memory {
+				if k == "" {
+					continue
+				}
+				if e.ExpiryTick != 0 && nowTick >= e.ExpiryTick {
+					continue
+				}
+				mem[k] = snapshot.MemoryEntryV1{Value: e.Value, ExpiryTick: e.ExpiryTick}
+			}
+			if len(mem) == 0 {
+				mem = nil
+			}
+		}
+
+		var rateWindows map[string]snapshot.RateWindowV1
+		if len(a.rl) > 0 {
+			rateWindows = map[string]snapshot.RateWindowV1{}
+			for k, rw := range a.rl {
+				if k == "" || rw == nil {
+					continue
+				}
+				if rw.Count <= 0 {
+					continue
+				}
+				rateWindows[k] = snapshot.RateWindowV1{StartTick: rw.StartTick, Count: rw.Count}
+			}
+			if len(rateWindows) == 0 {
+				rateWindows = nil
+			}
+		}
+
 		seenBiomes := []string{}
 		for b, ok := range a.seenBiomes {
 			if ok && b != "" {
@@ -79,6 +113,8 @@ func (w *World) ExportSnapshot(nowTick uint64) snapshot.SnapshotV1 {
 				Kind:        string(t.Kind),
 				Target:      [3]int{t.Target.X, t.Target.Y, t.Target.Z},
 				Tolerance:   t.Tolerance,
+				TargetID:    t.TargetID,
+				Distance:    t.Distance,
 				StartPos:    [3]int{t.StartPos.X, t.StartPos.Y, t.StartPos.Z},
 				StartedTick: t.StartedTick,
 			}
@@ -124,6 +160,8 @@ func (w *World) ExportSnapshot(nowTick uint64) snapshot.SnapshotV1 {
 			FunNarrative:  a.Fun.Narrative,
 			FunRiskRescue: a.Fun.RiskRescue,
 			Inventory:     inv,
+			Memory:        mem,
+			RateWindows:   rateWindows,
 			SeenBiomes:    seenBiomes,
 			SeenRecipes:   seenRecipes,
 			SeenEvents:    seenEvents,
@@ -223,6 +261,123 @@ func (w *World) ExportSnapshot(nowTick uint64) snapshot.SnapshotV1 {
 			Inventory: inv,
 			Reserved:  res,
 			Owed:      owed,
+		})
+	}
+
+	// Item entities (sorted by id).
+	itemIDs := make([]string, 0, len(w.items))
+	for id, e := range w.items {
+		if e == nil || e.Item == "" || e.Count <= 0 {
+			continue
+		}
+		if e.ExpiresTick != 0 && nowTick >= e.ExpiresTick {
+			continue
+		}
+		itemIDs = append(itemIDs, id)
+	}
+	sort.Strings(itemIDs)
+	itemSnaps := make([]snapshot.ItemEntityV1, 0, len(itemIDs))
+	for _, id := range itemIDs {
+		e := w.items[id]
+		if e == nil || e.Item == "" || e.Count <= 0 {
+			continue
+		}
+		if e.ExpiresTick != 0 && nowTick >= e.ExpiresTick {
+			continue
+		}
+		itemSnaps = append(itemSnaps, snapshot.ItemEntityV1{
+			EntityID:    e.EntityID,
+			Pos:         e.Pos.ToArray(),
+			Item:        e.Item,
+			Count:       e.Count,
+			CreatedTick: e.CreatedTick,
+			ExpiresTick: e.ExpiresTick,
+		})
+	}
+
+	// Signs (sorted by pos).
+	signPos := make([]Vec3i, 0, len(w.signs))
+	for p, s := range w.signs {
+		if s == nil {
+			continue
+		}
+		if w.blockName(w.chunks.GetBlock(p)) != "SIGN" {
+			continue
+		}
+		signPos = append(signPos, p)
+	}
+	sort.Slice(signPos, func(i, j int) bool {
+		if signPos[i].X != signPos[j].X {
+			return signPos[i].X < signPos[j].X
+		}
+		if signPos[i].Y != signPos[j].Y {
+			return signPos[i].Y < signPos[j].Y
+		}
+		return signPos[i].Z < signPos[j].Z
+	})
+	signSnaps := make([]snapshot.SignV1, 0, len(signPos))
+	for _, p := range signPos {
+		s := w.signs[p]
+		if s == nil {
+			continue
+		}
+		signSnaps = append(signSnaps, snapshot.SignV1{
+			Pos:         p.ToArray(),
+			Text:        s.Text,
+			UpdatedTick: s.UpdatedTick,
+			UpdatedBy:   s.UpdatedBy,
+		})
+	}
+
+	// Conveyors (sorted by pos).
+	conveyorPos := make([]Vec3i, 0, len(w.conveyors))
+	for p := range w.conveyors {
+		if w.blockName(w.chunks.GetBlock(p)) != "CONVEYOR" {
+			continue
+		}
+		conveyorPos = append(conveyorPos, p)
+	}
+	sort.Slice(conveyorPos, func(i, j int) bool {
+		if conveyorPos[i].X != conveyorPos[j].X {
+			return conveyorPos[i].X < conveyorPos[j].X
+		}
+		if conveyorPos[i].Y != conveyorPos[j].Y {
+			return conveyorPos[i].Y < conveyorPos[j].Y
+		}
+		return conveyorPos[i].Z < conveyorPos[j].Z
+	})
+	conveyorSnaps := make([]snapshot.ConveyorV1, 0, len(conveyorPos))
+	for _, p := range conveyorPos {
+		m := w.conveyors[p]
+		conveyorSnaps = append(conveyorSnaps, snapshot.ConveyorV1{
+			Pos: p.ToArray(),
+			DX:  int(m.DX),
+			DZ:  int(m.DZ),
+		})
+	}
+
+	// Switches (sorted by pos).
+	switchPos := make([]Vec3i, 0, len(w.switches))
+	for p := range w.switches {
+		if w.blockName(w.chunks.GetBlock(p)) != "SWITCH" {
+			continue
+		}
+		switchPos = append(switchPos, p)
+	}
+	sort.Slice(switchPos, func(i, j int) bool {
+		if switchPos[i].X != switchPos[j].X {
+			return switchPos[i].X < switchPos[j].X
+		}
+		if switchPos[i].Y != switchPos[j].Y {
+			return switchPos[i].Y < switchPos[j].Y
+		}
+		return switchPos[i].Z < switchPos[j].Z
+	})
+	switchSnaps := make([]snapshot.SwitchV1, 0, len(switchPos))
+	for _, p := range switchPos {
+		switchSnaps = append(switchSnaps, snapshot.SwitchV1{
+			Pos: p.ToArray(),
+			On:  w.switches[p],
 		})
 	}
 
@@ -429,6 +584,7 @@ func (w *World) ExportSnapshot(nowTick uint64) snapshot.SnapshotV1 {
 			BlueprintID:      s.BlueprintID,
 			BuilderID:        s.BuilderID,
 			Anchor:           s.Anchor.ToArray(),
+			Rotation:         s.Rotation,
 			Min:              s.Min.ToArray(),
 			Max:              s.Max.ToArray(),
 			CompletedTick:    s.CompletedTick,
@@ -471,33 +627,75 @@ func (w *World) ExportSnapshot(nowTick uint64) snapshot.SnapshotV1 {
 		}
 	}
 
+	var maintCost map[string]int
+	if len(w.cfg.MaintenanceCost) > 0 {
+		maintCost = map[string]int{}
+		for k, v := range w.cfg.MaintenanceCost {
+			if k != "" && v != 0 {
+				maintCost[k] = v
+			}
+		}
+		if len(maintCost) == 0 {
+			maintCost = nil
+		}
+	}
+
 	return snapshot.SnapshotV1{
 		Header: snapshot.Header{
 			Version: 1,
 			WorldID: w.cfg.ID,
 			Tick:    nowTick,
 		},
-		Seed:             w.cfg.Seed,
-		TickRate:         w.cfg.TickRateHz,
-		DayTicks:         w.cfg.DayTicks,
-		ObsRadius:        w.cfg.ObsRadius,
-		Height:           w.cfg.Height,
-		BoundaryR:        w.cfg.BoundaryR,
-		Weather:          w.weather,
-		WeatherUntilTick: w.weatherUntilTick,
-		ActiveEventID:    w.activeEventID,
-		ActiveEventEnds:  w.activeEventEnds,
-		Chunks:           chunks,
-		Agents:           agentSnaps,
-		Claims:           claimSnaps,
-		Containers:       containerSnaps,
-		Trades:           tradeSnaps,
-		Boards:           boardSnaps,
-		Contracts:        contractSnaps,
-		Laws:             lawSnaps,
-		Orgs:             orgSnaps,
-		Structures:       structSnaps,
-		Stats:            statsSnap,
+		Seed:               w.cfg.Seed,
+		TickRate:           w.cfg.TickRateHz,
+		DayTicks:           w.cfg.DayTicks,
+		SeasonLengthTicks:  w.cfg.SeasonLengthTicks,
+		ObsRadius:          w.cfg.ObsRadius,
+		Height:             w.cfg.Height,
+		BoundaryR:          w.cfg.BoundaryR,
+		SnapshotEveryTicks: w.cfg.SnapshotEveryTicks,
+		DirectorEveryTicks: w.cfg.DirectorEveryTicks,
+		RateLimits: snapshot.RateLimitsV1{
+			SayWindowTicks:        w.cfg.RateLimits.SayWindowTicks,
+			SayMax:                w.cfg.RateLimits.SayMax,
+			WhisperWindowTicks:    w.cfg.RateLimits.WhisperWindowTicks,
+			WhisperMax:            w.cfg.RateLimits.WhisperMax,
+			OfferTradeWindowTicks: w.cfg.RateLimits.OfferTradeWindowTicks,
+			OfferTradeMax:         w.cfg.RateLimits.OfferTradeMax,
+			PostBoardWindowTicks:  w.cfg.RateLimits.PostBoardWindowTicks,
+			PostBoardMax:          w.cfg.RateLimits.PostBoardMax,
+		},
+		LawNoticeTicks:         w.cfg.LawNoticeTicks,
+		LawVoteTicks:           w.cfg.LawVoteTicks,
+		BlueprintAutoPullRange: w.cfg.BlueprintAutoPullRange,
+		BlueprintBlocksPerTick: w.cfg.BlueprintBlocksPerTick,
+		AccessPassCoreRadius:   w.cfg.AccessPassCoreRadius,
+		MaintenanceCost:        maintCost,
+		FunDecayWindowTicks:    w.cfg.FunDecayWindowTicks,
+		FunDecayBase:           w.cfg.FunDecayBase,
+		StructureSurvivalTicks: w.cfg.StructureSurvivalTicks,
+		Weather:                w.weather,
+		WeatherUntilTick:       w.weatherUntilTick,
+		ActiveEventID:          w.activeEventID,
+		ActiveEventStart:       w.activeEventStart,
+		ActiveEventEnds:        w.activeEventEnds,
+		ActiveEventCenter:      w.activeEventCenter.ToArray(),
+		ActiveEventRadius:      w.activeEventRadius,
+		Chunks:                 chunks,
+		Agents:                 agentSnaps,
+		Claims:                 claimSnaps,
+		Containers:             containerSnaps,
+		Items:                  itemSnaps,
+		Signs:                  signSnaps,
+		Conveyors:              conveyorSnaps,
+		Switches:               switchSnaps,
+		Trades:                 tradeSnaps,
+		Boards:                 boardSnaps,
+		Contracts:              contractSnaps,
+		Laws:                   lawSnaps,
+		Orgs:                   orgSnaps,
+		Structures:             structSnaps,
+		Stats:                  statsSnap,
 		Counters: snapshot.CountersV1{
 			NextAgent:    w.nextAgentNum.Load(),
 			NextTask:     w.nextTaskNum.Load(),
@@ -507,6 +705,7 @@ func (w *World) ExportSnapshot(nowTick uint64) snapshot.SnapshotV1 {
 			NextContract: w.nextContractNum.Load(),
 			NextLaw:      w.nextLawNum.Load(),
 			NextOrg:      w.nextOrgNum.Load(),
+			NextItem:     w.nextItemNum.Load(),
 		},
 	}
 }
