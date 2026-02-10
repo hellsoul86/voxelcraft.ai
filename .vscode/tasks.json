@@ -1,0 +1,79 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "ai: dev (server + bot1)",
+      "type": "shell",
+      "command": "echo",
+      "args": ["ai dev tasks started"],
+      "dependsOn": ["ai: server (go run)", "ai: bot (bot1)"],
+      "dependsOrder": "sequence",
+      "problemMatcher": []
+    },
+    {
+      "label": "ai: server (go run)",
+      "type": "shell",
+      "command": "go",
+      "args": ["run", "./cmd/server", "-addr", ":8080", "-world", "world_1", "-seed", "1337"],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "isBackground": true,
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated"
+      },
+      "problemMatcher": {
+        "owner": "voxelcraft.ai",
+        "pattern": [
+          {
+            "regexp": ".*"
+          }
+        ],
+        "background": {
+          "activeOnStart": true,
+          "beginsPattern": ".*",
+          "endsPattern": ".*listening on.*"
+        }
+      }
+    },
+    {
+      "label": "ai: bot (bot1)",
+      "type": "shell",
+      "command": "go",
+      "args": ["run", "./cmd/bot", "-url", "ws://localhost:8080/v1/ws", "-name", "bot1"],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "isBackground": true,
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated"
+      },
+      "problemMatcher": {
+        "owner": "voxelcraft.ai.bot",
+        "pattern": [
+          {
+            "regexp": ".*"
+          }
+        ],
+        "background": {
+          "activeOnStart": true,
+          "beginsPattern": ".*",
+          "endsPattern": ".*WELCOME.*"
+        }
+      }
+    },
+    {
+      "label": "ai: test",
+      "type": "shell",
+      "command": "go",
+      "args": ["test", "./..."],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "group": "test",
+      "problemMatcher": []
+    }
+  ]
+}

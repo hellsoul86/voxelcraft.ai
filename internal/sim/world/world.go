@@ -224,6 +224,11 @@ type World struct {
 	leave  chan string
 	stop   chan struct{}
 
+	// Observer (admin-only, read-only)
+	observerJoin  chan ObserverJoinRequest
+	observerSub   chan ObserverSubscribeRequest
+	observerLeave chan string
+
 	nextAgentNum    atomic.Uint64
 	nextTaskNum     atomic.Uint64
 	nextLandNum     atomic.Uint64
@@ -254,6 +259,11 @@ type World struct {
 
 	// Fun-score: track blueprinted structures for delayed awards + usage/influence.
 	structures map[string]*Structure
+
+	// Observer sessions (admin-only, read-only).
+	observers map[string]*observerClient
+	// Per-tick audit events for observers (captured via auditSetBlock).
+	obsAuditsThisTick []AuditEntry
 }
 
 type TickLogger interface {
@@ -339,33 +349,37 @@ func New(cfg WorldConfig, cats *catalogs.Catalogs) (*World, error) {
 	}
 
 	w := &World{
-		cfg:          cfg,
-		catalogs:     cats,
-		chunks:       NewChunkStore(gen),
-		smeltByInput: smeltByInput,
-		agents:       map[string]*Agent{},
-		clients:      map[string]*clientState{},
-		claims:       map[string]*LandClaim{},
-		containers:   map[Vec3i]*Container{},
-		items:        map[string]*ItemEntity{},
-		itemsAt:      map[Vec3i][]string{},
-		conveyors:    map[Vec3i]ConveyorMeta{},
-		switches:     map[Vec3i]bool{},
-		trades:       map[string]*Trade{},
-		boards:       map[string]*Board{},
-		signs:        map[Vec3i]*Sign{},
-		contracts:    map[string]*Contract{},
-		laws:         map[string]*Law{},
-		orgs:         map[string]*Organization{},
-		inbox:        make(chan ActionEnvelope, 1024),
-		join:         make(chan JoinRequest, 64),
-		attach:       make(chan AttachRequest, 64),
-		admin:        make(chan adminSnapshotReq, 16),
-		leave:        make(chan string, 64),
-		stop:         make(chan struct{}),
-		weather:      "CLEAR",
-		stats:        NewWorldStats(300, 72000),
-		structures:   map[string]*Structure{},
+		cfg:           cfg,
+		catalogs:      cats,
+		chunks:        NewChunkStore(gen),
+		smeltByInput:  smeltByInput,
+		agents:        map[string]*Agent{},
+		clients:       map[string]*clientState{},
+		claims:        map[string]*LandClaim{},
+		containers:    map[Vec3i]*Container{},
+		items:         map[string]*ItemEntity{},
+		itemsAt:       map[Vec3i][]string{},
+		conveyors:     map[Vec3i]ConveyorMeta{},
+		switches:      map[Vec3i]bool{},
+		trades:        map[string]*Trade{},
+		boards:        map[string]*Board{},
+		signs:         map[Vec3i]*Sign{},
+		contracts:     map[string]*Contract{},
+		laws:          map[string]*Law{},
+		orgs:          map[string]*Organization{},
+		inbox:         make(chan ActionEnvelope, 1024),
+		join:          make(chan JoinRequest, 64),
+		attach:        make(chan AttachRequest, 64),
+		admin:         make(chan adminSnapshotReq, 16),
+		leave:         make(chan string, 64),
+		stop:          make(chan struct{}),
+		observerJoin:  make(chan ObserverJoinRequest, 16),
+		observerSub:   make(chan ObserverSubscribeRequest, 64),
+		observerLeave: make(chan string, 16),
+		weather:       "CLEAR",
+		stats:         NewWorldStats(300, 72000),
+		structures:    map[string]*Structure{},
+		observers:     map[string]*observerClient{},
 	}
 	return w, nil
 }
@@ -378,6 +392,10 @@ func (w *World) Inbox() chan<- ActionEnvelope { return w.inbox }
 func (w *World) Join() chan<- JoinRequest     { return w.join }
 func (w *World) Attach() chan<- AttachRequest { return w.attach }
 func (w *World) Leave() chan<- string         { return w.leave }
+
+func (w *World) ObserverJoin() chan<- ObserverJoinRequest           { return w.observerJoin }
+func (w *World) ObserverSubscribe() chan<- ObserverSubscribeRequest { return w.observerSub }
+func (w *World) ObserverLeave() chan<- string                       { return w.observerLeave }
 
 func (w *World) CurrentTick() uint64 { return w.tick.Load() }
 
@@ -403,6 +421,12 @@ func (w *World) Run(ctx context.Context) error {
 			w.handleAttach(req)
 		case id := <-w.leave:
 			pendingLeaves = append(pendingLeaves, id)
+		case req := <-w.observerJoin:
+			w.handleObserverJoin(req)
+		case req := <-w.observerSub:
+			w.handleObserverSubscribe(req)
+		case id := <-w.observerLeave:
+			w.handleObserverLeave(id)
 		case req := <-w.admin:
 			pendingAdmin = append(pendingAdmin, req)
 		case env := <-w.inbox:
@@ -639,6 +663,9 @@ func (w *World) step(joins []JoinRequest, leaves []string, actions []ActionEnvel
 	stepStart := time.Now()
 	nowTick := w.tick.Load()
 
+	// Reset per-tick observer audit buffer (filled by auditSetBlock).
+	w.obsAuditsThisTick = w.obsAuditsThisTick[:0]
+
 	// Season rollover happens at tick boundaries before processing joins/leaves/actions for this tick.
 	w.maybeSeasonRollover(nowTick)
 
@@ -700,6 +727,9 @@ func (w *World) step(joins []JoinRequest, leaves []string, actions []ActionEnvel
 		}
 		sendLatest(cl.Out, b)
 	}
+
+	// Observer stream (admin-only, read-only).
+	w.stepObservers(nowTick, recordedJoins, recordedLeaves, recorded)
 
 	digest := w.stateDigest(nowTick)
 	if w.tickLogger != nil {
@@ -2488,16 +2518,20 @@ func (w *World) systemMovement(nowTick uint64) {
 		}
 		var target Vec3i
 		switch mt.Kind {
-		case tasks.KindMoveTo:
-			target = v3FromTask(mt.Target)
-			if Manhattan(a.Pos, target) <= 1 {
-				a.Pos = Vec3i{X: target.X, Y: w.surfaceY(target.X, target.Z), Z: target.Z}
-				w.recordStructureUsage(a.ID, a.Pos, nowTick)
-				w.funOnBiome(a, nowTick)
-				a.MoveTask = nil
-				a.AddEvent(protocol.Event{"t": nowTick, "type": "TASK_DONE", "task_id": mt.TaskID, "kind": string(mt.Kind)})
-				continue
-			}
+	case tasks.KindMoveTo:
+		target = v3FromTask(mt.Target)
+		want := int(math.Ceil(mt.Tolerance))
+		if want < 1 {
+			want = 1
+		}
+		// Complete when within tolerance; do not teleport to the exact target to avoid skipping obstacles.
+		if distXZ(a.Pos, target) <= want {
+			w.recordStructureUsage(a.ID, a.Pos, nowTick)
+			w.funOnBiome(a, nowTick)
+			a.MoveTask = nil
+			a.AddEvent(protocol.Event{"t": nowTick, "type": "TASK_DONE", "task_id": mt.TaskID, "kind": string(mt.Kind)})
+			continue
+		}
 
 		case tasks.KindFollow:
 			t, ok := w.followTargetPos(mt.TargetID)
@@ -2541,18 +2575,54 @@ func (w *World) systemMovement(nowTick uint64) {
 		}
 		a.StaminaMilli -= moveCost
 
+		// Deterministic 2.5D stepping with minimal obstacle avoidance:
+		// - Pick primary axis by abs(dx)>=abs(dz)
+		// - If the next cell on the primary axis is blocked by a solid block, try the secondary axis.
+		dx := target.X - a.Pos.X
+		dz := target.Z - a.Pos.Z
+
+		primaryX := abs(dx) >= abs(dz)
 		next := a.Pos
-		// Prefer X then Z steps (deterministic).
-		if target.X > a.Pos.X {
-			next.X++
-		} else if target.X < a.Pos.X {
-			next.X--
-		} else if target.Z > a.Pos.Z {
-			next.Z++
-		} else if target.Z < a.Pos.Z {
-			next.Z--
+		next1 := a.Pos
+		if primaryX {
+			if dx > 0 {
+				next1.X++
+			} else if dx < 0 {
+				next1.X--
+			}
+		} else {
+			if dz > 0 {
+				next1.Z++
+			} else if dz < 0 {
+				next1.Z--
+			}
 		}
-		next.Y = w.surfaceY(next.X, next.Z)
+		next1.Y = w.surfaceY(next1.X, next1.Z)
+		next = next1
+
+		if w.blockSolid(w.chunks.GetBlock(next1)) {
+			// Try the secondary axis only when primary step is blocked.
+			next2 := a.Pos
+			if primaryX {
+				if dz > 0 {
+					next2.Z++
+				} else if dz < 0 {
+					next2.Z--
+				}
+			} else {
+				if dx > 0 {
+					next2.X++
+				} else if dx < 0 {
+					next2.X--
+				}
+			}
+			if next2 != a.Pos {
+				next2.Y = w.surfaceY(next2.X, next2.Z)
+				if !w.blockSolid(w.chunks.GetBlock(next2)) {
+					next = next2
+				}
+			}
+		}
 
 		// Reputation consequence: low Law rep agents may be blocked from entering a CITY core area.
 		// This is a system-level "wanted" restriction separate from access passes.
@@ -3158,12 +3228,21 @@ func (w *World) tickBuildBlueprint(a *Agent, wt *tasks.WorkTask, nowTick uint64)
 	// On first tick, validate cost.
 	if wt.BuildIndex == 0 && wt.WorkTicks == 0 {
 		// Preflight: space + permission check so we don't consume materials and then fail immediately.
+		// Also allow resuming: if a target cell already contains the correct block, treat it as satisfied.
+		alreadyCorrect := map[string]int{}
+		correct := 0
 		for _, p := range bp.Blocks {
 			off := rotateOffset(p.Pos, rot)
 			pos := Vec3i{
 				X: anchor.X + off[0],
 				Y: anchor.Y + off[1],
 				Z: anchor.Z + off[2],
+			}
+			bid, ok := w.catalogs.Blocks.Index[p.Block]
+			if !ok {
+				a.WorkTask = nil
+				a.AddEvent(protocol.Event{"t": nowTick, "type": "TASK_FAIL", "task_id": wt.TaskID, "code": "E_INTERNAL", "message": "unknown block in blueprint"})
+				return
 			}
 			if !w.canBuildAt(a.ID, pos, nowTick) {
 				a.WorkTask = nil
@@ -3174,16 +3253,50 @@ func (w *World) tickBuildBlueprint(a *Agent, wt *tasks.WorkTask, nowTick uint64)
 				a.AddEvent(protocol.Event{"t": nowTick, "type": "TASK_FAIL", "task_id": wt.TaskID, "code": "E_NO_PERMISSION", "message": "build denied"})
 				return
 			}
-			if w.chunks.GetBlock(pos) != w.chunks.gen.Air {
+			cur := w.chunks.GetBlock(pos)
+			if cur != w.chunks.gen.Air {
+				if cur == bid {
+					alreadyCorrect[p.Block]++
+					correct++
+					continue
+				}
 				a.WorkTask = nil
 				a.AddEvent(protocol.Event{"t": nowTick, "type": "TASK_FAIL", "task_id": wt.TaskID, "code": "E_BLOCKED", "message": "space occupied"})
 				return
 			}
 		}
+
+		// Anti-exploit: if the entire blueprint is already present, treat as no-op completion
+		// (no cost, no structure registration, no fun/stats).
+		if correct == len(bp.Blocks) {
+			a.WorkTask = nil
+			a.AddEvent(protocol.Event{"t": nowTick, "type": "TASK_DONE", "task_id": wt.TaskID, "kind": string(wt.Kind)})
+			return
+		}
+
+		// Charge only for the remaining required materials (best-effort: subtract already-correct blocks by id).
+		needCost := make([]catalogs.ItemCount, 0, len(bp.Cost))
 		for _, c := range bp.Cost {
+			if strings.TrimSpace(c.Item) == "" || c.Count <= 0 {
+				continue
+			}
+			n := c.Count
+			if k := alreadyCorrect[c.Item]; k > 0 {
+				if k >= n {
+					n = 0
+				} else {
+					n -= k
+				}
+			}
+			if n > 0 {
+				needCost = append(needCost, catalogs.ItemCount{Item: c.Item, Count: n})
+			}
+		}
+
+		for _, c := range needCost {
 			if a.Inventory[c.Item] < c.Count {
 				// Try auto-pull from nearby storage (same land, within range) if possible.
-				if ok, msg := w.blueprintEnsureMaterials(a, anchor, bp.Cost, nowTick); !ok {
+				if ok, msg := w.blueprintEnsureMaterials(a, anchor, needCost, nowTick); !ok {
 					a.WorkTask = nil
 					if msg == "" {
 						msg = "missing materials"
@@ -3194,7 +3307,7 @@ func (w *World) tickBuildBlueprint(a *Agent, wt *tasks.WorkTask, nowTick uint64)
 				break
 			}
 		}
-		for _, c := range bp.Cost {
+		for _, c := range needCost {
 			a.Inventory[c.Item] -= c.Count
 		}
 	}
@@ -3228,7 +3341,12 @@ func (w *World) tickBuildBlueprint(a *Agent, wt *tasks.WorkTask, nowTick uint64)
 			a.AddEvent(protocol.Event{"t": nowTick, "type": "TASK_FAIL", "task_id": wt.TaskID, "code": "E_NO_PERMISSION", "message": "build denied"})
 			return
 		}
-		if w.chunks.GetBlock(pos) != w.chunks.gen.Air {
+		cur := w.chunks.GetBlock(pos)
+		if cur != w.chunks.gen.Air {
+			if cur == bid {
+				wt.BuildIndex++
+				continue
+			}
 			a.WorkTask = nil
 			a.AddEvent(protocol.Event{"t": nowTick, "type": "TASK_FAIL", "task_id": wt.TaskID, "code": "E_BLOCKED", "message": "space occupied"})
 			return
@@ -3575,11 +3693,34 @@ func (w *World) buildObs(a *Agent, cl *clientState, nowTick uint64) protocol.Obs
 			})
 		} else {
 			start := v3FromTask(mt.StartPos)
-			eta := Manhattan(a.Pos, target)
+			want := int(math.Ceil(mt.Tolerance))
+			if want < 1 {
+				want = 1
+			}
+			distStart := distXZ(start, target)
+			distCur := distXZ(a.Pos, target)
+			totalEff := distStart - want
+			if totalEff < 0 {
+				totalEff = 0
+			}
+			remEff := distCur - want
+			if remEff < 0 {
+				remEff = 0
+			}
+			prog := 1.0
+			if totalEff > 0 {
+				prog = float64(totalEff-remEff) / float64(totalEff)
+				if prog < 0 {
+					prog = 0
+				} else if prog > 1 {
+					prog = 1
+				}
+			}
+			eta := remEff
 			tasksObs = append(tasksObs, protocol.TaskObs{
 				TaskID:   mt.TaskID,
 				Kind:     string(mt.Kind),
-				Progress: taskProgress(start, a.Pos, target),
+				Progress: prog,
 				Target:   target.ToArray(),
 				EtaTicks: eta,
 			})
@@ -4003,10 +4144,7 @@ func (w *World) blockSolid(b uint16) bool {
 }
 
 func (w *World) auditSetBlock(tick uint64, actor string, pos Vec3i, from, to uint16, reason string) {
-	if w.auditLogger == nil {
-		return
-	}
-	_ = w.auditLogger.WriteAudit(AuditEntry{
+	entry := AuditEntry{
 		Tick:   tick,
 		Actor:  actor,
 		Action: "SET_BLOCK",
@@ -4014,7 +4152,13 @@ func (w *World) auditSetBlock(tick uint64, actor string, pos Vec3i, from, to uin
 		From:   from,
 		To:     to,
 		Reason: reason,
-	})
+	}
+	if w.auditLogger != nil {
+		_ = w.auditLogger.WriteAudit(entry)
+	}
+	if len(w.observers) > 0 {
+		w.obsAuditsThisTick = append(w.obsAuditsThisTick, entry)
+	}
 }
 
 func (w *World) auditEvent(tick uint64, actor string, action string, pos Vec3i, reason string, details map[string]any) {

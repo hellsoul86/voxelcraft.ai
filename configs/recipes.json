@@ -32,6 +32,30 @@
     "time_ticks":5
   },
   {
+    "recipe_id":"chest",
+    "station":"CRAFTING_BENCH",
+    "inputs":[{"item":"PLANK","count":8}],
+    "outputs":[{"item":"CHEST","count":1}],
+    "tier":1,
+    "time_ticks":5
+  },
+  {
+    "recipe_id":"sign",
+    "station":"CRAFTING_BENCH",
+    "inputs":[{"item":"PLANK","count":2},{"item":"STICK","count":1}],
+    "outputs":[{"item":"SIGN","count":1}],
+    "tier":1,
+    "time_ticks":5
+  },
+  {
+    "recipe_id":"bulletin_board",
+    "station":"CRAFTING_BENCH",
+    "inputs":[{"item":"PLANK","count":4},{"item":"STICK","count":2}],
+    "outputs":[{"item":"BULLETIN_BOARD","count":1}],
+    "tier":1,
+    "time_ticks":5
+  },
+  {
     "recipe_id":"wood_pickaxe",
     "station":"CRAFTING_BENCH",
     "inputs":[{"item":"PLANK","count":3},{"item":"STICK","count":2}],
@@ -164,6 +188,14 @@
     "station":"CRAFTING_BENCH",
     "inputs":[{"item":"WIRE","count":2},{"item":"BATTERY","count":1},{"item":"CRYSTAL_SHARD","count":1}],
     "outputs":[{"item":"SENSOR","count":1}],
+    "tier":3,
+    "time_ticks":5
+  },
+  {
+    "recipe_id":"switch",
+    "station":"CRAFTING_BENCH",
+    "inputs":[{"item":"WIRE","count":1},{"item":"PLANK","count":1}],
+    "outputs":[{"item":"SWITCH","count":1}],
     "tier":3,
     "time_ticks":5
   },

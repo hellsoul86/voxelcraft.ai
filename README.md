@@ -47,12 +47,15 @@ Endpoints:
 - `GET /metrics` (Prometheus text)
 - `GET /admin/v1/state` (loopback-only)
 - `POST /admin/v1/snapshot` (loopback-only; force a snapshot)
+- `GET /admin/v1/observer/bootstrap` (loopback-only; observer bootstrap)
+- `WS /admin/v1/observer/ws` (loopback-only; observer stream)
 - `GET /debug/pprof/` (pprof)
 
 Local admin smoke test:
 ```bash
 curl -s http://127.0.0.1:8080/admin/v1/state | jq .
 curl -s -XPOST http://127.0.0.1:8080/admin/v1/snapshot | jq .
+curl -s http://127.0.0.1:8080/admin/v1/observer/bootstrap | jq .
 ```
 
 Or via CLI:
@@ -70,6 +73,11 @@ Persistence (defaults under `./data`):
 Admin tools:
 - Rollback a region using audit logs (offline):  
   `go run ./cmd/admin rollback -data ./data -world world_1 -aabb 0,0,0:32,64,32 -since_tick 10000`
+
+Rollback limitations (v0.9):
+- Rollback currently reverts **only** `SET_BLOCK` (voxel edits) from the audit log.
+- It does **not** rollback container inventories, trades, contracts, org treasuries, dropped item entities, etc.
+- `-only_illegal` is not supported (illegal edits are rejected before audit logging).
 
 ## Protocol
 - WebSocket endpoint: `/v1/ws`

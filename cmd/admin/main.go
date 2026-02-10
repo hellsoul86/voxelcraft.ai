@@ -67,7 +67,7 @@ func rollbackCmd(args []string) {
 	sinceTick := fs.Uint64("since_tick", 0, "rollback changes since tick (inclusive)")
 	toTick := fs.Uint64("to_tick", 0, "rollback changes up to tick (inclusive, optional; defaults to snapshot tick)")
 	outPath := fs.String("out", "", "output snapshot path (optional)")
-	onlyIllegal := fs.Bool("only_illegal", false, "rollback only illegal operations (MVP: no-op; illegal operations are rejected before audit)")
+	onlyIllegal := fs.Bool("only_illegal", false, "rollback only illegal operations (unsupported in v0.9; illegal edits are rejected before audit)")
 	_ = fs.Parse(args)
 
 	if strings.TrimSpace(*worldID) == "" {
@@ -76,6 +76,10 @@ func rollbackCmd(args []string) {
 	}
 	if strings.TrimSpace(*aabb) == "" {
 		fmt.Fprintln(os.Stderr, "missing -aabb")
+		os.Exit(2)
+	}
+	if *onlyIllegal {
+		fmt.Fprintln(os.Stderr, "error: -only_illegal is not supported in v0.9 (illegal edits are rejected before audit logging)")
 		os.Exit(2)
 	}
 
@@ -104,9 +108,6 @@ func rollbackCmd(args []string) {
 	endTick := *toTick
 	if endTick == 0 || endTick > snap.Header.Tick {
 		endTick = snap.Header.Tick
-	}
-	if *onlyIllegal {
-		fmt.Fprintln(os.Stderr, "note: -only_illegal is effectively a no-op in MVP; illegal edits are rejected before audit logging")
 	}
 
 	recs, err := readAudit(worldDir, *sinceTick, endTick, min, max)

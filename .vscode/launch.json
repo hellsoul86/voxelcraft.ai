@@ -1,0 +1,15 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Debug voxelcraft.ai (server)",
+      "type": "go",
+      "request": "launch",
+      "mode": "auto",
+      "program": "${workspaceFolder}/cmd/server",
+      "cwd": "${workspaceFolder}",
+      "args": ["-addr", ":8080", "-world", "world_1", "-seed", "1337"]
+    }
+  ]
+}
+

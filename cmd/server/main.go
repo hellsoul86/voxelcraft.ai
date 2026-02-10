@@ -24,6 +24,7 @@ import (
 	"voxelcraft.ai/internal/sim/catalogs"
 	"voxelcraft.ai/internal/sim/tuning"
 	"voxelcraft.ai/internal/sim/world"
+	"voxelcraft.ai/internal/transport/observer"
 	"voxelcraft.ai/internal/transport/ws"
 )
 
@@ -330,6 +331,10 @@ func main() {
 		}
 		_ = json.NewEncoder(rw).Encode(map[string]any{"ok": true, "tick": tick})
 	})
+
+	obsSrv := observer.NewServer(w, logger)
+	mux.HandleFunc("/admin/v1/observer/bootstrap", obsSrv.BootstrapHandler())
+	mux.HandleFunc("/admin/v1/observer/ws", obsSrv.WSHandler())
 	mux.HandleFunc("/debug/pprof/", pprof.Index)
 	mux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
 	mux.HandleFunc("/debug/pprof/profile", pprof.Profile)

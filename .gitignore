@@ -19,4 +19,6 @@ bin/
 
 # Editors / OS
 .DS_Store
-.vscode/
+.vscode/*
+!.vscode/tasks.json
+!.vscode/launch.json
