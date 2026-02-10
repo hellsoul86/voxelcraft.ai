@@ -30,8 +30,8 @@ func TestClaimUpgrade_OwnerHappyPath(t *testing.T) {
 	a.Inventory["BATTERY"] = 2
 	a.Inventory["CRYSTAL_SHARD"] = 3
 
-	y := w.cfg.Height - 2
-	anchor := Vec3i{X: 0, Y: y, Z: 0}
+	anchor := Vec3i{X: 0, Y: 0, Z: 0}
+	setAir(w, anchor)
 
 	// Claim land.
 	w.step(nil, nil, []ActionEnvelope{{AgentID: a.ID, Act: protocol.ActMsg{
@@ -112,9 +112,10 @@ func TestClaimUpgrade_RequiresAdminAndNoOverlap(t *testing.T) {
 	a2.Inventory["BATTERY"] = 10
 	a2.Inventory["CRYSTAL_SHARD"] = 10
 
-	y := w.cfg.Height - 2
-	anchor1 := Vec3i{X: 0, Y: y, Z: 0}
-	anchor2 := Vec3i{X: 80, Y: y, Z: 0} // does not overlap at radius=32, but overlaps if anchor1 upgrades to 64
+	anchor1 := Vec3i{X: 0, Y: 0, Z: 0}
+	anchor2 := Vec3i{X: 80, Y: 0, Z: 0} // does not overlap at radius=32, but overlaps if anchor1 upgrades to 64
+	setAir(w, anchor1)
+	setAir(w, anchor2)
 
 	// Claim 1 (a1).
 	w.step(nil, nil, []ActionEnvelope{{AgentID: a1.ID, Act: protocol.ActMsg{
@@ -196,8 +197,8 @@ func TestClaimUpgrade_BlockedByMaintenanceStageAndMaterials(t *testing.T) {
 	a.Inventory["BATTERY"] = 1
 	a.Inventory["CRYSTAL_SHARD"] = 1
 
-	y := w.cfg.Height - 2
-	anchor := Vec3i{X: 0, Y: y, Z: 0}
+	anchor := Vec3i{X: 0, Y: 0, Z: 0}
+	setAir(w, anchor)
 
 	// Claim land.
 	w.step(nil, nil, []ActionEnvelope{{AgentID: a.ID, Act: protocol.ActMsg{

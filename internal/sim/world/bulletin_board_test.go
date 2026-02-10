@@ -17,7 +17,7 @@ func TestBulletinBoard_Physical_PostOpenAndPermissions(t *testing.T) {
 		TickRateHz: 5,
 		DayTicks:   6000,
 		ObsRadius:  7,
-		Height:     64,
+		Height:     1,
 		Seed:       42,
 		BoundaryR:  4000,
 	}, cats)

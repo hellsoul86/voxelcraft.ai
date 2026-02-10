@@ -17,7 +17,7 @@ func TestBuildBlueprint_ResumeByReissue_SkipsCorrectBlocks(t *testing.T) {
 		TickRateHz: 5,
 		DayTicks:   6000,
 		ObsRadius:  7,
-		Height:     64,
+		Height:     1,
 		Seed:       42,
 		BoundaryR:  4000,
 	}, cats)
@@ -36,7 +36,8 @@ func TestBuildBlueprint_ResumeByReissue_SkipsCorrectBlocks(t *testing.T) {
 	// Ensure enough materials across retries.
 	a.Inventory["PLANK"] = 20
 
-	anchor := Vec3i{X: a.Pos.X, Y: 40, Z: a.Pos.Z}
+	anchor := Vec3i{X: a.Pos.X, Y: 0, Z: a.Pos.Z}
+	clearBlueprintFootprint(t, w, "road_segment", anchor, 0)
 
 	// Start building and let the first tick place some blocks.
 	w.step(nil, nil, []ActionEnvelope{{AgentID: a.ID, Act: protocol.ActMsg{
@@ -82,4 +83,3 @@ func TestBuildBlueprint_ResumeByReissue_SkipsCorrectBlocks(t *testing.T) {
 		t.Fatalf("expected blueprint to be fully placed after re-issue")
 	}
 }
-

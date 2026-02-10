@@ -284,6 +284,11 @@ func loadBlueprints(dir string, out *BlueprintCatalog) error {
 		if bp.ID == "" {
 			return fmt.Errorf("blueprint %s: missing id", filepath.Base(p))
 		}
+		for i, blk := range bp.Blocks {
+			if blk.Pos[1] != 0 {
+				return fmt.Errorf("blueprint %s: blocks[%d] y must be 0 for 2D world (got %d)", filepath.Base(p), i, blk.Pos[1])
+			}
+		}
 		out.ByID[bp.ID] = bp
 	}
 	out.Digest = sha256Hex(concat.Bytes())

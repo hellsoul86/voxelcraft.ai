@@ -152,4 +152,3 @@ func TestSmelt_ConfigDrivenRecipes(t *testing.T) {
 		}
 	})
 }
-

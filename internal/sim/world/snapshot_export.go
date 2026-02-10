@@ -17,7 +17,7 @@ func (w *World) ExportSnapshot(nowTick uint64) snapshot.SnapshotV1 {
 		chunks = append(chunks, snapshot.ChunkV1{
 			CX:     k.CX,
 			CZ:     k.CZ,
-			Height: ch.Height,
+			Height: 1,
 			Blocks: blocks,
 		})
 	}

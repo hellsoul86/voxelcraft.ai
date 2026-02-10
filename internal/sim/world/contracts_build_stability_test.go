@@ -17,7 +17,7 @@ func TestContract_BuildRequiresStability(t *testing.T) {
 		TickRateHz: 5,
 		DayTicks:   6000,
 		ObsRadius:  7,
-		Height:     64,
+		Height:     1,
 		Seed:       7,
 		BoundaryR:  4000,
 	}, cats)
@@ -39,12 +39,10 @@ func TestContract_BuildRequiresStability(t *testing.T) {
 	w.ensureContainer(termPos, "CONTRACT_TERMINAL")
 	termID := containerID("CONTRACT_TERMINAL", termPos)
 
-	anchor := Vec3i{X: poster.Pos.X + 10, Y: poster.Pos.Y + 5, Z: poster.Pos.Z}
-	if got := w.chunks.GetBlock(anchor); got != w.chunks.gen.Air {
-		t.Fatalf("expected build anchor in air; got block=%q", w.blockName(got))
-	}
+	anchor := Vec3i{X: poster.Pos.X + 10, Y: 0, Z: poster.Pos.Z}
+	clearBlueprintFootprint(t, w, "road_segment", anchor, 0)
 
-	// Post a BUILD contract for a simple blueprint at a floating anchor (initially unstable).
+	// Post a BUILD contract for a simple blueprint.
 	poster.Inventory["PLANK"] = 20
 	w.applyInstant(poster, protocol.InstantReq{
 		ID:            "I_post",
@@ -79,6 +77,18 @@ func TestContract_BuildRequiresStability(t *testing.T) {
 		t.Fatalf("contract state=%s want %s", got, ContractAccepted)
 	}
 
+	// Submit before building: should fail.
+	builder.Events = nil
+	w.applyInstant(builder, protocol.InstantReq{
+		ID:         "I_submit_1",
+		Type:       "SUBMIT_CONTRACT",
+		TerminalID: termID,
+		ContractID: cid,
+	}, 2)
+	if got := w.contracts[cid].State; got != ContractAccepted {
+		t.Fatalf("contract state after early submit=%s want %s", got, ContractAccepted)
+	}
+
 	// Build the blueprint (floating).
 	w.applyTaskReq(builder, protocol.TaskReq{
 		ID:          "K_build",
@@ -94,45 +104,9 @@ func TestContract_BuildRequiresStability(t *testing.T) {
 		t.Fatalf("expected build to finish")
 	}
 
-	// Not stable: should not auto-complete and submit should fail.
+	// In 2D, all blueprint blocks are on the ground plane (y=0), so stability is always satisfied.
+	// Contracts should auto-complete once the blueprint is placed.
 	w.tickContracts(10)
-	if got := w.contracts[cid].State; got != ContractAccepted {
-		t.Fatalf("contract state after unstable build=%s want %s", got, ContractAccepted)
-	}
-	builder.Events = nil
-	w.applyInstant(builder, protocol.InstantReq{
-		ID:         "I_submit_1",
-		Type:       "SUBMIT_CONTRACT",
-		TerminalID: termID,
-		ContractID: cid,
-	}, 10)
-	if got := w.contracts[cid].State; got != ContractAccepted {
-		t.Fatalf("contract state after unstable submit=%s want %s", got, ContractAccepted)
-	}
-	foundBlocked := false
-	for _, ev := range builder.Events {
-		if ev["type"] != "ACTION_RESULT" || ev["ref"] != "I_submit_1" {
-			continue
-		}
-		if ok, _ := ev["ok"].(bool); ok {
-			continue
-		}
-		if ev["code"] == "E_BLOCKED" {
-			foundBlocked = true
-		}
-	}
-	if !foundBlocked {
-		t.Fatalf("expected E_BLOCKED action result; events=%v", builder.Events)
-	}
-
-	// Add a support block under the structure so stability passes.
-	stoneID, ok := w.catalogs.Blocks.Index["STONE"]
-	if !ok {
-		t.Fatalf("missing STONE block id")
-	}
-	w.chunks.SetBlock(Vec3i{X: anchor.X, Y: anchor.Y - 1, Z: anchor.Z}, stoneID)
-
-	w.tickContracts(11)
 	if got := w.contracts[cid].State; got != ContractCompleted {
 		t.Fatalf("contract state after support=%s want %s", got, ContractCompleted)
 	}

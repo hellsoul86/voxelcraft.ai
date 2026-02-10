@@ -66,8 +66,15 @@ func TestMining_ImplicitToolsAffectSpeedAndStamina(t *testing.T) {
 		if got := w.chunks.GetBlock(pos); got == stone {
 			t.Fatalf("expected stone mined on 10th tick")
 		}
-		if got := a.Inventory["STONE"]; got != 1 {
-			t.Fatalf("drop: STONE=%d want 1", got)
+		// Drop should be an ITEM entity at the mined position.
+		if ids := w.itemsAt[pos]; len(ids) == 0 {
+			t.Fatalf("expected item entity drop at mined pos")
+		} else {
+			id := ids[0]
+			e := w.items[id]
+			if e == nil || e.Item != "STONE" || e.Count != 1 {
+				t.Fatalf("unexpected drop entity: %+v", e)
+			}
 		}
 		if got, want := a.StaminaMilli, 1000-10*15; got != want {
 			t.Fatalf("stamina: got %d want %d", got, want)
@@ -100,12 +107,18 @@ func TestMining_ImplicitToolsAffectSpeedAndStamina(t *testing.T) {
 		if got := w.chunks.GetBlock(pos); got == stone {
 			t.Fatalf("expected stone mined on 4th tick with iron pickaxe")
 		}
-		if got := a.Inventory["STONE"]; got != 1 {
-			t.Fatalf("drop: STONE=%d want 1", got)
+		// Drop should be an ITEM entity at the mined position.
+		if ids := w.itemsAt[pos]; len(ids) == 0 {
+			t.Fatalf("expected item entity drop at mined pos")
+		} else {
+			id := ids[0]
+			e := w.items[id]
+			if e == nil || e.Item != "STONE" || e.Count != 1 {
+				t.Fatalf("unexpected drop entity: %+v", e)
+			}
 		}
 		if got, want := a.StaminaMilli, 1000-4*9; got != want {
 			t.Fatalf("stamina: got %d want %d", got, want)
 		}
 	})
 }
-

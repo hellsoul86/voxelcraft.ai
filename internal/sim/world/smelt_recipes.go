@@ -41,4 +41,3 @@ func buildSmeltByInput(recipes map[string]catalogs.RecipeDef) (map[string]catalo
 	}
 	return out, nil
 }
-

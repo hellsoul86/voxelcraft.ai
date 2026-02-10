@@ -17,7 +17,7 @@ func TestConveyor_SensorGatesEnable(t *testing.T) {
 		TickRateHz: 5,
 		DayTicks:   6000,
 		ObsRadius:  7,
-		Height:     64,
+		Height:     1,
 		Seed:       42,
 		BoundaryR:  4000,
 	}, cats)
@@ -34,15 +34,20 @@ func TestConveyor_SensorGatesEnable(t *testing.T) {
 	}
 
 	a.Yaw = 0 // +Z
-	y := w.cfg.Height - 2
-	pos := Vec3i{X: a.Pos.X, Y: y, Z: a.Pos.Z}
-	back := Vec3i{X: pos.X, Y: y, Z: pos.Z - 1}
-	front := Vec3i{X: pos.X, Y: y, Z: pos.Z + 1}
+	pos := Vec3i{X: a.Pos.X, Y: 0, Z: a.Pos.Z}
+	back := Vec3i{X: pos.X, Y: 0, Z: pos.Z - 1}
+	front := Vec3i{X: pos.X, Y: 0, Z: pos.Z + 1}
 
 	// Sensor is adjacent (east) of the conveyor.
-	sensorPos := Vec3i{X: pos.X + 1, Y: y, Z: pos.Z}
+	sensorPos := Vec3i{X: pos.X + 1, Y: 0, Z: pos.Z}
 	// Dummy chest adjacent (east) of the sensor to toggle it ON via inventory presence.
-	dummy := Vec3i{X: pos.X + 2, Y: y, Z: pos.Z}
+	dummy := Vec3i{X: pos.X + 2, Y: 0, Z: pos.Z}
+
+	w.chunks.SetBlock(pos, w.chunks.gen.Air)
+	w.chunks.SetBlock(back, w.chunks.gen.Air)
+	w.chunks.SetBlock(front, w.chunks.gen.Air)
+	w.chunks.SetBlock(sensorPos, w.chunks.gen.Air)
+	w.chunks.SetBlock(dummy, w.chunks.gen.Air)
 
 	place := func(item string, at Vec3i, taskID string) {
 		a.Inventory[item]++

@@ -17,7 +17,7 @@ func TestMoveTo_ToleranceCompletesWithinRadius_NoTeleport(t *testing.T) {
 		TickRateHz: 5,
 		DayTicks:   6000,
 		ObsRadius:  7,
-		Height:     64,
+		Height:     1,
 		Seed:       42,
 		BoundaryR:  4000,
 	}, cats)
@@ -72,7 +72,7 @@ func TestMoveTo_PrimaryAxisBlocked_TriesSecondaryAxis(t *testing.T) {
 		TickRateHz: 5,
 		DayTicks:   6000,
 		ObsRadius:  7,
-		Height:     64,
+		Height:     1,
 		Seed:       42,
 		BoundaryR:  4000,
 	}, cats)
@@ -89,17 +89,16 @@ func TestMoveTo_PrimaryAxisBlocked_TriesSecondaryAxis(t *testing.T) {
 	}
 
 	// Place the agent at a deterministic surface location.
-	start := Vec3i{X: 10, Y: w.surfaceY(10, 10), Z: 10}
+	start := Vec3i{X: 10, Y: 0, Z: 10}
 	a.Pos = start
 	target := Vec3i{X: start.X + 5, Y: start.Y, Z: start.Z + 1} // abs(dx)>abs(dz) => primary axis X
 
-	// Build a full-height solid pillar at the primary next step position so surfaceY() returns 1 and the cell is solid.
 	stone := cats.Blocks.Index["STONE"]
 	pillarX := start.X + 1
 	pillarZ := start.Z
-	for y := 0; y < w.cfg.Height; y++ {
-		w.chunks.SetBlock(Vec3i{X: pillarX, Y: y, Z: pillarZ}, stone)
-	}
+	setAir(w, start)
+	setAir(w, Vec3i{X: start.X, Y: 0, Z: start.Z + 1}) // secondary axis cell must be passable
+	setSolid(w, Vec3i{X: pillarX, Y: 0, Z: pillarZ}, stone)
 
 	a.Events = nil
 	w.step(nil, nil, []ActionEnvelope{{AgentID: a.ID, Act: protocol.ActMsg{
@@ -114,4 +113,3 @@ func TestMoveTo_PrimaryAxisBlocked_TriesSecondaryAxis(t *testing.T) {
 		t.Fatalf("pos=(%d,%d) want=(%d,%d)", gotX, gotZ, start.X, start.Z+1)
 	}
 }
-

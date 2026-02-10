@@ -17,7 +17,7 @@ func TestMarketWeek_ReducesMarketTaxOnTrades(t *testing.T) {
 		TickRateHz: 5,
 		DayTicks:   6000,
 		ObsRadius:  7,
-		Height:     64,
+		Height:     1,
 		Seed:       42,
 		BoundaryR:  4000,
 	}, cats)
@@ -104,7 +104,7 @@ func TestBanditCamp_OpenChestAwardsGoal(t *testing.T) {
 		TickRateHz: 5,
 		DayTicks:   6000,
 		ObsRadius:  7,
-		Height:     64,
+		Height:     1,
 		Seed:       42,
 		BoundaryR:  4000,
 	}, cats)
@@ -160,7 +160,7 @@ func TestBlightZone_ReducesStaminaRecoveryInZone(t *testing.T) {
 		TickRateHz: 5,
 		DayTicks:   6000,
 		ObsRadius:  7,
-		Height:     64,
+		Height:     1,
 		Seed:       42,
 		BoundaryR:  4000,
 	}, cats)
@@ -206,7 +206,7 @@ func TestFloodWarning_SlowsMovementInZone(t *testing.T) {
 		TickRateHz: 5,
 		DayTicks:   6000,
 		ObsRadius:  7,
-		Height:     64,
+		Height:     1,
 		Seed:       42,
 		BoundaryR:  4000,
 	}, cats)
@@ -256,7 +256,7 @@ func TestBuilderExpo_SpawnsNoticeBoardAndSign(t *testing.T) {
 		TickRateHz: 5,
 		DayTicks:   6000,
 		ObsRadius:  7,
-		Height:     64,
+		Height:     1,
 		Seed:       42,
 		BoundaryR:  4000,
 	}, cats)
@@ -266,15 +266,8 @@ func TestBuilderExpo_SpawnsNoticeBoardAndSign(t *testing.T) {
 
 	w.startEvent(0, "BUILDER_EXPO")
 	center := w.activeEventCenter
-	// surfaceY() returns the air block above the topmost non-air block (including water); after
-	// spawning the board/sign, the topmost non-air becomes the spawned block itself, so surfaceY() moves up
-	// by 1. We want the placed block position, hence -1.
-	y := w.surfaceY(center.X, center.Z) - 1
-	if y < 1 {
-		y = 1
-	}
-	boardPos := Vec3i{X: center.X, Y: y, Z: center.Z}
-	signPos := Vec3i{X: center.X + 1, Y: y, Z: center.Z}
+	boardPos := Vec3i{X: center.X, Y: 0, Z: center.Z}
+	signPos := Vec3i{X: center.X + 1, Y: 0, Z: center.Z}
 
 	bBoard := w.blockName(w.chunks.GetBlock(boardPos))
 	if bBoard != "BULLETIN_BOARD" {

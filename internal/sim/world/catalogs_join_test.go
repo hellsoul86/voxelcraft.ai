@@ -117,4 +117,3 @@ func TestJoin_CatalogsIncludeFullSet(t *testing.T) {
 		}
 	}
 }
-

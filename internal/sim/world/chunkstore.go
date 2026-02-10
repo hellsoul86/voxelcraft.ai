@@ -13,25 +13,23 @@ type ChunkKey struct {
 
 type Chunk struct {
 	CX, CZ int
-	Height int
-
-	Blocks []uint16 // len = 16*16*Height
+	Blocks []uint16 // len = 16*16 (pure 2D world)
 
 	dirty bool
 	hash  [32]byte
 }
 
-func (c *Chunk) index(x, y, z int) int {
-	// x fastest, then z, then y
-	return x + z*16 + y*16*16
+func (c *Chunk) index(x, z int) int {
+	// x fastest, then z
+	return x + z*16
 }
 
-func (c *Chunk) Get(x, y, z int) uint16 {
-	return c.Blocks[c.index(x, y, z)]
+func (c *Chunk) Get(x, z int) uint16 {
+	return c.Blocks[c.index(x, z)]
 }
 
-func (c *Chunk) Set(x, y, z int, b uint16) {
-	i := c.index(x, y, z)
+func (c *Chunk) Set(x, z int, b uint16) {
+	i := c.index(x, z)
 	if c.Blocks[i] == b {
 		return
 	}
@@ -56,8 +54,6 @@ func (c *Chunk) Digest() [32]byte {
 
 type WorldGen struct {
 	Seed      int64
-	Height    int
-	SeaLevel  int
 	BoundaryR int // blocks
 
 	// Palette ids for core blocks.
@@ -66,7 +62,8 @@ type WorldGen struct {
 	Grass      uint16
 	Sand       uint16
 	Stone      uint16
-	Water      uint16
+	Gravel     uint16
+	Log        uint16
 	CoalOre    uint16
 	IronOre    uint16
 	CopperOre  uint16
@@ -86,6 +83,18 @@ func NewChunkStore(gen WorldGen) *ChunkStore {
 	}
 }
 
+func (s *ChunkStore) inBounds(pos Vec3i) bool {
+	if pos.Y != 0 {
+		return false
+	}
+	if s.gen.BoundaryR > 0 {
+		if pos.X < -s.gen.BoundaryR || pos.X > s.gen.BoundaryR || pos.Z < -s.gen.BoundaryR || pos.Z > s.gen.BoundaryR {
+			return false
+		}
+	}
+	return true
+}
+
 func (s *ChunkStore) LoadedChunkKeys() []ChunkKey {
 	keys := make([]ChunkKey, 0, len(s.chunks))
 	for k := range s.chunks {
@@ -101,12 +110,10 @@ func (s *ChunkStore) LoadedChunkKeys() []ChunkKey {
 }
 
 func (s *ChunkStore) GetBlock(pos Vec3i) uint16 {
-	if s.gen.BoundaryR > 0 {
-		if pos.X < -s.gen.BoundaryR || pos.X > s.gen.BoundaryR || pos.Z < -s.gen.BoundaryR || pos.Z > s.gen.BoundaryR {
-			return s.gen.Air
-		}
+	if pos.Y != 0 {
+		return s.gen.Air
 	}
-	if pos.Y < 0 || pos.Y >= s.gen.Height {
+	if !s.inBounds(pos) {
 		return s.gen.Air
 	}
 
@@ -115,11 +122,14 @@ func (s *ChunkStore) GetBlock(pos Vec3i) uint16 {
 	lx := mod(pos.X, 16)
 	lz := mod(pos.Z, 16)
 	ch := s.getOrGenChunk(cx, cz)
-	return ch.Get(lx, pos.Y, lz)
+	return ch.Get(lx, lz)
 }
 
 func (s *ChunkStore) SetBlock(pos Vec3i, b uint16) {
-	if pos.Y < 0 || pos.Y >= s.gen.Height {
+	if pos.Y != 0 {
+		return
+	}
+	if !s.inBounds(pos) {
 		return
 	}
 	cx := floorDiv(pos.X, 16)
@@ -127,7 +137,7 @@ func (s *ChunkStore) SetBlock(pos Vec3i, b uint16) {
 	lx := mod(pos.X, 16)
 	lz := mod(pos.Z, 16)
 	ch := s.getOrGenChunk(cx, cz)
-	ch.Set(lx, pos.Y, lz, b)
+	ch.Set(lx, lz, b)
 }
 
 func (s *ChunkStore) getOrGenChunk(cx, cz int) *Chunk {
@@ -138,8 +148,7 @@ func (s *ChunkStore) getOrGenChunk(cx, cz int) *Chunk {
 	ch := &Chunk{
 		CX:     cx,
 		CZ:     cz,
-		Height: s.gen.Height,
-		Blocks: make([]uint16, 16*16*s.gen.Height),
+		Blocks: make([]uint16, 16*16),
 	}
 	s.generateChunk(ch)
 	ch.dirty = true
@@ -149,65 +158,42 @@ func (s *ChunkStore) getOrGenChunk(cx, cz int) *Chunk {
 }
 
 func (s *ChunkStore) generateChunk(ch *Chunk) {
-	base := 22
-	amp := 8
-	sea := s.gen.SeaLevel
 	for z := 0; z < 16; z++ {
 		for x := 0; x < 16; x++ {
 			wx := ch.CX*16 + x
 			wz := ch.CZ*16 + z
 
-			noise := hash2(s.gen.Seed, wx, wz)
-			biome := biomeFrom(noise)
-			h := base + int(noise%uint64(2*amp+1)) - amp
-			if h < 3 {
-				h = 3
-			}
-			if h >= s.gen.Height-2 {
-				h = s.gen.Height - 2
-			}
-
-			for y := 0; y < s.gen.Height; y++ {
-				pos := Vec3i{X: wx, Y: y, Z: wz}
-				var b uint16
-				switch {
-				case y > h && y <= sea:
-					b = s.gen.Water
-				case y > h:
-					b = s.gen.Air
-				case y == h:
-					if biome == "DESERT" {
-						b = s.gen.Sand
-					} else {
-						b = s.gen.Grass
-					}
-				case y >= h-3:
-					if biome == "DESERT" {
-						b = s.gen.Sand
-					} else {
-						b = s.gen.Dirt
-					}
-				default:
-					b = s.gen.Stone
+			// Pure 2D generation: each (x,z) cell picks a single block.
+			roll := hash2(s.gen.Seed, wx, wz) % 1000
+			b := s.gen.Air
+			switch {
+			case roll < 10:
+				b = s.gen.CrystalOre
+			case roll < 30:
+				b = s.gen.IronOre
+			case roll < 60:
+				b = s.gen.CopperOre
+			case roll < 100:
+				b = s.gen.CoalOre
+			case roll < 180:
+				b = s.gen.Stone
+			case roll < 240:
+				b = s.gen.Log
+			case roll < 300:
+				if biomeFrom(hash2(s.gen.Seed, wx, wz)) == "DESERT" {
+					b = s.gen.Sand
+				} else {
+					b = s.gen.Dirt
 				}
-
-				// Deterministic ore sprinkling below y<16 (MVP).
-				if y > 0 && y < 16 && b == s.gen.Stone {
-					oreRoll := hash3(s.gen.Seed, pos.X, pos.Y, pos.Z) % 1000
-					switch {
-					case y < 10 && oreRoll < 2:
-						b = s.gen.CrystalOre
-					case oreRoll < 10:
-						b = s.gen.IronOre
-					case oreRoll < 25:
-						b = s.gen.CopperOre
-					case oreRoll < 45:
-						b = s.gen.CoalOre
-					}
-				}
-
-				ch.Blocks[ch.index(x, y, z)] = b
+			case roll < 330:
+				b = s.gen.Sand
+			case roll < 350:
+				b = s.gen.Gravel
+			default:
+				b = s.gen.Air
 			}
+
+			ch.Blocks[ch.index(x, z)] = b
 		}
 	}
 }

@@ -17,7 +17,7 @@ func TestBlueprintAutoPull_PullsFromNearbyChest(t *testing.T) {
 		TickRateHz: 5,
 		DayTicks:   6000,
 		ObsRadius:  7,
-		Height:     64,
+		Height:     1,
 		Seed:       42,
 		BoundaryR:  4000,
 	}, cats)
@@ -34,8 +34,10 @@ func TestBlueprintAutoPull_PullsFromNearbyChest(t *testing.T) {
 	}
 	a.Inventory["PLANK"] = 0
 
-	anchor := Vec3i{X: a.Pos.X, Y: 40, Z: a.Pos.Z}
-	chestPos := Vec3i{X: anchor.X + 5, Y: anchor.Y, Z: anchor.Z}
+	anchor := Vec3i{X: a.Pos.X, Y: 0, Z: a.Pos.Z}
+	clearBlueprintFootprint(t, w, "road_segment", anchor, 0)
+
+	chestPos := Vec3i{X: anchor.X + 5, Y: 0, Z: anchor.Z}
 	ch := w.ensureContainer(chestPos, "CHEST")
 	ch.Inventory["PLANK"] = 10
 
@@ -74,7 +76,7 @@ func TestBlueprintAutoPull_SameLandOnly(t *testing.T) {
 		TickRateHz: 5,
 		DayTicks:   6000,
 		ObsRadius:  7,
-		Height:     64,
+		Height:     1,
 		Seed:       42,
 		BoundaryR:  4000,
 	}, cats)
@@ -91,7 +93,7 @@ func TestBlueprintAutoPull_SameLandOnly(t *testing.T) {
 	}
 	a.Inventory["PLANK"] = 0
 
-	claimAnchor := Vec3i{X: 0, Y: 40, Z: 0}
+	claimAnchor := Vec3i{X: 0, Y: 0, Z: 0}
 	landID := w.newLandID(a.ID)
 	w.claims[landID] = &LandClaim{
 		LandID:  landID,
@@ -103,8 +105,10 @@ func TestBlueprintAutoPull_SameLandOnly(t *testing.T) {
 	}
 
 	// Blueprint anchor is inside claim (edge), but a nearby chest is outside claim (still within pull range).
-	anchor := Vec3i{X: 32, Y: 40, Z: 0}
-	outsideChestPos := Vec3i{X: 64, Y: 40, Z: 0} // dist=32 from anchor, but outside claim dx=64 from claim anchor.
+	anchor := Vec3i{X: 32, Y: 0, Z: 0}
+	clearBlueprintFootprint(t, w, "road_segment", anchor, 0)
+
+	outsideChestPos := Vec3i{X: 64, Y: 0, Z: 0} // dist=32 from anchor, but outside claim dx=64 from claim anchor.
 	ch := w.ensureContainer(outsideChestPos, "CHEST")
 	ch.Inventory["PLANK"] = 100
 

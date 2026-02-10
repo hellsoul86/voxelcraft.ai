@@ -80,7 +80,7 @@ func (c *WorldConfig) applyDefaults() {
 		c.ObsRadius = 7
 	}
 	if c.Height <= 0 {
-		c.Height = 64
+		c.Height = 1
 	}
 	if c.BoundaryR <= 0 {
 		c.BoundaryR = 4000
@@ -306,6 +306,9 @@ type clientState struct {
 
 func New(cfg WorldConfig, cats *catalogs.Catalogs) (*World, error) {
 	cfg.applyDefaults()
+	if cfg.Height != 1 {
+		return nil, fmt.Errorf("2D world requires height=1 (got %d)", cfg.Height)
+	}
 
 	smeltByInput, err := buildSmeltByInput(cats.Recipes.ByID)
 	if err != nil {
@@ -325,7 +328,8 @@ func New(cfg WorldConfig, cats *catalogs.Catalogs) (*World, error) {
 	grass, _ := b("GRASS")
 	sand, _ := b("SAND")
 	stone, _ := b("STONE")
-	water, _ := b("WATER")
+	gravel, _ := b("GRAVEL")
+	logBlock, _ := b("LOG")
 	coal, _ := b("COAL_ORE")
 	iron, _ := b("IRON_ORE")
 	copper, _ := b("COPPER_ORE")
@@ -333,15 +337,14 @@ func New(cfg WorldConfig, cats *catalogs.Catalogs) (*World, error) {
 
 	gen := WorldGen{
 		Seed:       cfg.Seed,
-		Height:     cfg.Height,
-		SeaLevel:   20,
 		BoundaryR:  cfg.BoundaryR,
 		Air:        air,
 		Dirt:       dirt,
 		Grass:      grass,
 		Sand:       sand,
 		Stone:      stone,
-		Water:      water,
+		Gravel:     gravel,
+		Log:        logBlock,
 		CoalOre:    coal,
 		IronOre:    iron,
 		CopperOre:  copper,
@@ -457,12 +460,12 @@ func (w *World) joinAgent(name string, delta bool, out chan []byte) JoinResponse
 	spawnXZ := int(idNum) * 2
 	spawnX := spawnXZ
 	spawnZ := -spawnXZ
-	y := w.surfaceY(spawnX, spawnZ)
+	spawnX, spawnZ = w.findSpawnAir(spawnX, spawnZ, 8)
 
 	a := &Agent{
 		ID:   agentID,
 		Name: name,
-		Pos:  Vec3i{X: spawnX, Y: y, Z: spawnZ},
+		Pos:  Vec3i{X: spawnX, Y: 0, Z: spawnZ},
 		Yaw:  0,
 	}
 	a.initDefaults()
@@ -493,8 +496,8 @@ func (w *World) joinAgent(name string, delta bool, out chan []byte) JoinResponse
 		ResumeToken:     token,
 		WorldParams: protocol.WorldParams{
 			TickRateHz: w.cfg.TickRateHz,
-			ChunkSize:  [3]int{16, 16, w.cfg.Height},
-			Height:     w.cfg.Height,
+			ChunkSize:  [3]int{16, 16, 1},
+			Height:     1,
 			ObsRadius:  w.cfg.ObsRadius,
 			DayTicks:   w.cfg.DayTicks,
 			Seed:       w.cfg.Seed,
@@ -600,8 +603,8 @@ func (w *World) handleAttach(req AttachRequest) {
 		ResumeToken:     newToken,
 		WorldParams: protocol.WorldParams{
 			TickRateHz: w.cfg.TickRateHz,
-			ChunkSize:  [3]int{16, 16, w.cfg.Height},
-			Height:     w.cfg.Height,
+			ChunkSize:  [3]int{16, 16, 1},
+			Height:     1,
 			ObsRadius:  w.cfg.ObsRadius,
 			DayTicks:   w.cfg.DayTicks,
 			Seed:       w.cfg.Seed,
@@ -2221,11 +2224,17 @@ func (w *World) applyTaskReq(a *Agent, tr protocol.TaskReq, nowTick uint64) {
 			a.AddEvent(actionResult(nowTick, tr.ID, false, "E_CONFLICT", "movement task slot occupied"))
 			return
 		}
+		// Reject targets outside the world boundary to avoid agents wandering into the "void"
+		// (GetBlock returns AIR outside BoundaryR, and we don't generate chunks there).
+		if !w.chunks.inBounds(Vec3i{X: tr.Target[0], Y: 0, Z: tr.Target[2]}) {
+			a.AddEvent(actionResult(nowTick, tr.ID, false, "E_INVALID_TARGET", "out of bounds"))
+			return
+		}
 		taskID := w.newTaskID()
 		a.MoveTask = &tasks.MovementTask{
 			TaskID:      taskID,
 			Kind:        tasks.KindMoveTo,
-			Target:      tasks.Vec3i{X: tr.Target[0], Y: tr.Target[1], Z: tr.Target[2]},
+			Target:      tasks.Vec3i{X: tr.Target[0], Y: 0, Z: tr.Target[2]},
 			Tolerance:   tr.Tolerance,
 			StartPos:    tasks.Vec3i{X: a.Pos.X, Y: a.Pos.Y, Z: a.Pos.Z},
 			StartedTick: nowTick,
@@ -2282,11 +2291,15 @@ func (w *World) applyTaskReq(a *Agent, tr protocol.TaskReq, nowTick uint64) {
 			a.AddEvent(actionResult(nowTick, tr.ID, false, "E_CONFLICT", "work task slot occupied"))
 			return
 		}
+		if tr.BlockPos[1] != 0 {
+			a.AddEvent(actionResult(nowTick, tr.ID, false, "E_INVALID_TARGET", "2D world requires y==0"))
+			return
+		}
 		taskID := w.newTaskID()
 		a.WorkTask = &tasks.WorkTask{
 			TaskID:      taskID,
 			Kind:        tasks.KindMine,
-			BlockPos:    tasks.Vec3i{X: tr.BlockPos[0], Y: tr.BlockPos[1], Z: tr.BlockPos[2]},
+			BlockPos:    tasks.Vec3i{X: tr.BlockPos[0], Y: 0, Z: tr.BlockPos[2]},
 			StartedTick: nowTick,
 			WorkTicks:   0,
 		}
@@ -2323,12 +2336,16 @@ func (w *World) applyTaskReq(a *Agent, tr protocol.TaskReq, nowTick uint64) {
 			a.AddEvent(actionResult(nowTick, tr.ID, false, "E_BAD_REQUEST", "missing item_id"))
 			return
 		}
+		if tr.BlockPos[1] != 0 {
+			a.AddEvent(actionResult(nowTick, tr.ID, false, "E_INVALID_TARGET", "2D world requires y==0"))
+			return
+		}
 		taskID := w.newTaskID()
 		a.WorkTask = &tasks.WorkTask{
 			TaskID:      taskID,
 			Kind:        tasks.KindPlace,
 			ItemID:      tr.ItemID,
-			BlockPos:    tasks.Vec3i{X: tr.BlockPos[0], Y: tr.BlockPos[1], Z: tr.BlockPos[2]},
+			BlockPos:    tasks.Vec3i{X: tr.BlockPos[0], Y: 0, Z: tr.BlockPos[2]},
 			StartedTick: nowTick,
 		}
 		a.AddEvent(protocol.Event{"t": nowTick, "type": "ACTION_RESULT", "ref": tr.ID, "ok": true, "task_id": taskID})
@@ -2427,7 +2444,15 @@ func (w *World) applyTaskReq(a *Agent, tr protocol.TaskReq, nowTick uint64) {
 		if r > 128 {
 			r = 128
 		}
+		if tr.Anchor[1] != 0 {
+			a.AddEvent(actionResult(nowTick, tr.ID, false, "E_INVALID_TARGET", "2D world requires y==0"))
+			return
+		}
 		anchor := Vec3i{X: tr.Anchor[0], Y: tr.Anchor[1], Z: tr.Anchor[2]}
+		if !w.chunks.inBounds(anchor) {
+			a.AddEvent(actionResult(nowTick, tr.ID, false, "E_INVALID_TARGET", "out of bounds"))
+			return
+		}
 		// Must be allowed to build at anchor (unclaimed or owned land with build permission).
 		if !w.canBuildAt(a.ID, anchor, nowTick) {
 			a.AddEvent(actionResult(nowTick, tr.ID, false, "E_NO_PERMISSION", "cannot claim here"))
@@ -2489,6 +2514,10 @@ func (w *World) applyTaskReq(a *Agent, tr protocol.TaskReq, nowTick uint64) {
 			a.AddEvent(actionResult(nowTick, tr.ID, false, "E_BAD_REQUEST", "missing blueprint_id"))
 			return
 		}
+		if tr.Anchor[1] != 0 {
+			a.AddEvent(actionResult(nowTick, tr.ID, false, "E_INVALID_TARGET", "2D world requires y==0"))
+			return
+		}
 		if _, ok := w.catalogs.Blueprints.ByID[tr.BlueprintID]; !ok {
 			a.AddEvent(actionResult(nowTick, tr.ID, false, "E_INVALID_TARGET", "unknown blueprint"))
 			return
@@ -2498,7 +2527,7 @@ func (w *World) applyTaskReq(a *Agent, tr protocol.TaskReq, nowTick uint64) {
 			TaskID:      taskID,
 			Kind:        tasks.KindBuildBlueprint,
 			BlueprintID: tr.BlueprintID,
-			Anchor:      tasks.Vec3i{X: tr.Anchor[0], Y: tr.Anchor[1], Z: tr.Anchor[2]},
+			Anchor:      tasks.Vec3i{X: tr.Anchor[0], Y: 0, Z: tr.Anchor[2]},
 			Rotation:    normalizeRotation(tr.Rotation),
 			BuildIndex:  0,
 			StartedTick: nowTick,
@@ -2518,20 +2547,20 @@ func (w *World) systemMovement(nowTick uint64) {
 		}
 		var target Vec3i
 		switch mt.Kind {
-	case tasks.KindMoveTo:
-		target = v3FromTask(mt.Target)
-		want := int(math.Ceil(mt.Tolerance))
-		if want < 1 {
-			want = 1
-		}
-		// Complete when within tolerance; do not teleport to the exact target to avoid skipping obstacles.
-		if distXZ(a.Pos, target) <= want {
-			w.recordStructureUsage(a.ID, a.Pos, nowTick)
-			w.funOnBiome(a, nowTick)
-			a.MoveTask = nil
-			a.AddEvent(protocol.Event{"t": nowTick, "type": "TASK_DONE", "task_id": mt.TaskID, "kind": string(mt.Kind)})
-			continue
-		}
+		case tasks.KindMoveTo:
+			target = v3FromTask(mt.Target)
+			want := int(math.Ceil(mt.Tolerance))
+			if want < 1 {
+				want = 1
+			}
+			// Complete when within tolerance; do not teleport to the exact target to avoid skipping obstacles.
+			if distXZ(a.Pos, target) <= want {
+				w.recordStructureUsage(a.ID, a.Pos, nowTick)
+				w.funOnBiome(a, nowTick)
+				a.MoveTask = nil
+				a.AddEvent(protocol.Event{"t": nowTick, "type": "TASK_DONE", "task_id": mt.TaskID, "kind": string(mt.Kind)})
+				continue
+			}
 
 		case tasks.KindFollow:
 			t, ok := w.followTargetPos(mt.TargetID)
@@ -2833,7 +2862,7 @@ func (w *World) tickMine(a *Agent, wt *tasks.WorkTask, nowTick uint64) {
 
 	item := w.blockIDToItem(b)
 	if item != "" {
-		a.Inventory[item]++
+		_ = w.spawnItemEntity(nowTick, a.ID, pos, item, 1, "MINE_DROP")
 	}
 	w.onMinedBlockDuringEvent(a, pos, blockName, nowTick)
 	a.WorkTask = nil
@@ -2858,6 +2887,15 @@ func (w *World) tickGather(a *Agent, wt *tasks.WorkTask, nowTick uint64) {
 		a.AddEvent(protocol.Event{"t": nowTick, "type": "TASK_FAIL", "task_id": wt.TaskID, "code": "E_BLOCKED", "message": "too far"})
 		return
 	}
+	if !w.canPickupItemEntity(a.ID, e.Pos) {
+		a.WorkTask = nil
+		w.bumpRepLaw(a.ID, -1)
+		if w.stats != nil {
+			w.stats.RecordDenied(nowTick)
+		}
+		a.AddEvent(protocol.Event{"t": nowTick, "type": "TASK_FAIL", "task_id": wt.TaskID, "code": "E_NO_PERMISSION", "message": "pickup denied"})
+		return
+	}
 
 	a.Inventory[e.Item] += e.Count
 	w.removeItemEntity(nowTick, a.ID, id, "GATHER")
@@ -2868,6 +2906,11 @@ func (w *World) tickGather(a *Agent, wt *tasks.WorkTask, nowTick uint64) {
 
 func (w *World) tickPlace(a *Agent, wt *tasks.WorkTask, nowTick uint64) {
 	pos := v3FromTask(wt.BlockPos)
+	if !w.chunks.inBounds(pos) {
+		a.WorkTask = nil
+		a.AddEvent(protocol.Event{"t": nowTick, "type": "TASK_FAIL", "task_id": wt.TaskID, "code": "E_INVALID_TARGET", "message": "out of bounds"})
+		return
+	}
 	if !w.canBuildAt(a.ID, pos, nowTick) {
 		a.WorkTask = nil
 		w.bumpRepLaw(a.ID, -1)
@@ -3238,6 +3281,11 @@ func (w *World) tickBuildBlueprint(a *Agent, wt *tasks.WorkTask, nowTick uint64)
 				Y: anchor.Y + off[1],
 				Z: anchor.Z + off[2],
 			}
+			if !w.chunks.inBounds(pos) {
+				a.WorkTask = nil
+				a.AddEvent(protocol.Event{"t": nowTick, "type": "TASK_FAIL", "task_id": wt.TaskID, "code": "E_INVALID_TARGET", "message": "out of bounds"})
+				return
+			}
 			bid, ok := w.catalogs.Blocks.Index[p.Block]
 			if !ok {
 				a.WorkTask = nil
@@ -3325,6 +3373,11 @@ func (w *World) tickBuildBlueprint(a *Agent, wt *tasks.WorkTask, nowTick uint64)
 			X: anchor.X + off[0],
 			Y: anchor.Y + off[1],
 			Z: anchor.Z + off[2],
+		}
+		if !w.chunks.inBounds(pos) {
+			a.WorkTask = nil
+			a.AddEvent(protocol.Event{"t": nowTick, "type": "TASK_FAIL", "task_id": wt.TaskID, "code": "E_INVALID_TARGET", "message": "out of bounds"})
+			return
 		}
 		bid, ok := w.catalogs.Blocks.Index[p.Block]
 		if !ok {
@@ -3568,8 +3621,8 @@ func (w *World) respawnAgent(nowTick uint64, a *Agent, reason string) {
 	spawnXZ := n * 2
 	spawnX := spawnXZ
 	spawnZ := -spawnXZ
-	y := w.surfaceY(spawnX, spawnZ)
-	a.Pos = Vec3i{X: spawnX, Y: y, Z: spawnZ}
+	spawnX, spawnZ = w.findSpawnAir(spawnX, spawnZ, 8)
+	a.Pos = Vec3i{X: spawnX, Y: 0, Z: spawnZ}
 	a.Yaw = 0
 
 	a.HP = 20
@@ -3730,7 +3783,7 @@ func (w *World) buildObs(a *Agent, cl *clientState, nowTick uint64) protocol.Obs
 		tasksObs = append(tasksObs, protocol.TaskObs{
 			TaskID:   a.WorkTask.TaskID,
 			Kind:     string(a.WorkTask.Kind),
-			Progress: workProgress(a.WorkTask),
+			Progress: w.workProgressForAgent(a, a.WorkTask),
 		})
 	}
 
@@ -4070,19 +4123,40 @@ func (w *World) broadcastChat(tick uint64, from *Agent, channel string, text str
 }
 
 func (w *World) surfaceY(x, z int) int {
-	// Return an "air" cell just above the topmost non-air block (including water).
-	// This keeps spawns/movement out of water by default without needing fluid physics.
-	for y := w.cfg.Height - 1; y >= 1; y-- {
-		b := w.chunks.GetBlock(Vec3i{X: x, Y: y, Z: z})
-		if b != w.chunks.gen.Air {
-			continue
-		}
-		below := w.chunks.GetBlock(Vec3i{X: x, Y: y - 1, Z: z})
-		if below != w.chunks.gen.Air {
-			return y
+	// Pure 2D world: the only valid y coordinate is 0.
+	_ = x
+	_ = z
+	return 0
+}
+
+func (w *World) findSpawnAir(x, z int, maxR int) (int, int) {
+	if w == nil || w.chunks == nil {
+		return x, z
+	}
+	if maxR < 0 {
+		maxR = 0
+	}
+	air := w.chunks.gen.Air
+	for r := 0; r <= maxR; r++ {
+		for dz := -r; dz <= r; dz++ {
+			for dx := -r; dx <= r; dx++ {
+				// Check the perimeter only (square spiral) for deterministic order.
+				if abs(dx) != r && abs(dz) != r {
+					continue
+				}
+				px := x + dx
+				pz := z + dz
+				p := Vec3i{X: px, Y: 0, Z: pz}
+				if !w.chunks.inBounds(p) {
+					continue
+				}
+				if w.chunks.GetBlock(p) == air {
+					return px, pz
+				}
+			}
 		}
 	}
-	return 1
+	return x, z
 }
 
 func (w *World) nearBlock(pos Vec3i, blockID string, dist int) bool {
@@ -4090,11 +4164,13 @@ func (w *World) nearBlock(pos Vec3i, blockID string, dist int) bool {
 	if !ok {
 		return false
 	}
-	for dz := -dist; dz <= dist; dz++ {
-		for dx := -dist; dx <= dist; dx++ {
-			p := Vec3i{X: pos.X + dx, Y: pos.Y, Z: pos.Z + dz}
-			if w.chunks.GetBlock(p) == bid {
-				return true
+	for dy := -dist; dy <= dist; dy++ {
+		for dz := -dist; dz <= dist; dz++ {
+			for dx := -dist; dx <= dist; dx++ {
+				p := Vec3i{X: pos.X + dx, Y: pos.Y + dy, Z: pos.Z + dz}
+				if w.chunks.GetBlock(p) == bid {
+					return true
+				}
 			}
 		}
 	}
@@ -4885,6 +4961,54 @@ func taskProgress(start, cur, target Vec3i) float64 {
 		return 1
 	}
 	return p
+}
+
+func clamp01(x float64) float64 {
+	if x < 0 {
+		return 0
+	}
+	if x > 1 {
+		return 1
+	}
+	return x
+}
+
+func (w *World) workProgressForAgent(a *Agent, wt *tasks.WorkTask) float64 {
+	if a == nil || wt == nil {
+		return 0
+	}
+	switch wt.Kind {
+	case tasks.KindMine:
+		pos := v3FromTask(wt.BlockPos)
+		blockName := w.blockName(w.chunks.GetBlock(pos))
+		family := mineToolFamilyForBlock(blockName)
+		tier := bestToolTier(a.Inventory, family)
+		workNeeded, _ := mineParamsForTier(tier)
+		if workNeeded <= 0 {
+			return 0
+		}
+		return clamp01(float64(wt.WorkTicks) / float64(workNeeded))
+	case tasks.KindCraft:
+		rec, ok := w.catalogs.Recipes.ByID[wt.RecipeID]
+		if !ok || rec.TimeTicks <= 0 {
+			return 0
+		}
+		return clamp01(float64(wt.WorkTicks) / float64(rec.TimeTicks))
+	case tasks.KindSmelt:
+		rec, ok := w.smeltByInput[wt.ItemID]
+		if !ok || rec.TimeTicks <= 0 {
+			return 0
+		}
+		return clamp01(float64(wt.WorkTicks) / float64(rec.TimeTicks))
+	case tasks.KindBuildBlueprint:
+		bp, ok := w.catalogs.Blueprints.ByID[wt.BlueprintID]
+		if !ok || len(bp.Blocks) == 0 {
+			return 0
+		}
+		return clamp01(float64(wt.BuildIndex) / float64(len(bp.Blocks)))
+	default:
+		return 0
+	}
 }
 
 func workProgress(wt *tasks.WorkTask) float64 {

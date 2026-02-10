@@ -25,6 +25,18 @@ func (w *World) newItemEntityID() string {
 	return fmt.Sprintf("IT%06d", n)
 }
 
+func (w *World) canPickupItemEntity(agentID string, pos Vec3i) bool {
+	land := w.landAt(pos)
+	if land == nil {
+		return true
+	}
+	// Maintenance downgrade: once protection is lost, treat as "wild" for pickup.
+	if land.MaintenanceStage >= 2 && !w.isLandMember(agentID, land) {
+		return true
+	}
+	return w.isLandMember(agentID, land)
+}
+
 func (w *World) spawnItemEntity(nowTick uint64, actor string, pos Vec3i, item string, count int, reason string) string {
 	if item == "" || count <= 0 {
 		return ""

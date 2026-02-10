@@ -197,6 +197,9 @@ func TestCityCore_AllowsNonWanted(t *testing.T) {
 	startX := anchor.X + 9
 	vis.Pos = Vec3i{X: startX, Y: w.surfaceY(startX, anchor.Z), Z: anchor.Z}
 	vis.RepLaw = 500
+	for x := anchor.X; x <= startX; x++ {
+		setAir(w, Vec3i{X: x, Y: 0, Z: anchor.Z})
+	}
 
 	w.step(nil, nil, []ActionEnvelope{{AgentID: vis.ID, Act: protocol.ActMsg{
 		Type:            protocol.TypeAct,

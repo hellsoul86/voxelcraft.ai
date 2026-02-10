@@ -319,8 +319,7 @@ func (w *World) pickEventCenter(nowTick uint64, eventID string) Vec3i {
 		x := -boundary + margin + int(hx%uint64(span))
 		z := -boundary + margin + int(hz%uint64(span))
 
-		y := w.surfaceY(x, z)
-		p := Vec3i{X: x, Y: y, Z: z}
+		p := Vec3i{X: x, Y: 0, Z: z}
 		// Avoid placing event centers inside claimed land.
 		if w.landAt(p) != nil {
 			continue
@@ -328,8 +327,7 @@ func (w *World) pickEventCenter(nowTick uint64, eventID string) Vec3i {
 		return p
 	}
 	// Fallback (deterministic).
-	y := w.surfaceY(0, 0)
-	return Vec3i{X: 0, Y: y, Z: 0}
+	return Vec3i{X: 0, Y: 0, Z: 0}
 }
 
 func hashEventID(id string) int {
@@ -351,24 +349,14 @@ func (w *World) spawnCrystalRift(nowTick uint64, center Vec3i) {
 	if !ok {
 		return
 	}
-	// Spawn a compact underground cluster below the surface marker.
-	yc := 8
-	if yc < 2 {
-		yc = 2
-	}
-	if yc >= w.cfg.Height-1 {
-		yc = w.cfg.Height - 2
-	}
-	c := Vec3i{X: center.X, Y: yc, Z: center.Z}
-
-	for dy := -1; dy <= 1; dy++ {
-		for dz := -2; dz <= 2; dz++ {
-			for dx := -2; dx <= 2; dx++ {
-				p := Vec3i{X: c.X + dx, Y: c.Y + dy, Z: c.Z + dz}
-				from := w.chunks.GetBlock(p)
-				w.chunks.SetBlock(p, ore)
-				w.auditSetBlock(nowTick, "WORLD", p, from, ore, "EVENT:CRYSTAL_RIFT")
-			}
+	// 2D world: spawn a compact surface cluster on y=0.
+	c := Vec3i{X: center.X, Y: 0, Z: center.Z}
+	for dz := -2; dz <= 2; dz++ {
+		for dx := -2; dx <= 2; dx++ {
+			p := Vec3i{X: c.X + dx, Y: 0, Z: c.Z + dz}
+			from := w.chunks.GetBlock(p)
+			w.chunks.SetBlock(p, ore)
+			w.auditSetBlock(nowTick, "WORLD", p, from, ore, "EVENT:CRYSTAL_RIFT")
 		}
 	}
 }
@@ -379,27 +367,18 @@ func (w *World) spawnDeepVein(nowTick uint64, center Vec3i) {
 	if !ok1 || !ok2 {
 		return
 	}
-	yc := 6
-	if yc < 2 {
-		yc = 2
-	}
-	if yc >= w.cfg.Height-1 {
-		yc = w.cfg.Height - 2
-	}
-	c := Vec3i{X: center.X, Y: yc, Z: center.Z}
-
-	for dy := -2; dy <= 2; dy++ {
-		for dz := -3; dz <= 3; dz++ {
-			for dx := -3; dx <= 3; dx++ {
-				p := Vec3i{X: c.X + dx, Y: c.Y + dy, Z: c.Z + dz}
-				to := iron
-				if (dx+dz+dy)&1 == 0 {
-					to = copper
-				}
-				from := w.chunks.GetBlock(p)
-				w.chunks.SetBlock(p, to)
-				w.auditSetBlock(nowTick, "WORLD", p, from, to, "EVENT:DEEP_VEIN")
+	// 2D world: spawn a mixed ore patch on y=0.
+	c := Vec3i{X: center.X, Y: 0, Z: center.Z}
+	for dz := -3; dz <= 3; dz++ {
+		for dx := -3; dx <= 3; dx++ {
+			p := Vec3i{X: c.X + dx, Y: 0, Z: c.Z + dz}
+			to := iron
+			if (dx+dz)&1 == 0 {
+				to = copper
 			}
+			from := w.chunks.GetBlock(p)
+			w.chunks.SetBlock(p, to)
+			w.auditSetBlock(nowTick, "WORLD", p, from, to, "EVENT:DEEP_VEIN")
 		}
 	}
 }
@@ -411,9 +390,8 @@ func (w *World) spawnRuinsGate(nowTick uint64, center Vec3i) {
 		return
 	}
 
-	// Build a small ring at the surface with a loot chest in the center.
-	y := w.surfaceY(center.X, center.Z)
-	p0 := Vec3i{X: center.X, Y: y, Z: center.Z}
+	// Build a small ring with a loot chest in the center.
+	p0 := Vec3i{X: center.X, Y: 0, Z: center.Z}
 
 	for dz := -1; dz <= 1; dz++ {
 		for dx := -1; dx <= 1; dx++ {
@@ -445,9 +423,8 @@ func (w *World) spawnEventNoticeBoard(nowTick uint64, center Vec3i, eventID stri
 		return
 	}
 
-	y := w.surfaceY(center.X, center.Z)
-	boardPos := Vec3i{X: center.X, Y: y, Z: center.Z}
-	signPos := Vec3i{X: center.X + 1, Y: y, Z: center.Z}
+	boardPos := Vec3i{X: center.X, Y: 0, Z: center.Z}
+	signPos := Vec3i{X: center.X + 1, Y: 0, Z: center.Z}
 
 	from := w.chunks.GetBlock(boardPos)
 	w.chunks.SetBlock(boardPos, board)
@@ -478,10 +455,9 @@ func (w *World) spawnFloodWarning(nowTick uint64, center Vec3i) {
 	if !ok {
 		return
 	}
-	y := w.surfaceY(center.X, center.Z)
 	for dz := -2; dz <= 2; dz++ {
 		for dx := -2; dx <= 2; dx++ {
-			p := Vec3i{X: center.X + dx, Y: y, Z: center.Z + dz}
+			p := Vec3i{X: center.X + dx, Y: 0, Z: center.Z + dz}
 			from := w.chunks.GetBlock(p)
 			w.chunks.SetBlock(p, water)
 			w.auditSetBlock(nowTick, "WORLD", p, from, water, "EVENT:FLOOD_WARNING")
@@ -494,16 +470,12 @@ func (w *World) spawnBlightZone(nowTick uint64, center Vec3i) {
 	if !ok {
 		return
 	}
-	groundY := w.surfaceY(center.X, center.Z) - 1
-	if groundY < 1 {
-		groundY = 1
-	}
 	for dz := -3; dz <= 3; dz++ {
 		for dx := -3; dx <= 3; dx++ {
 			if abs(dx)+abs(dz) > 4 {
 				continue
 			}
-			p := Vec3i{X: center.X + dx, Y: groundY, Z: center.Z + dz}
+			p := Vec3i{X: center.X + dx, Y: 0, Z: center.Z + dz}
 			from := w.chunks.GetBlock(p)
 			w.chunks.SetBlock(p, gravel)
 			w.auditSetBlock(nowTick, "WORLD", p, from, gravel, "EVENT:BLIGHT_ZONE")
@@ -519,8 +491,7 @@ func (w *World) spawnBanditCamp(nowTick uint64, center Vec3i) {
 		return
 	}
 
-	y := w.surfaceY(center.X, center.Z)
-	p0 := Vec3i{X: center.X, Y: y, Z: center.Z}
+	p0 := Vec3i{X: center.X, Y: 0, Z: center.Z}
 
 	// Build a simple camp ring with a loot chest in the center.
 	for dz := -2; dz <= 2; dz++ {

@@ -18,7 +18,7 @@ func TestSnapshotExportImport_ConveyorMetaRoundTrip(t *testing.T) {
 		TickRateHz: 5,
 		DayTicks:   6000,
 		ObsRadius:  7,
-		Height:     64,
+		Height:     1,
 		Seed:       42,
 		BoundaryR:  4000,
 	}
@@ -39,7 +39,8 @@ func TestSnapshotExportImport_ConveyorMetaRoundTrip(t *testing.T) {
 	a.Inventory["CONVEYOR"] = 1
 	a.Yaw = 180 // -Z
 
-	pos := Vec3i{X: a.Pos.X, Y: w1.cfg.Height - 2, Z: a.Pos.Z}
+	pos := Vec3i{X: a.Pos.X, Y: 0, Z: a.Pos.Z}
+	w1.chunks.SetBlock(pos, w1.chunks.gen.Air)
 	act := protocol.ActMsg{
 		Type:            protocol.TypeAct,
 		ProtocolVersion: protocol.Version,

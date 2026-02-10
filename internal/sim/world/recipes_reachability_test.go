@@ -17,7 +17,7 @@ func TestRecipesReachability_CraftPlaceToggleSwitch(t *testing.T) {
 		TickRateHz: 5,
 		DayTicks:   6000,
 		ObsRadius:  7,
-		Height:     64,
+		Height:     1,
 		Seed:       42,
 		BoundaryR:  4000,
 	}, cats)
@@ -33,10 +33,11 @@ func TestRecipesReachability_CraftPlaceToggleSwitch(t *testing.T) {
 		t.Fatalf("missing agent")
 	}
 
-	// Place a crafting bench at a guaranteed-air layer and position the agent next to it on the same Y.
-	y := w.cfg.Height - 2
-	benchPos := Vec3i{X: a.Pos.X + 1, Y: y, Z: a.Pos.Z}
-	a.Pos = Vec3i{X: a.Pos.X, Y: y, Z: a.Pos.Z}
+	// Place a crafting bench at y=0 and position the agent next to it.
+	benchPos := Vec3i{X: a.Pos.X + 1, Y: 0, Z: a.Pos.Z}
+	a.Pos = Vec3i{X: a.Pos.X, Y: 0, Z: a.Pos.Z}
+	// Ensure target cells are empty in the 2D world.
+	w.chunks.SetBlock(benchPos, w.chunks.gen.Air)
 
 	a.Inventory["CRAFTING_BENCH"] = 1
 	w.step(nil, nil, []ActionEnvelope{{AgentID: a.ID, Act: protocol.ActMsg{
@@ -74,6 +75,7 @@ func TestRecipesReachability_CraftPlaceToggleSwitch(t *testing.T) {
 
 	// Place the switch and toggle it.
 	switchPos := Vec3i{X: a.Pos.X, Y: a.Pos.Y, Z: a.Pos.Z + 1}
+	w.chunks.SetBlock(switchPos, w.chunks.gen.Air)
 	w.step(nil, nil, []ActionEnvelope{{AgentID: a.ID, Act: protocol.ActMsg{
 		Type:            protocol.TypeAct,
 		ProtocolVersion: protocol.Version,
@@ -94,4 +96,3 @@ func TestRecipesReachability_CraftPlaceToggleSwitch(t *testing.T) {
 		t.Fatalf("expected switch to be on after toggle")
 	}
 }
-

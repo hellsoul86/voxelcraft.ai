@@ -18,7 +18,7 @@ func TestFollow_MovesTowardTargetAndMaintainsDistance(t *testing.T) {
 		TickRateHz: 5,
 		DayTicks:   6000,
 		ObsRadius:  7,
-		Height:     64,
+		Height:     1,
 		Seed:       42,
 		BoundaryR:  4000,
 	}, cats)
@@ -38,8 +38,13 @@ func TestFollow_MovesTowardTargetAndMaintainsDistance(t *testing.T) {
 		t.Fatalf("missing agents")
 	}
 
-	leader.Pos = Vec3i{X: 0, Y: 40, Z: 0}
-	follower.Pos = Vec3i{X: 10, Y: 40, Z: 0}
+	leader.Pos = Vec3i{X: 0, Y: 0, Z: 0}
+	follower.Pos = Vec3i{X: 10, Y: 0, Z: 0}
+
+	// Clear a corridor so movement isn't blocked by generated solids.
+	for x := 0; x <= 10; x++ {
+		setAir(w, Vec3i{X: x, Y: 0, Z: 0})
+	}
 
 	act := protocol.ActMsg{
 		Type:            protocol.TypeAct,
@@ -70,7 +75,7 @@ func TestFollow_MovesTowardTargetAndMaintainsDistance(t *testing.T) {
 	}
 
 	// Move leader away; follower should start moving again.
-	leader.Pos = Vec3i{X: 5, Y: 40, Z: 0}
+	leader.Pos = Vec3i{X: 5, Y: 0, Z: 0}
 	w.step(nil, nil, nil)
 	if got := follower.Pos.X; got != 2 {
 		t.Fatalf("follower should advance after leader moved: got x=%d want %d", got, 2)
@@ -87,7 +92,7 @@ func TestFollow_InvalidTargetFails(t *testing.T) {
 		TickRateHz: 5,
 		DayTicks:   6000,
 		ObsRadius:  7,
-		Height:     64,
+		Height:     1,
 		Seed:       42,
 		BoundaryR:  4000,
 	}, cats)

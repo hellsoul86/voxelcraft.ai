@@ -88,4 +88,3 @@ func (w *World) eventsCatalogMsg() protocol.CatalogMsg {
 		Data:            defs,
 	}
 }
-

@@ -75,7 +75,7 @@ func Defaults() Tuning {
 		TickDurationMs:    200,
 		DayTicks:          6000,
 		SeasonLengthTicks: 6000 * 7, // 7 in-game days
-		ChunkSize:         []int{16, 16, 64},
+		ChunkSize:         []int{16, 16, 1},
 		ObsRadius:         7,
 		WorldBoundaryR:    4000,
 

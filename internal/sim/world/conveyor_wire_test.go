@@ -17,7 +17,7 @@ func TestConveyor_EnabledViaWirePoweredByRemoteSwitch(t *testing.T) {
 		TickRateHz: 5,
 		DayTicks:   6000,
 		ObsRadius:  7,
-		Height:     64,
+		Height:     1,
 		Seed:       42,
 		BoundaryR:  4000,
 	}, cats)
@@ -34,13 +34,18 @@ func TestConveyor_EnabledViaWirePoweredByRemoteSwitch(t *testing.T) {
 	}
 
 	a.Yaw = 0 // +Z
-	y := w.cfg.Height - 2
-	conv := Vec3i{X: a.Pos.X, Y: y, Z: a.Pos.Z}
-	dst := Vec3i{X: conv.X, Y: y, Z: conv.Z + 1}
+	conv := Vec3i{X: a.Pos.X, Y: 0, Z: a.Pos.Z}
+	dst := Vec3i{X: conv.X, Y: 0, Z: conv.Z + 1}
 
-	wire1 := Vec3i{X: conv.X + 1, Y: y, Z: conv.Z}
-	wire2 := Vec3i{X: conv.X + 2, Y: y, Z: conv.Z}
-	sw := Vec3i{X: conv.X + 3, Y: y, Z: conv.Z}
+	wire1 := Vec3i{X: conv.X + 1, Y: 0, Z: conv.Z}
+	wire2 := Vec3i{X: conv.X + 2, Y: 0, Z: conv.Z}
+	sw := Vec3i{X: conv.X + 3, Y: 0, Z: conv.Z}
+
+	w.chunks.SetBlock(conv, w.chunks.gen.Air)
+	w.chunks.SetBlock(dst, w.chunks.gen.Air)
+	w.chunks.SetBlock(wire1, w.chunks.gen.Air)
+	w.chunks.SetBlock(wire2, w.chunks.gen.Air)
+	w.chunks.SetBlock(sw, w.chunks.gen.Air)
 
 	// Place wires + remote switch + conveyor.
 	a.Inventory["WIRE"] = 2

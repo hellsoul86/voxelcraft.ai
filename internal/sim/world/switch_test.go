@@ -17,7 +17,7 @@ func TestToggleSwitch_TogglesState(t *testing.T) {
 		TickRateHz: 5,
 		DayTicks:   6000,
 		ObsRadius:  7,
-		Height:     64,
+		Height:     1,
 		Seed:       42,
 		BoundaryR:  4000,
 	}, cats)
@@ -33,8 +33,9 @@ func TestToggleSwitch_TogglesState(t *testing.T) {
 		t.Fatalf("missing agent")
 	}
 
-	// Place switch high above terrain (guaranteed AIR) and teleport near it for interaction range checks.
-	pos := Vec3i{X: a.Pos.X, Y: w.cfg.Height - 2, Z: a.Pos.Z}
+	// Place switch at y=0 and teleport onto it for interaction range checks.
+	pos := Vec3i{X: a.Pos.X, Y: 0, Z: a.Pos.Z}
+	w.chunks.SetBlock(pos, w.chunks.gen.Air)
 	a.Inventory["SWITCH"] = 1
 	w.step(nil, nil, []ActionEnvelope{{AgentID: a.ID, Act: protocol.ActMsg{
 		Type:            protocol.TypeAct,

@@ -11,7 +11,6 @@ func TestComputeSurfaceCellAt_surfaceUpdateCases(t *testing.T) {
 	w := &World{
 		chunks: &ChunkStore{
 			gen: WorldGen{
-				Height:    8,
 				Air:       0,
 				BoundaryR: 0,
 			},
@@ -22,8 +21,7 @@ func TestComputeSurfaceCellAt_surfaceUpdateCases(t *testing.T) {
 	ch := &Chunk{
 		CX:     0,
 		CZ:     0,
-		Height: 8,
-		Blocks: make([]uint16, 16*16*8),
+		Blocks: make([]uint16, 16*16),
 	}
 	w.chunks.chunks[ChunkKey{CX: 0, CZ: 0}] = ch
 
@@ -31,36 +29,33 @@ func TestComputeSurfaceCellAt_surfaceUpdateCases(t *testing.T) {
 		air   uint16 = 0
 		stone uint16 = 1
 		wood  uint16 = 2
-		brick uint16 = 3
 	)
 
-	// Use a fixed column within chunk (0,0).
+	// Use a fixed cell within chunk (0,0).
 	wx, wz := 3, 9
 	lx, lz := wx, wz
 
-	// Baseline: surface is STONE at y=2.
-	ch.Set(lx, 2, lz, stone)
-	if got := w.computeSurfaceCellAt(wx, wz); got != (surfaceCell{b: stone, y: 2}) {
-		t.Fatalf("baseline surface = %+v, want stone@2", got)
+	// Baseline: empty cell => AIR@0.
+	if got := w.computeSurfaceCellAt(wx, wz); got != (surfaceCell{b: air, y: 0}) {
+		t.Fatalf("baseline surface = %+v, want air@0", got)
 	}
 
-	// Place a higher block: surface becomes WOOD at y=5.
-	ch.Set(lx, 5, lz, wood)
-	if got := w.computeSurfaceCellAt(wx, wz); got != (surfaceCell{b: wood, y: 5}) {
-		t.Fatalf("place higher surface = %+v, want wood@5", got)
+	// Place a block: surface becomes STONE@0.
+	ch.Set(lx, lz, stone)
+	if got := w.computeSurfaceCellAt(wx, wz); got != (surfaceCell{b: stone, y: 0}) {
+		t.Fatalf("place surface = %+v, want stone@0", got)
 	}
 
-	// Replace the surface at same height: surface becomes BRICK at y=5.
-	ch.Set(lx, 5, lz, brick)
-	if got := w.computeSurfaceCellAt(wx, wz); got != (surfaceCell{b: brick, y: 5}) {
-		t.Fatalf("replace same-height surface = %+v, want brick@5", got)
+	// Replace the surface: surface becomes WOOD@0.
+	ch.Set(lx, lz, wood)
+	if got := w.computeSurfaceCellAt(wx, wz); got != (surfaceCell{b: wood, y: 0}) {
+		t.Fatalf("replace surface = %+v, want wood@0", got)
 	}
 
-	// Mine the surface: remove y=5 and ensure we scan down to y=4.
-	ch.Set(lx, 4, lz, stone)
-	ch.Set(lx, 5, lz, air)
-	if got := w.computeSurfaceCellAt(wx, wz); got != (surfaceCell{b: stone, y: 4}) {
-		t.Fatalf("mine surface = %+v, want stone@4", got)
+	// Mine the surface: remove block => AIR@0.
+	ch.Set(lx, lz, air)
+	if got := w.computeSurfaceCellAt(wx, wz); got != (surfaceCell{b: air, y: 0}) {
+		t.Fatalf("mine surface = %+v, want air@0", got)
 	}
 }
 
@@ -68,7 +63,6 @@ func TestStepObserverChunksForClient_emitsChunkPatch(t *testing.T) {
 	w := &World{
 		chunks: &ChunkStore{
 			gen: WorldGen{
-				Height:    8,
 				Air:       0,
 				BoundaryR: 0,
 			},
@@ -79,8 +73,7 @@ func TestStepObserverChunksForClient_emitsChunkPatch(t *testing.T) {
 	ch := &Chunk{
 		CX:     0,
 		CZ:     0,
-		Height: 8,
-		Blocks: make([]uint16, 16*16*8),
+		Blocks: make([]uint16, 16*16),
 	}
 	w.chunks.chunks[ChunkKey{CX: 0, CZ: 0}] = ch
 
@@ -90,7 +83,7 @@ func TestStepObserverChunksForClient_emitsChunkPatch(t *testing.T) {
 	)
 
 	wx, wz := 3, 9
-	ch.Set(wx, 2, wz, stone)
+	ch.Set(wx, wz, stone)
 
 	dataOut := make(chan []byte, 8)
 	c := &observerClient{
@@ -115,13 +108,13 @@ func TestStepObserverChunksForClient_emitsChunkPatch(t *testing.T) {
 	c.chunks[key] = st
 
 	// Apply the world change first (audit is recorded after mutation).
-	ch.Set(wx, 6, wz, wood)
+	ch.Set(wx, wz, wood)
 	audits := []AuditEntry{
 		{
 			Tick:   100,
 			Actor:  "A1",
 			Action: "SET_BLOCK",
-			Pos:    [3]int{wx, 6, wz},
+			Pos:    [3]int{wx, 0, wz},
 			From:   stone,
 			To:     wood,
 			Reason: "TEST",
@@ -151,8 +144,7 @@ func TestStepObserverChunksForClient_emitsChunkPatch(t *testing.T) {
 		t.Fatalf("unexpected cells len=%d", len(patch.Cells))
 	}
 	cell := patch.Cells[0]
-	if cell.X != wx || cell.Z != wz || cell.Block != wood || cell.Y != 6 {
+	if cell.X != wx || cell.Z != wz || cell.Block != wood || cell.Y != 0 {
 		t.Fatalf("unexpected cell: %+v", cell)
 	}
 }
-

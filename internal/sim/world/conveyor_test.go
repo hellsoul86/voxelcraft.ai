@@ -17,7 +17,7 @@ func TestConveyor_MovesDroppedItemEntity(t *testing.T) {
 		TickRateHz: 5,
 		DayTicks:   6000,
 		ObsRadius:  7,
-		Height:     64,
+		Height:     1,
 		Seed:       42,
 		BoundaryR:  4000,
 	}, cats)
@@ -37,8 +37,9 @@ func TestConveyor_MovesDroppedItemEntity(t *testing.T) {
 	// Place a conveyor facing +Z (yaw 0).
 	a.Inventory["CONVEYOR"] = 1
 	a.Yaw = 0
-	// Place high above the terrain so both the conveyor and its destination are guaranteed AIR.
-	pos := Vec3i{X: a.Pos.X, Y: w.cfg.Height - 2, Z: a.Pos.Z}
+	pos := Vec3i{X: a.Pos.X, Y: 0, Z: a.Pos.Z}
+	w.chunks.SetBlock(pos, w.chunks.gen.Air)
+	w.chunks.SetBlock(Vec3i{X: pos.X, Y: 0, Z: pos.Z + 1}, w.chunks.gen.Air)
 
 	act := protocol.ActMsg{
 		Type:            protocol.TypeAct,
@@ -81,7 +82,7 @@ func TestConveyor_InsertsIntoChest(t *testing.T) {
 		TickRateHz: 5,
 		DayTicks:   6000,
 		ObsRadius:  7,
-		Height:     64,
+		Height:     1,
 		Seed:       42,
 		BoundaryR:  4000,
 	}, cats)
@@ -98,8 +99,10 @@ func TestConveyor_InsertsIntoChest(t *testing.T) {
 	}
 
 	a.Yaw = 0 // +Z
-	pos := Vec3i{X: a.Pos.X, Y: w.cfg.Height - 2, Z: a.Pos.Z}
+	pos := Vec3i{X: a.Pos.X, Y: 0, Z: a.Pos.Z}
 	dst := Vec3i{X: pos.X, Y: pos.Y, Z: pos.Z + 1}
+	w.chunks.SetBlock(pos, w.chunks.gen.Air)
+	w.chunks.SetBlock(dst, w.chunks.gen.Air)
 
 	// Place chest at destination.
 	a.Inventory["CHEST"] = 1
@@ -150,7 +153,7 @@ func TestConveyor_PullsFromBackChest_AndMovesToFrontChest(t *testing.T) {
 		TickRateHz: 5,
 		DayTicks:   6000,
 		ObsRadius:  7,
-		Height:     64,
+		Height:     1,
 		Seed:       42,
 		BoundaryR:  4000,
 	}, cats)
@@ -167,10 +170,12 @@ func TestConveyor_PullsFromBackChest_AndMovesToFrontChest(t *testing.T) {
 	}
 
 	a.Yaw = 0 // +Z
-	y := w.cfg.Height - 2
-	pos := Vec3i{X: a.Pos.X, Y: y, Z: a.Pos.Z}
-	back := Vec3i{X: pos.X, Y: y, Z: pos.Z - 1}
-	front := Vec3i{X: pos.X, Y: y, Z: pos.Z + 1}
+	pos := Vec3i{X: a.Pos.X, Y: 0, Z: a.Pos.Z}
+	back := Vec3i{X: pos.X, Y: 0, Z: pos.Z - 1}
+	front := Vec3i{X: pos.X, Y: 0, Z: pos.Z + 1}
+	w.chunks.SetBlock(pos, w.chunks.gen.Air)
+	w.chunks.SetBlock(back, w.chunks.gen.Air)
+	w.chunks.SetBlock(front, w.chunks.gen.Air)
 
 	// Place back chest.
 	a.Inventory["CHEST"] = 1

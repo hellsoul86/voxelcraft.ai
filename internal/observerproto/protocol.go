@@ -11,6 +11,11 @@ type SubscribeMsg struct {
 	ProtocolVersion string `json:"protocol_version"`
 	ChunkRadius     int    `json:"chunk_radius"`
 	MaxChunks       int    `json:"max_chunks"`
+
+	// Optional: request 3D voxels around a focused agent (for true 3D rendering).
+	FocusAgentID   string `json:"focus_agent_id,omitempty"`
+	VoxelRadius    int    `json:"voxel_radius,omitempty"`
+	VoxelMaxChunks int    `json:"voxel_max_chunks,omitempty"`
 }
 
 // HTTP response for GET /admin/v1/observer/bootstrap.
@@ -122,6 +127,43 @@ type ChunkPatchCell struct {
 
 // Server -> Client. Evict a chunk from the client cache.
 type ChunkEvictMsg struct {
+	Type            string `json:"type"`
+	ProtocolVersion string `json:"protocol_version"`
+	CX              int    `json:"cx"`
+	CZ              int    `json:"cz"`
+}
+
+// Server -> Client. Full voxel data for a chunk (16x16xheight).
+// Encoding "PAL16_U16LE_YZX" means:
+// - Decode base64 to bytes, interpret as little-endian uint16 palette ids
+// - Iteration order: for y in 0..height-1, for z in 0..15, for x in 0..15 (x fastest)
+// - Total length: 16*16*height uint16s
+type ChunkVoxelsMsg struct {
+	Type            string `json:"type"`
+	ProtocolVersion string `json:"protocol_version"`
+	CX              int    `json:"cx"`
+	CZ              int    `json:"cz"`
+	Encoding        string `json:"encoding"`
+	Data            string `json:"data"`
+}
+
+type ChunkVoxelPatchMsg struct {
+	Type            string                `json:"type"`
+	ProtocolVersion string                `json:"protocol_version"`
+	CX              int                   `json:"cx"`
+	CZ              int                   `json:"cz"`
+	Cells           []ChunkVoxelPatchCell `json:"cells"`
+}
+
+type ChunkVoxelPatchCell struct {
+	X     int    `json:"x"`
+	Y     int    `json:"y"`
+	Z     int    `json:"z"`
+	Block uint16 `json:"block"`
+}
+
+// Server -> Client. Evict voxel data for a chunk from the client cache.
+type ChunkVoxelsEvictMsg struct {
 	Type            string `json:"type"`
 	ProtocolVersion string `json:"protocol_version"`
 	CX              int    `json:"cx"`

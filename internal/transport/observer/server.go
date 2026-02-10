@@ -55,8 +55,8 @@ func (s *Server) BootstrapHandler() http.HandlerFunc {
 			Tick:            s.world.CurrentTick(),
 			WorldParams: observerproto.WorldParams{
 				TickRateHz: cfg.TickRateHz,
-				ChunkSize:  [3]int{16, 16, cfg.Height},
-				Height:     cfg.Height,
+				ChunkSize:  [3]int{16, 16, 1},
+				Height:     1,
 				Seed:       cfg.Seed,
 				BoundaryR:  cfg.BoundaryR,
 			},
@@ -104,11 +104,14 @@ func (s *Server) WSHandler() http.HandlerFunc {
 		dataOut := make(chan []byte, 4096)
 
 		joinReq := world.ObserverJoinRequest{
-			SessionID:   sid,
-			TickOut:     tickOut,
-			DataOut:     dataOut,
-			ChunkRadius: sub.ChunkRadius,
-			MaxChunks:   sub.MaxChunks,
+			SessionID:      sid,
+			TickOut:        tickOut,
+			DataOut:        dataOut,
+			ChunkRadius:    sub.ChunkRadius,
+			MaxChunks:      sub.MaxChunks,
+			FocusAgentID:   sub.FocusAgentID,
+			VoxelRadius:    sub.VoxelRadius,
+			VoxelMaxChunks: sub.VoxelMaxChunks,
 		}
 		select {
 		case s.world.ObserverJoin() <- joinReq:
@@ -175,9 +178,12 @@ func (s *Server) WSHandler() http.HandlerFunc {
 			}
 			normalizeSubscribe(&sub)
 			req := world.ObserverSubscribeRequest{
-				SessionID:   sid,
-				ChunkRadius: sub.ChunkRadius,
-				MaxChunks:   sub.MaxChunks,
+				SessionID:      sid,
+				ChunkRadius:    sub.ChunkRadius,
+				MaxChunks:      sub.MaxChunks,
+				FocusAgentID:   sub.FocusAgentID,
+				VoxelRadius:    sub.VoxelRadius,
+				VoxelMaxChunks: sub.VoxelMaxChunks,
 			}
 			select {
 			case s.world.ObserverSubscribe() <- req:
@@ -209,6 +215,20 @@ func normalizeSubscribe(sub *observerproto.SubscribeMsg) {
 	}
 	if sub.MaxChunks > 16384 {
 		sub.MaxChunks = 16384
+	}
+
+	sub.FocusAgentID = strings.TrimSpace(sub.FocusAgentID)
+	if sub.VoxelRadius < 0 {
+		sub.VoxelRadius = 0
+	}
+	if sub.VoxelRadius > 8 {
+		sub.VoxelRadius = 8
+	}
+	if sub.VoxelMaxChunks <= 0 {
+		sub.VoxelMaxChunks = 256
+	}
+	if sub.VoxelMaxChunks > 2048 {
+		sub.VoxelMaxChunks = 2048
 	}
 }
 

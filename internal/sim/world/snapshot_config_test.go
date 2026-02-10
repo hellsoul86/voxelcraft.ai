@@ -18,7 +18,7 @@ func TestSnapshotImport_RestoresOperationalConfig(t *testing.T) {
 		DayTicks:          6000,
 		SeasonLengthTicks: 18000,
 		ObsRadius:         7,
-		Height:            64,
+		Height:     1,
 		Seed:              42,
 		BoundaryR:         4000,
 

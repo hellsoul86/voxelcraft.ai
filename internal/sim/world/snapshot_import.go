@@ -25,6 +25,9 @@ func (w *World) ImportSnapshot(s snapshot.SnapshotV1) error {
 	if w.cfg.Height != s.Height {
 		return fmt.Errorf("snapshot height mismatch: cfg=%d snap=%d", w.cfg.Height, s.Height)
 	}
+	if s.Height != 1 {
+		return fmt.Errorf("unsupported snapshot height for 2D world: height=%d", s.Height)
+	}
 	if w.cfg.DayTicks != s.DayTicks {
 		return fmt.Errorf("snapshot day_ticks mismatch: cfg=%d snap=%d", w.cfg.DayTicks, s.DayTicks)
 	}
@@ -118,13 +121,18 @@ func (w *World) ImportSnapshot(s snapshot.SnapshotV1) error {
 	// Rebuild chunks.
 	store := NewChunkStore(w.chunks.gen)
 	for _, ch := range s.Chunks {
+		if ch.Height != 1 {
+			return fmt.Errorf("snapshot chunk height mismatch: got %d want 1", ch.Height)
+		}
+		if len(ch.Blocks) != 16*16 {
+			return fmt.Errorf("snapshot chunk blocks length mismatch: got %d want %d", len(ch.Blocks), 16*16)
+		}
 		k := ChunkKey{CX: ch.CX, CZ: ch.CZ}
 		blocks := make([]uint16, len(ch.Blocks))
 		copy(blocks, ch.Blocks)
 		c := &Chunk{
 			CX:     ch.CX,
 			CZ:     ch.CZ,
-			Height: ch.Height,
 			Blocks: blocks,
 			dirty:  true,
 		}

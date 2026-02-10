@@ -2,9 +2,9 @@
   "id": "workshop_pad",
   "author": "system",
   "version": "0.9",
-  "aabb": [[0,0,0],[2,2,2]],
+  "aabb": [[0,0,0],[3,1,2]],
   "cost": [
-    {"item":"PLANK","count":4},
+    {"item":"PLANK","count":3},
     {"item":"CRAFTING_BENCH","count":1},
     {"item":"FURNACE","count":1},
     {"item":"TORCH","count":1}
@@ -12,12 +12,10 @@
   "blocks": [
     {"pos":[0,0,0],"block":"PLANK"},
     {"pos":[1,0,0],"block":"PLANK"},
-    {"pos":[0,0,1],"block":"PLANK"},
-    {"pos":[1,0,1],"block":"PLANK"},
+    {"pos":[2,0,0],"block":"PLANK"},
 
-    {"pos":[0,1,0],"block":"CRAFTING_BENCH"},
-    {"pos":[1,1,0],"block":"FURNACE"},
-    {"pos":[0,1,1],"block":"TORCH"}
+    {"pos":[0,0,1],"block":"CRAFTING_BENCH"},
+    {"pos":[1,0,1],"block":"FURNACE"},
+    {"pos":[2,0,1],"block":"TORCH"}
   ]
 }
-

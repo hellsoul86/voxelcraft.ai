@@ -18,7 +18,7 @@ func TestSnapshotExportImport_SwitchStateRoundTrip(t *testing.T) {
 		TickRateHz: 5,
 		DayTicks:   6000,
 		ObsRadius:  7,
-		Height:     64,
+		Height:     1,
 		Seed:       42,
 		BoundaryR:  4000,
 	}
@@ -36,7 +36,8 @@ func TestSnapshotExportImport_SwitchStateRoundTrip(t *testing.T) {
 		t.Fatalf("missing agent")
 	}
 
-	pos := Vec3i{X: a.Pos.X, Y: w1.cfg.Height - 2, Z: a.Pos.Z}
+	pos := Vec3i{X: a.Pos.X, Y: 0, Z: a.Pos.Z}
+	w1.chunks.SetBlock(pos, w1.chunks.gen.Air)
 	a.Inventory["SWITCH"] = 1
 	w1.step(nil, nil, []ActionEnvelope{{AgentID: a.ID, Act: protocol.ActMsg{
 		Type:            protocol.TypeAct,

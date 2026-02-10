@@ -17,7 +17,7 @@ func TestStartEvent_CrystalRift_SpawnsOreAndBroadcastsLocation(t *testing.T) {
 		TickRateHz: 5,
 		DayTicks:   6000,
 		ObsRadius:  7,
-		Height:     64,
+		Height:     1,
 		Seed:       42,
 		BoundaryR:  4000,
 	}, cats)
@@ -66,15 +66,12 @@ func TestStartEvent_CrystalRift_SpawnsOreAndBroadcastsLocation(t *testing.T) {
 	}
 
 	oreID := cats.Blocks.Index["CRYSTAL_ORE"]
-	// Spawn is deterministic: a 5x5x3 cluster centered at (center.X, y=8, center.Z).
-	yc := 8
-	for dy := -1; dy <= 1; dy++ {
-		for dz := -2; dz <= 2; dz++ {
-			for dx := -2; dx <= 2; dx++ {
-				p := Vec3i{X: w.activeEventCenter.X + dx, Y: yc + dy, Z: w.activeEventCenter.Z + dz}
-				if got := w.chunks.GetBlock(p); got != oreID {
-					t.Fatalf("ore cluster mismatch at %+v: got %d want %d", p, got, oreID)
-				}
+	// 2D world: deterministic 5x5 surface cluster centered at (center.X, y=0, center.Z).
+	for dz := -2; dz <= 2; dz++ {
+		for dx := -2; dx <= 2; dx++ {
+			p := Vec3i{X: w.activeEventCenter.X + dx, Y: 0, Z: w.activeEventCenter.Z + dz}
+			if got := w.chunks.GetBlock(p); got != oreID {
+				t.Fatalf("ore cluster mismatch at %+v: got %d want %d", p, got, oreID)
 			}
 		}
 	}
@@ -90,7 +87,7 @@ func TestCrystalRift_MiningInZoneGivesBonusShard(t *testing.T) {
 		TickRateHz: 5,
 		DayTicks:   6000,
 		ObsRadius:  7,
-		Height:     64,
+		Height:     1,
 		Seed:       42,
 		BoundaryR:  4000,
 	}, cats)
@@ -109,7 +106,7 @@ func TestCrystalRift_MiningInZoneGivesBonusShard(t *testing.T) {
 	w.startEvent(0, "CRYSTAL_RIFT")
 
 	// Mine the center ore block.
-	target := Vec3i{X: w.activeEventCenter.X, Y: 8, Z: w.activeEventCenter.Z}
+	target := Vec3i{X: w.activeEventCenter.X, Y: 0, Z: w.activeEventCenter.Z}
 	a.Pos = target
 
 	act := protocol.ActMsg{
@@ -127,8 +124,30 @@ func TestCrystalRift_MiningInZoneGivesBonusShard(t *testing.T) {
 		w.step(nil, nil, nil)
 	}
 
-	if got := a.Inventory["CRYSTAL_SHARD"]; got != 2 {
-		t.Fatalf("CRYSTAL_SHARD=%d want 2 (base drop + event bonus)", got)
+	// Event bonus goes directly to inventory; base drop is an ITEM entity.
+	if got := a.Inventory["CRYSTAL_SHARD"]; got != 1 {
+		t.Fatalf("CRYSTAL_SHARD=%d want 1 (event bonus only)", got)
+	}
+	if ids := w.itemsAt[target]; len(ids) == 0 {
+		t.Fatalf("expected item entity drop at mined pos")
+	} else {
+		id := ids[0]
+		e := w.items[id]
+		if e == nil || e.Item != "CRYSTAL_SHARD" || e.Count != 1 {
+			t.Fatalf("unexpected drop entity: %+v", e)
+		}
+		// Pick up the drop to verify full reward path.
+		act2 := protocol.ActMsg{
+			Type:            protocol.TypeAct,
+			ProtocolVersion: protocol.Version,
+			Tick:            w.CurrentTick(),
+			AgentID:         a.ID,
+			Tasks:           []protocol.TaskReq{{ID: "K2", Type: "GATHER", TargetID: id}},
+		}
+		w.step(nil, nil, []ActionEnvelope{{AgentID: a.ID, Act: act2}})
+		if got := a.Inventory["CRYSTAL_SHARD"]; got != 2 {
+			t.Fatalf("CRYSTAL_SHARD=%d want 2 (base drop + event bonus)", got)
+		}
 	}
 
 	foundGoal := false
@@ -153,7 +172,7 @@ func TestStartEvent_RuinsGate_SpawnsLootChestAndOpenAwardsGoal(t *testing.T) {
 		TickRateHz: 5,
 		DayTicks:   6000,
 		ObsRadius:  7,
-		Height:     64,
+		Height:     1,
 		Seed:       42,
 		BoundaryR:  4000,
 	}, cats)

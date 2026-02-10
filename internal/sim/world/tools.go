@@ -76,4 +76,3 @@ func mineParamsForTier(tier int) (workNeeded int, staminaCost int) {
 		return workNeeded, staminaCost
 	}
 }
-

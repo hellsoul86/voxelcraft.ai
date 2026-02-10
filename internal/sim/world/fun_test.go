@@ -17,7 +17,7 @@ func TestFun_NoveltyBiomeOnJoin(t *testing.T) {
 		TickRateHz: 5,
 		DayTicks:   6000,
 		ObsRadius:  7,
-		Height:     64,
+		Height:     1,
 		Seed:       42,
 		BoundaryR:  4000,
 	}, cats)
@@ -47,7 +47,7 @@ func TestFun_NoveltyRecipeOnFirstCraft(t *testing.T) {
 		TickRateHz: 5,
 		DayTicks:   6000,
 		ObsRadius:  7,
-		Height:     64,
+		Height:     1,
 		Seed:       42,
 		BoundaryR:  4000,
 	}, cats)
@@ -94,7 +94,7 @@ func TestFun_CreationDelayedAwardOnBlueprintSurvival(t *testing.T) {
 		TickRateHz: 5,
 		DayTicks:   6000,
 		ObsRadius:  7,
-		Height:     64,
+		Height:     1,
 		Seed:       42,
 		BoundaryR:  4000,
 	}, cats)
@@ -110,7 +110,8 @@ func TestFun_CreationDelayedAwardOnBlueprintSurvival(t *testing.T) {
 		t.Fatalf("missing agent")
 	}
 
-	anchor := Vec3i{X: a.Pos.X, Y: 40, Z: a.Pos.Z}
+	anchor := Vec3i{X: a.Pos.X, Y: 0, Z: a.Pos.Z}
+	clearBlueprintFootprint(t, w, "road_segment", anchor, 0)
 	act := protocol.ActMsg{
 		Type:            protocol.TypeAct,
 		ProtocolVersion: protocol.Version,

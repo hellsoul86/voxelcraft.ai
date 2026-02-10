@@ -17,7 +17,7 @@ func TestConveyor_DisabledByAdjacentSwitchUntilToggledOn(t *testing.T) {
 		TickRateHz: 5,
 		DayTicks:   6000,
 		ObsRadius:  7,
-		Height:     64,
+		Height:     1,
 		Seed:       42,
 		BoundaryR:  4000,
 	}, cats)
@@ -34,10 +34,12 @@ func TestConveyor_DisabledByAdjacentSwitchUntilToggledOn(t *testing.T) {
 	}
 
 	a.Yaw = 0 // +Z
-	y := w.cfg.Height - 2
-	pos := Vec3i{X: a.Pos.X, Y: y, Z: a.Pos.Z}
-	sw := Vec3i{X: pos.X + 1, Y: y, Z: pos.Z}
-	dst := Vec3i{X: pos.X, Y: y, Z: pos.Z + 1}
+	pos := Vec3i{X: a.Pos.X, Y: 0, Z: a.Pos.Z}
+	sw := Vec3i{X: pos.X + 1, Y: 0, Z: pos.Z}
+	dst := Vec3i{X: pos.X, Y: 0, Z: pos.Z + 1}
+	w.chunks.SetBlock(pos, w.chunks.gen.Air)
+	w.chunks.SetBlock(sw, w.chunks.gen.Air)
+	w.chunks.SetBlock(dst, w.chunks.gen.Air)
 
 	// Place switch adjacent (defaults off).
 	a.Inventory["SWITCH"] = 1

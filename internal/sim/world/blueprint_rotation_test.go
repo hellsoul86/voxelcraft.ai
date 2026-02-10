@@ -41,7 +41,7 @@ func TestBuildBlueprint_RotationAffectsPlacementAndValidation(t *testing.T) {
 		TickRateHz: 5,
 		DayTicks:   6000,
 		ObsRadius:  7,
-		Height:     64,
+		Height:     1,
 		Seed:       42,
 		BoundaryR:  4000,
 	}, cats)
@@ -58,8 +58,9 @@ func TestBuildBlueprint_RotationAffectsPlacementAndValidation(t *testing.T) {
 	}
 	a.Inventory["PLANK"] = 10
 
-	anchor := Vec3i{X: 10, Y: 40, Z: 10}
+	anchor := Vec3i{X: 10, Y: 0, Z: 10}
 	rot := 1
+	clearBlueprintFootprint(t, w, "road_segment", anchor, rot)
 
 	act := protocol.ActMsg{
 		Type:            protocol.TypeAct,
@@ -83,7 +84,7 @@ func TestBuildBlueprint_RotationAffectsPlacementAndValidation(t *testing.T) {
 	plankID := cats.Blocks.Index["PLANK"]
 	// rotation=1 should place along +X axis: offsets (0..4, 0)
 	for i := 0; i < 5; i++ {
-		p := Vec3i{X: anchor.X + i, Y: anchor.Y, Z: anchor.Z}
+		p := Vec3i{X: anchor.X + i, Y: 0, Z: anchor.Z}
 		if got := w.chunks.GetBlock(p); got != plankID {
 			t.Fatalf("block at %+v: got %d want %d (PLANK)", p, got, plankID)
 		}
@@ -107,7 +108,7 @@ func TestBuildBlueprint_Rotation_LShape(t *testing.T) {
 		TickRateHz: 5,
 		DayTicks:   6000,
 		ObsRadius:  7,
-		Height:     64,
+		Height:     1,
 		Seed:       42,
 		BoundaryR:  4000,
 	}, cats)
@@ -124,8 +125,9 @@ func TestBuildBlueprint_Rotation_LShape(t *testing.T) {
 	}
 	a.Inventory["PLANK"] = 20
 
-	anchor := Vec3i{X: 10, Y: 40, Z: 10}
+	anchor := Vec3i{X: 10, Y: 0, Z: 10}
 	rot := 1
+	clearBlueprintFootprint(t, w, "road_turn", anchor, rot)
 
 	act := protocol.ActMsg{
 		Type:            protocol.TypeAct,
@@ -152,14 +154,14 @@ func TestBuildBlueprint_Rotation_LShape(t *testing.T) {
 	// - a 5-long segment along +X at Z=0 (relative), and
 	// - a 3-long segment along -Z at X=4 (relative), excluding the corner overlap.
 	expect := []Vec3i{
-		{X: anchor.X + 0, Y: anchor.Y, Z: anchor.Z + 0},
-		{X: anchor.X + 1, Y: anchor.Y, Z: anchor.Z + 0},
-		{X: anchor.X + 2, Y: anchor.Y, Z: anchor.Z + 0},
-		{X: anchor.X + 3, Y: anchor.Y, Z: anchor.Z + 0},
-		{X: anchor.X + 4, Y: anchor.Y, Z: anchor.Z + 0},
-		{X: anchor.X + 4, Y: anchor.Y, Z: anchor.Z - 1},
-		{X: anchor.X + 4, Y: anchor.Y, Z: anchor.Z - 2},
-		{X: anchor.X + 4, Y: anchor.Y, Z: anchor.Z - 3},
+		{X: anchor.X + 0, Y: 0, Z: anchor.Z + 0},
+		{X: anchor.X + 1, Y: 0, Z: anchor.Z + 0},
+		{X: anchor.X + 2, Y: 0, Z: anchor.Z + 0},
+		{X: anchor.X + 3, Y: 0, Z: anchor.Z + 0},
+		{X: anchor.X + 4, Y: 0, Z: anchor.Z + 0},
+		{X: anchor.X + 4, Y: 0, Z: anchor.Z - 1},
+		{X: anchor.X + 4, Y: 0, Z: anchor.Z - 2},
+		{X: anchor.X + 4, Y: 0, Z: anchor.Z - 3},
 	}
 	for _, p := range expect {
 		if got := w.chunks.GetBlock(p); got != plankID {

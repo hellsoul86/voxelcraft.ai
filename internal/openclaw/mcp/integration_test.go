@@ -49,7 +49,7 @@ func TestMCP_Sidecar_EndToEnd_WS(t *testing.T) {
 		ID:         "test_world",
 		TickRateHz: 50,
 		ObsRadius:  7,
-		Height:     64,
+		Height:     1,
 		Seed:       123,
 	}, cats)
 	if err != nil {
@@ -188,4 +188,3 @@ func TestMCP_Sidecar_EndToEnd_WS(t *testing.T) {
 	// Let goroutines observe cancel.
 	time.Sleep(50 * time.Millisecond)
 }
-

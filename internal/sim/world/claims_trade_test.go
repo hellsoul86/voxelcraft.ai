@@ -17,7 +17,7 @@ func TestCurfewBlocksBuildAndBreak(t *testing.T) {
 		TickRateHz: 5,
 		DayTicks:   100,
 		ObsRadius:  7,
-		Height:     64,
+		Height:     1,
 		Seed:       1,
 		BoundaryR:  4000,
 	}, cats)
@@ -73,7 +73,7 @@ func TestTradeMarketTax(t *testing.T) {
 		TickRateHz: 5,
 		DayTicks:   6000,
 		ObsRadius:  7,
-		Height:     64,
+		Height:     1,
 		Seed:       1,
 		BoundaryR:  4000,
 	}, cats)
