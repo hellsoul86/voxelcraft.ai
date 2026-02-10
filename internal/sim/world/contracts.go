@@ -206,6 +206,12 @@ func (w *World) tickContracts(nowTick uint64) {
 			// Validate structure roughly by checking all blueprint blocks at anchor.
 			ok := w.checkBlueprintPlaced(c.BlueprintID, c.Anchor, c.Rotation)
 			if ok {
+				bp, okBP := w.catalogs.Blueprints.ByID[c.BlueprintID]
+				if okBP && !w.structureStable(&bp, c.Anchor, c.Rotation) {
+					ok = false
+				}
+			}
+			if ok {
 				for item, n := range c.Reward {
 					terminal.unreserve(item, n)
 					terminal.Inventory[item] -= n

@@ -33,6 +33,8 @@ type tuningCatalog struct {
 type tuningRateLimits struct {
 	SayWindowTicks        int `json:"say_window_ticks"`
 	SayMax                int `json:"say_max"`
+	MarketSayWindowTicks  int `json:"market_say_window_ticks"`
+	MarketSayMax          int `json:"market_say_max"`
 	WhisperWindowTicks    int `json:"whisper_window_ticks"`
 	WhisperMax            int `json:"whisper_max"`
 	OfferTradeWindowTicks int `json:"offer_trade_window_ticks"`
@@ -58,6 +60,8 @@ func (w *World) tuningCatalogMsg() protocol.CatalogMsg {
 		RateLimits: tuningRateLimits{
 			SayWindowTicks:        w.cfg.RateLimits.SayWindowTicks,
 			SayMax:                w.cfg.RateLimits.SayMax,
+			MarketSayWindowTicks:  w.cfg.RateLimits.MarketSayWindowTicks,
+			MarketSayMax:          w.cfg.RateLimits.MarketSayMax,
 			WhisperWindowTicks:    w.cfg.RateLimits.WhisperWindowTicks,
 			WhisperMax:            w.cfg.RateLimits.WhisperMax,
 			OfferTradeWindowTicks: w.cfg.RateLimits.OfferTradeWindowTicks,

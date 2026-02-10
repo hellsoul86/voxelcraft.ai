@@ -79,6 +79,27 @@
 
 补充（MVP 实现）：
 - 服务器会额外下发 `name="tuning"` 的 catalog，用于告知运行参数（例如 `snapshot_every_ticks`、`director_every_ticks`、`rate_limits` 等），方便 agent 做冷却/调度推理。
+- 服务器会在握手后下发完整 catalogs（MVP：单片），**下发顺序固定**：
+  - `block_palette`
+  - `item_palette`
+  - `tuning`
+  - `recipes`
+  - `blueprints`
+  - `law_templates`
+  - `events`
+
+CATALOG `data` 形状（MVP）：
+- `block_palette`: `string[]`（方块 id 列表，AIR 必为 index=0）
+- `item_palette`: `string[]`（物品 id 列表）
+- `tuning`: object（见 `configs/tuning.yaml` 对应字段；用于冷却/导演频率等）
+- `recipes`: `RecipeDef[]`（按 `recipe_id` 排序）
+  - `{"recipe_id","station","inputs":[{"item","count"}...],"outputs":[...],"tier","time_ticks"}`
+- `blueprints`: `BlueprintDef[]`（按 `id` 排序）
+  - `{"id","author","version","aabb","blocks":[{"pos","block"}...],"cost":[{"item","count"}...]}`
+- `law_templates`: object
+  - `{"templates":[{"id","title","description","params"}...]}`
+- `events`: `EventTemplate[]`（按 `id` 排序）
+  - `{"id","category","title","description","base_weight","params"}`（`params` 可选）
 
 ## 6. OBS
 
@@ -122,6 +143,7 @@ Instants:
 - `SEARCH_BOARD(board_id,text,limit?)`
 - `SET_SIGN(target_id,text)`（target_id 形如 `SIGN@x,y,z`）
 - `TOGGLE_SWITCH(target_id)`（target_id 形如 `SWITCH@x,y,z`）
+- `UPGRADE_CLAIM(land_id,radius)`（radius 目前仅支持 `64|128`；要求 land admin 且维护费 stage=0）
 - `SET_PERMISSIONS(land_id, policy)` (claim flags)
 - `ADD_MEMBER(land_id, member_id)` / `REMOVE_MEMBER(land_id, member_id)` (claim members)
 - `CREATE_ORG(org_kind, org_name)` -> `org_id` (kinds: `GUILD|CITY`)
@@ -132,6 +154,11 @@ Instants:
 - `VOTE(law_id, choice)` (MVP: land owner or member; `choice` in `YES|NO|ABSTAIN`)
 - `SAVE_MEMORY(key,value,ttl_ticks)`
 - `LOAD_MEMORY(prefix,limit)`
+
+`SAY` channels（MVP）：
+- `LOCAL`：广播给曼哈顿距离 `<=32` 的 agents
+- `CITY`：仅广播给同一组织 `org_id` 的成员；发送者必须已加入该组织，否则 `E_NO_PERMISSION`
+- `MARKET`：全服广播；发送者当前位置需 `local_rules.permissions.can_trade=true`，否则 `E_NO_PERMISSION`
 
 Tasks:
 - `MOVE_TO(target,tolerance)`
@@ -173,3 +200,10 @@ Contracts (Instants):
 当触发 `E_RATE_LIMIT` 时，服务端会在 `ACTION_RESULT` event 中附带冷却信息：
 - `cooldown_ticks`: 距离下一次窗口重置还剩多少 ticks
 - `cooldown_until_tick`: 下一次窗口重置的 tick（client 可据此推算等待时间）
+
+默认值：
+- `SAY`（`LOCAL/CITY`）：`window=50 ticks`, `max=5`
+- `SAY`（`MARKET`）：`window=50 ticks`, `max=2`（独立桶 `SAY_MARKET`，不与普通 `SAY` 共享计数）
+- `WHISPER`：`window=50 ticks`, `max=5`
+- `OFFER_TRADE`：`window=50 ticks`, `max=3`
+- `POST_BOARD`：`window=600 ticks`, `max=1`

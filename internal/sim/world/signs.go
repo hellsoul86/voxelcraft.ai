@@ -59,4 +59,3 @@ func (w *World) sortedSignPositionsNear(pos Vec3i, dist int) []Vec3i {
 	})
 	return out
 }
-

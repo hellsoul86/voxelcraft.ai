@@ -73,4 +73,3 @@ func TestTask_Gather_PicksUpItemEntityAndRemovesIt(t *testing.T) {
 		t.Fatalf("expected item entity to be removed after gather")
 	}
 }
-

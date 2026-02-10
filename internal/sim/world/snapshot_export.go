@@ -658,6 +658,8 @@ func (w *World) ExportSnapshot(nowTick uint64) snapshot.SnapshotV1 {
 		RateLimits: snapshot.RateLimitsV1{
 			SayWindowTicks:        w.cfg.RateLimits.SayWindowTicks,
 			SayMax:                w.cfg.RateLimits.SayMax,
+			MarketSayWindowTicks:  w.cfg.RateLimits.MarketSayWindowTicks,
+			MarketSayMax:          w.cfg.RateLimits.MarketSayMax,
 			WhisperWindowTicks:    w.cfg.RateLimits.WhisperWindowTicks,
 			WhisperMax:            w.cfg.RateLimits.WhisperMax,
 			OfferTradeWindowTicks: w.cfg.RateLimits.OfferTradeWindowTicks,

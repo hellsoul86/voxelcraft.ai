@@ -165,4 +165,3 @@ func TestSign_SetPermissionDeniedForVisitorWhenAllowBuildFalse(t *testing.T) {
 		t.Fatalf("expected E_NO_PERMISSION, got %+v", ev)
 	}
 }
-

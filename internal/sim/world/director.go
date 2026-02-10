@@ -46,9 +46,9 @@ func (w *World) systemDirector(nowTick uint64) {
 			"BANDIT_CAMP",
 			"CIVIC_VOTE",
 		}
-		day := int(nowTick/uint64(w.cfg.DayTicks)) + 1
-		if day >= 1 && day <= len(schedule) {
-			w.startEvent(nowTick, schedule[day-1])
+		dayInSeason := w.seasonDay(nowTick)
+		if dayInSeason >= 1 && dayInSeason <= len(schedule) {
+			w.startEvent(nowTick, schedule[dayInSeason-1])
 			return
 		}
 	}

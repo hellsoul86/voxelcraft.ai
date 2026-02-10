@@ -48,6 +48,8 @@ func (w *World) ImportSnapshot(s snapshot.SnapshotV1) error {
 	}
 	if s.RateLimits.SayWindowTicks > 0 ||
 		s.RateLimits.SayMax > 0 ||
+		s.RateLimits.MarketSayWindowTicks > 0 ||
+		s.RateLimits.MarketSayMax > 0 ||
 		s.RateLimits.WhisperWindowTicks > 0 ||
 		s.RateLimits.WhisperMax > 0 ||
 		s.RateLimits.OfferTradeWindowTicks > 0 ||
@@ -57,6 +59,8 @@ func (w *World) ImportSnapshot(s snapshot.SnapshotV1) error {
 		w.cfg.RateLimits = RateLimitConfig{
 			SayWindowTicks:        s.RateLimits.SayWindowTicks,
 			SayMax:                s.RateLimits.SayMax,
+			MarketSayWindowTicks:  s.RateLimits.MarketSayWindowTicks,
+			MarketSayMax:          s.RateLimits.MarketSayMax,
 			WhisperWindowTicks:    s.RateLimits.WhisperWindowTicks,
 			WhisperMax:            s.RateLimits.WhisperMax,
 			OfferTradeWindowTicks: s.RateLimits.OfferTradeWindowTicks,

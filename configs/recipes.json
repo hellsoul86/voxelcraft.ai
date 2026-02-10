@@ -32,6 +32,78 @@
     "time_ticks":5
   },
   {
+    "recipe_id":"wood_pickaxe",
+    "station":"CRAFTING_BENCH",
+    "inputs":[{"item":"PLANK","count":3},{"item":"STICK","count":2}],
+    "outputs":[{"item":"WOOD_PICKAXE","count":1}],
+    "tier":1,
+    "time_ticks":5
+  },
+  {
+    "recipe_id":"wood_axe",
+    "station":"CRAFTING_BENCH",
+    "inputs":[{"item":"PLANK","count":3},{"item":"STICK","count":2}],
+    "outputs":[{"item":"WOOD_AXE","count":1}],
+    "tier":1,
+    "time_ticks":5
+  },
+  {
+    "recipe_id":"wood_shovel",
+    "station":"CRAFTING_BENCH",
+    "inputs":[{"item":"PLANK","count":1},{"item":"STICK","count":2}],
+    "outputs":[{"item":"WOOD_SHOVEL","count":1}],
+    "tier":1,
+    "time_ticks":5
+  },
+  {
+    "recipe_id":"stone_pickaxe",
+    "station":"CRAFTING_BENCH",
+    "inputs":[{"item":"STONE","count":3},{"item":"STICK","count":2}],
+    "outputs":[{"item":"STONE_PICKAXE","count":1}],
+    "tier":2,
+    "time_ticks":5
+  },
+  {
+    "recipe_id":"stone_axe",
+    "station":"CRAFTING_BENCH",
+    "inputs":[{"item":"STONE","count":3},{"item":"STICK","count":2}],
+    "outputs":[{"item":"STONE_AXE","count":1}],
+    "tier":2,
+    "time_ticks":5
+  },
+  {
+    "recipe_id":"stone_shovel",
+    "station":"CRAFTING_BENCH",
+    "inputs":[{"item":"STONE","count":1},{"item":"STICK","count":2}],
+    "outputs":[{"item":"STONE_SHOVEL","count":1}],
+    "tier":2,
+    "time_ticks":5
+  },
+  {
+    "recipe_id":"iron_pickaxe",
+    "station":"CRAFTING_BENCH",
+    "inputs":[{"item":"IRON_INGOT","count":3},{"item":"STICK","count":2}],
+    "outputs":[{"item":"IRON_PICKAXE","count":1}],
+    "tier":3,
+    "time_ticks":5
+  },
+  {
+    "recipe_id":"iron_axe",
+    "station":"CRAFTING_BENCH",
+    "inputs":[{"item":"IRON_INGOT","count":3},{"item":"STICK","count":2}],
+    "outputs":[{"item":"IRON_AXE","count":1}],
+    "tier":3,
+    "time_ticks":5
+  },
+  {
+    "recipe_id":"iron_shovel",
+    "station":"CRAFTING_BENCH",
+    "inputs":[{"item":"IRON_INGOT","count":1},{"item":"STICK","count":2}],
+    "outputs":[{"item":"IRON_SHOVEL","count":1}],
+    "tier":3,
+    "time_ticks":5
+  },
+  {
     "recipe_id":"torch",
     "station":"HAND",
     "inputs":[{"item":"COAL","count":1},{"item":"STICK","count":1}],
@@ -52,6 +124,14 @@
     "station":"FURNACE",
     "inputs":[{"item":"COPPER_ORE","count":1},{"item":"COAL","count":1}],
     "outputs":[{"item":"COPPER_INGOT","count":1}],
+    "tier":2,
+    "time_ticks":10
+  },
+  {
+    "recipe_id":"cooked_meat",
+    "station":"FURNACE",
+    "inputs":[{"item":"RAW_MEAT","count":1},{"item":"COAL","count":1}],
+    "outputs":[{"item":"COOKED_MEAT","count":1}],
     "tier":2,
     "time_ticks":10
   },

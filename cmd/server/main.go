@@ -2,9 +2,11 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"net/http/pprof"
 	"os"
@@ -117,6 +119,8 @@ func main() {
 			RateLimits: world.RateLimitConfig{
 				SayWindowTicks:        tune.RateLimits.SayWindowTicks,
 				SayMax:                tune.RateLimits.SayMax,
+				MarketSayWindowTicks:  tune.RateLimits.MarketSayWindowTicks,
+				MarketSayMax:          tune.RateLimits.MarketSayMax,
 				WhisperWindowTicks:    tune.RateLimits.WhisperWindowTicks,
 				WhisperMax:            tune.RateLimits.WhisperMax,
 				OfferTradeWindowTicks: tune.RateLimits.OfferTradeWindowTicks,
@@ -156,6 +160,8 @@ func main() {
 			RateLimits: world.RateLimitConfig{
 				SayWindowTicks:        tune.RateLimits.SayWindowTicks,
 				SayMax:                tune.RateLimits.SayMax,
+				MarketSayWindowTicks:  tune.RateLimits.MarketSayWindowTicks,
+				MarketSayMax:          tune.RateLimits.MarketSayMax,
 				WhisperWindowTicks:    tune.RateLimits.WhisperWindowTicks,
 				WhisperMax:            tune.RateLimits.WhisperMax,
 				OfferTradeWindowTicks: tune.RateLimits.OfferTradeWindowTicks,
@@ -202,6 +208,7 @@ func main() {
 					logger.Printf("snapshot write: %v", err)
 				} else if idx != nil {
 					idx.RecordSnapshot(path, snap)
+					idx.RecordSnapshotState(snap)
 					if season, archivedPath, ok, err := archive.ArchiveSeasonSnapshot(worldDir, path, snap); err != nil {
 						logger.Printf("archive season snapshot: %v", err)
 					} else if ok {
@@ -230,10 +237,98 @@ func main() {
 	})
 	mux.HandleFunc("/metrics", func(rw http.ResponseWriter, r *http.Request) {
 		rw.Header().Set("Content-Type", "text/plain; version=0.0.4")
+
+		m := w.Metrics()
+		tick := w.CurrentTick()
+		if m.Tick != 0 {
+			tick = m.Tick
+		}
+
 		// Minimal Prometheus exposition format.
 		fmt.Fprintf(rw, "# HELP voxelcraft_world_tick Current world tick.\n")
 		fmt.Fprintf(rw, "# TYPE voxelcraft_world_tick gauge\n")
-		fmt.Fprintf(rw, "voxelcraft_world_tick{world=%q} %d\n", *worldID, w.CurrentTick())
+		fmt.Fprintf(rw, "voxelcraft_world_tick{world=%q} %d\n", *worldID, tick)
+
+		fmt.Fprintf(rw, "# HELP voxelcraft_world_agents Current number of agents in the world.\n")
+		fmt.Fprintf(rw, "# TYPE voxelcraft_world_agents gauge\n")
+		fmt.Fprintf(rw, "voxelcraft_world_agents{world=%q} %d\n", *worldID, m.Agents)
+
+		fmt.Fprintf(rw, "# HELP voxelcraft_world_clients Current number of connected clients.\n")
+		fmt.Fprintf(rw, "# TYPE voxelcraft_world_clients gauge\n")
+		fmt.Fprintf(rw, "voxelcraft_world_clients{world=%q} %d\n", *worldID, m.Clients)
+
+		fmt.Fprintf(rw, "# HELP voxelcraft_world_loaded_chunks Loaded chunk count.\n")
+		fmt.Fprintf(rw, "# TYPE voxelcraft_world_loaded_chunks gauge\n")
+		fmt.Fprintf(rw, "voxelcraft_world_loaded_chunks{world=%q} %d\n", *worldID, m.LoadedChunks)
+
+		fmt.Fprintf(rw, "# HELP voxelcraft_world_queue_depth Channel backlog depth.\n")
+		fmt.Fprintf(rw, "# TYPE voxelcraft_world_queue_depth gauge\n")
+		fmt.Fprintf(rw, "voxelcraft_world_queue_depth{world=%q,queue=%q} %d\n", *worldID, "inbox", m.QueueDepths.Inbox)
+		fmt.Fprintf(rw, "voxelcraft_world_queue_depth{world=%q,queue=%q} %d\n", *worldID, "join", m.QueueDepths.Join)
+		fmt.Fprintf(rw, "voxelcraft_world_queue_depth{world=%q,queue=%q} %d\n", *worldID, "leave", m.QueueDepths.Leave)
+		fmt.Fprintf(rw, "voxelcraft_world_queue_depth{world=%q,queue=%q} %d\n", *worldID, "attach", m.QueueDepths.Attach)
+
+		fmt.Fprintf(rw, "# HELP voxelcraft_world_step_ms Last tick step duration in milliseconds.\n")
+		fmt.Fprintf(rw, "# TYPE voxelcraft_world_step_ms gauge\n")
+		fmt.Fprintf(rw, "voxelcraft_world_step_ms{world=%q} %.3f\n", *worldID, m.StepMS)
+
+		fmt.Fprintf(rw, "# HELP voxelcraft_director_metric Director metrics (0..1).\n")
+		fmt.Fprintf(rw, "# TYPE voxelcraft_director_metric gauge\n")
+		fmt.Fprintf(rw, "voxelcraft_director_metric{world=%q,metric=%q} %.6f\n", *worldID, "trade", m.Director.Trade)
+		fmt.Fprintf(rw, "voxelcraft_director_metric{world=%q,metric=%q} %.6f\n", *worldID, "conflict", m.Director.Conflict)
+		fmt.Fprintf(rw, "voxelcraft_director_metric{world=%q,metric=%q} %.6f\n", *worldID, "exploration", m.Director.Exploration)
+		fmt.Fprintf(rw, "voxelcraft_director_metric{world=%q,metric=%q} %.6f\n", *worldID, "inequality", m.Director.Inequality)
+		fmt.Fprintf(rw, "voxelcraft_director_metric{world=%q,metric=%q} %.6f\n", *worldID, "public_infra", m.Director.PublicInfra)
+
+		fmt.Fprintf(rw, "# HELP voxelcraft_stats_window Rolling window stats.\n")
+		fmt.Fprintf(rw, "# TYPE voxelcraft_stats_window gauge\n")
+		fmt.Fprintf(rw, "voxelcraft_stats_window{world=%q,metric=%q} %d\n", *worldID, "trades", m.StatsWindow.Trades)
+		fmt.Fprintf(rw, "voxelcraft_stats_window{world=%q,metric=%q} %d\n", *worldID, "denied", m.StatsWindow.Denied)
+		fmt.Fprintf(rw, "voxelcraft_stats_window{world=%q,metric=%q} %d\n", *worldID, "chunks_discovered", m.StatsWindow.ChunksDiscovered)
+		fmt.Fprintf(rw, "voxelcraft_stats_window{world=%q,metric=%q} %d\n", *worldID, "blueprints_complete", m.StatsWindow.BlueprintsComplete)
+
+		fmt.Fprintf(rw, "# HELP voxelcraft_stats_window_ticks Rolling window size in ticks.\n")
+		fmt.Fprintf(rw, "# TYPE voxelcraft_stats_window_ticks gauge\n")
+		fmt.Fprintf(rw, "voxelcraft_stats_window_ticks{world=%q} %d\n", *worldID, m.StatsWindowTicks)
+	})
+
+	// Local-only admin endpoints (do not affect simulation determinism).
+	mux.HandleFunc("/admin/v1/state", func(rw http.ResponseWriter, r *http.Request) {
+		if !isLoopbackRemote(r.RemoteAddr) {
+			http.Error(rw, "forbidden", http.StatusForbidden)
+			return
+		}
+		rw.Header().Set("Content-Type", "application/json")
+		resp := struct {
+			WorldID string             `json:"world_id"`
+			Tick    uint64             `json:"tick"`
+			Metrics world.WorldMetrics `json:"metrics"`
+		}{
+			WorldID: *worldID,
+			Tick:    w.CurrentTick(),
+			Metrics: w.Metrics(),
+		}
+		_ = json.NewEncoder(rw).Encode(resp)
+	})
+	mux.HandleFunc("/admin/v1/snapshot", func(rw http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			rw.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		if !isLoopbackRemote(r.RemoteAddr) {
+			http.Error(rw, "forbidden", http.StatusForbidden)
+			return
+		}
+		ctx2, cancel2 := context.WithTimeout(r.Context(), 5*time.Second)
+		defer cancel2()
+		tick, err := w.RequestSnapshot(ctx2)
+		rw.Header().Set("Content-Type", "application/json")
+		if err != nil {
+			rw.WriteHeader(http.StatusServiceUnavailable)
+			_ = json.NewEncoder(rw).Encode(map[string]any{"ok": false, "tick": tick, "error": err.Error()})
+			return
+		}
+		_ = json.NewEncoder(rw).Encode(map[string]any{"ok": true, "tick": tick})
 	})
 	mux.HandleFunc("/debug/pprof/", pprof.Index)
 	mux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
@@ -299,6 +394,17 @@ func latestSnapshot(worldDir string) string {
 		}
 	}
 	return best
+}
+
+func isLoopbackRemote(remoteAddr string) bool {
+	host := remoteAddr
+	if h, _, err := net.SplitHostPort(remoteAddr); err == nil {
+		host = h
+	}
+	host = strings.TrimPrefix(host, "[")
+	host = strings.TrimSuffix(host, "]")
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 type multiTickLogger struct {

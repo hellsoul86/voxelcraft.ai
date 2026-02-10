@@ -71,4 +71,3 @@ func TestSign_SnapshotRoundTrip_PreservesTextAndDigest(t *testing.T) {
 		t.Fatalf("sign not restored: %+v", s)
 	}
 }
-

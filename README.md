@@ -26,10 +26,40 @@ Run a simple bot client:
 go run ./cmd/bot -url ws://localhost:8080/v1/ws -name bot1
 ```
 
+Run MCP sidecar (for OpenClaw/ClawHub-style agents):
+```bash
+go run ./cmd/mcp -listen 127.0.0.1:8090 -world-ws-url ws://127.0.0.1:8080/v1/ws
+```
+
+MCP smoke test:
+```bash
+curl -s http://127.0.0.1:8090/mcp \
+  -H 'content-type: application/json' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"list_tools"}' | jq .
+
+curl -s http://127.0.0.1:8090/mcp \
+  -H 'content-type: application/json' \
+  -d '{"jsonrpc":"2.0","id":2,"method":"call_tool","params":{"name":"voxelcraft.get_obs","arguments":{"mode":"summary","wait_new_tick":true,"timeout_ms":2000}}}' | jq .
+```
+
 Endpoints:
 - `GET /healthz`
-- `GET /metrics` (minimal Prometheus text)
+- `GET /metrics` (Prometheus text)
+- `GET /admin/v1/state` (loopback-only)
+- `POST /admin/v1/snapshot` (loopback-only; force a snapshot)
 - `GET /debug/pprof/` (pprof)
+
+Local admin smoke test:
+```bash
+curl -s http://127.0.0.1:8080/admin/v1/state | jq .
+curl -s -XPOST http://127.0.0.1:8080/admin/v1/snapshot | jq .
+```
+
+Or via CLI:
+```bash
+go run ./cmd/admin state -url http://127.0.0.1:8080
+go run ./cmd/admin snapshot -url http://127.0.0.1:8080
+```
 
 Persistence (defaults under `./data`):
 - tick log: `data/worlds/<world>/events/*.jsonl.zst`
@@ -48,3 +78,7 @@ Admin tools:
 See:
 - `docs/spec/agent_protocol_v0.9.md`
 - `schemas/*.schema.json`
+
+OpenClaw/ClawHub (MCP sidecar):
+- `POST /mcp` on the sidecar (default: `http://127.0.0.1:8090/mcp`)
+- Skill doc: `docs/CLAWHUB_SKILL.md`

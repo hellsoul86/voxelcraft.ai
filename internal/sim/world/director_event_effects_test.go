@@ -238,8 +238,8 @@ func TestFloodWarning_SlowsMovementInZone(t *testing.T) {
 		},
 	}
 	w.step(nil, nil, []ActionEnvelope{{AgentID: a.ID, Act: act}}) // tick 0: should move
-	w.step(nil, nil, nil)                                        // tick 1: should be slowed
-	w.step(nil, nil, nil)                                        // tick 2: should move
+	w.step(nil, nil, nil)                                         // tick 1: should be slowed
+	w.step(nil, nil, nil)                                         // tick 2: should move
 
 	if got := a.Pos.X; got != start.X+2 {
 		t.Fatalf("pos.X=%d want %d", got, start.X+2)
@@ -266,8 +266,8 @@ func TestBuilderExpo_SpawnsNoticeBoardAndSign(t *testing.T) {
 
 	w.startEvent(0, "BUILDER_EXPO")
 	center := w.activeEventCenter
-	// surfaceY() returns the air block above the topmost non-water solid; after spawning the
-	// board/sign, the topmost solid becomes the spawned block itself, so surfaceY() moves up
+	// surfaceY() returns the air block above the topmost non-air block (including water); after
+	// spawning the board/sign, the topmost non-air becomes the spawned block itself, so surfaceY() moves up
 	// by 1. We want the placed block position, hence -1.
 	y := w.surfaceY(center.X, center.Z) - 1
 	if y < 1 {

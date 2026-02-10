@@ -65,4 +65,3 @@ func TestDeterminism_MultiAgentRespawnItemIDsStable(t *testing.T) {
 		t.Fatalf("digest mismatch after multi-agent respawn: %s vs %s", d1, d2)
 	}
 }
-

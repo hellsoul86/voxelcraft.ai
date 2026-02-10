@@ -18,9 +18,21 @@ import (
 )
 
 func main() {
-	if len(os.Args) >= 2 && os.Args[1] == "rollback" {
-		rollbackCmd(os.Args[2:])
-		return
+	if len(os.Args) >= 2 {
+		switch os.Args[1] {
+		case "rollback":
+			rollbackCmd(os.Args[2:])
+			return
+		case "db":
+			dbCmd(os.Args[2:])
+			return
+		case "state":
+			stateCmd(os.Args[2:])
+			return
+		case "snapshot":
+			snapshotCmd(os.Args[2:])
+			return
+		}
 	}
 	listCmd(os.Args[1:])
 }

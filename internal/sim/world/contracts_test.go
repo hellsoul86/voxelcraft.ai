@@ -135,4 +135,15 @@ func TestContract_RequirementsDoNotCountEscrow(t *testing.T) {
 	if term.Owed == nil || term.Owed[poster.ID]["IRON_INGOT"] != 10 {
 		t.Fatalf("poster owed mismatch: %+v", term.Owed)
 	}
+
+	// Reputation/fun should be granted on successful manual submit.
+	if got := acceptor.RepTrade; got != 506 {
+		t.Fatalf("acceptor RepTrade=%d want 506", got)
+	}
+	if got := acceptor.RepSocial; got != 502 {
+		t.Fatalf("acceptor RepSocial=%d want 502", got)
+	}
+	if got := acceptor.Fun.Social; got != 5 {
+		t.Fatalf("acceptor Fun.Social=%d want 5", got)
+	}
 }

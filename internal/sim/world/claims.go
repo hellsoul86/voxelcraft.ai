@@ -171,6 +171,42 @@ func (w *World) newLandID(owner string) string {
 	return fmt.Sprintf("LAND_%s_%03d", owner, n)
 }
 
+func (w *World) removeClaimByAnchor(nowTick uint64, actor string, anchor Vec3i, reason string) {
+	if len(w.claims) == 0 {
+		return
+	}
+	// Deterministic: if multiple claims share an anchor (shouldn't happen), remove the smallest land_id.
+	landID := ""
+	for id, c := range w.claims {
+		if c == nil || c.Anchor != anchor {
+			continue
+		}
+		if landID == "" || id < landID {
+			landID = id
+		}
+	}
+	if landID == "" {
+		return
+	}
+	delete(w.claims, landID)
+
+	// Remove laws bound to this land (safety).
+	if len(w.laws) > 0 {
+		for id, l := range w.laws {
+			if l == nil {
+				continue
+			}
+			if l.LandID == landID {
+				delete(w.laws, id)
+			}
+		}
+	}
+
+	w.auditEvent(nowTick, actor, "CLAIM_REMOVE", anchor, reason, map[string]any{
+		"land_id": landID,
+	})
+}
+
 func inWindow(t, start, end float64) bool {
 	if start <= end {
 		return t >= start && t <= end

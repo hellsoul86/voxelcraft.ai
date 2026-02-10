@@ -26,9 +26,9 @@ func TestArchiveSeasonSnapshot_CopiesSeasonEndSnapshot(t *testing.T) {
 	}
 
 	snap := snapshot.SnapshotV1{
-		Header: snapshot.Header{Version: 1, WorldID: "w1", Tick: 2},
-		Seed:   42,
-		DayTicks: 3,
+		Header:            snapshot.Header{Version: 1, WorldID: "w1", Tick: 2},
+		Seed:              42,
+		DayTicks:          3,
 		SeasonLengthTicks: 3,
 	}
 
@@ -56,4 +56,3 @@ func TestArchiveSeasonSnapshot_CopiesSeasonEndSnapshot(t *testing.T) {
 		t.Fatalf("expected meta.json to exist: %v", err)
 	}
 }
-

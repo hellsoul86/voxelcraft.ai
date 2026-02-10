@@ -26,6 +26,27 @@ func (w *World) maybeSeasonRollover(nowTick uint64) {
 	w.resetWorldForNewSeason(nowTick, newSeason, archiveTick)
 }
 
+func (w *World) seasonIndex(nowTick uint64) int {
+	seasonLen := uint64(w.cfg.SeasonLengthTicks)
+	if seasonLen == 0 {
+		return 1
+	}
+	return int(nowTick/seasonLen) + 1
+}
+
+func (w *World) seasonDay(nowTick uint64) int {
+	dayTicks := uint64(w.cfg.DayTicks)
+	if dayTicks == 0 {
+		return 1
+	}
+	seasonLen := uint64(w.cfg.SeasonLengthTicks)
+	seasonDays := seasonLen / dayTicks
+	if seasonDays == 0 {
+		seasonDays = 1
+	}
+	return int((nowTick/dayTicks)%seasonDays) + 1
+}
+
 func (w *World) resetWorldForNewSeason(nowTick uint64, newSeason int, archiveTick uint64) {
 	// Advance world seed to reshuffle resources deterministically.
 	w.cfg.Seed++
@@ -137,4 +158,3 @@ func (w *World) resetAgentForNewSeason(nowTick uint64, a *Agent) {
 	// Award novelty for the first biome arrival in the season.
 	w.funOnBiome(a, nowTick)
 }
-

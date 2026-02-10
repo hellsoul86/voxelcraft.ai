@@ -12,6 +12,8 @@ world_boundary_r: 4000
 rate_limits:
   say_window_ticks: 50
   say_max: 5
+  market_say_window_ticks: 50
+  market_say_max: 2
   whisper_window_ticks: 50
   whisper_max: 5
   offer_trade_window_ticks: 50

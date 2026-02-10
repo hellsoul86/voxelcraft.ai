@@ -56,6 +56,8 @@ type WorldConfig struct {
 type RateLimitConfig struct {
 	SayWindowTicks        int
 	SayMax                int
+	MarketSayWindowTicks  int
+	MarketSayMax          int
 	WhisperWindowTicks    int
 	WhisperMax            int
 	OfferTradeWindowTicks int
@@ -130,6 +132,12 @@ func (rl *RateLimitConfig) applyDefaults() {
 	if rl.SayMax <= 0 {
 		rl.SayMax = 5
 	}
+	if rl.MarketSayWindowTicks <= 0 {
+		rl.MarketSayWindowTicks = 50
+	}
+	if rl.MarketSayMax <= 0 {
+		rl.MarketSayMax = 2
+	}
 	if rl.WhisperWindowTicks <= 0 {
 		rl.WhisperWindowTicks = 50
 	}
@@ -185,9 +193,13 @@ type World struct {
 	cfg      WorldConfig
 	catalogs *catalogs.Catalogs
 
-	tick atomic.Uint64
+	tick    atomic.Uint64
+	metrics atomic.Value
 
 	chunks *ChunkStore
+
+	// Derived from catalogs at startup; does not affect determinism/digests directly.
+	smeltByInput map[string]catalogs.RecipeDef
 
 	agents  map[string]*Agent
 	clients map[string]*clientState
@@ -208,6 +220,7 @@ type World struct {
 	inbox  chan ActionEnvelope
 	join   chan JoinRequest
 	attach chan AttachRequest
+	admin  chan adminSnapshotReq
 	leave  chan string
 	stop   chan struct{}
 
@@ -284,6 +297,11 @@ type clientState struct {
 func New(cfg WorldConfig, cats *catalogs.Catalogs) (*World, error) {
 	cfg.applyDefaults()
 
+	smeltByInput, err := buildSmeltByInput(cats.Recipes.ByID)
+	if err != nil {
+		return nil, err
+	}
+
 	// Resolve required block ids.
 	b := func(id string) (uint16, error) {
 		v, ok := cats.Blocks.Index[id]
@@ -321,31 +339,33 @@ func New(cfg WorldConfig, cats *catalogs.Catalogs) (*World, error) {
 	}
 
 	w := &World{
-		cfg:        cfg,
-		catalogs:   cats,
-		chunks:     NewChunkStore(gen),
-		agents:     map[string]*Agent{},
-		clients:    map[string]*clientState{},
-		claims:     map[string]*LandClaim{},
-		containers: map[Vec3i]*Container{},
-		items:      map[string]*ItemEntity{},
-		itemsAt:    map[Vec3i][]string{},
-		conveyors:  map[Vec3i]ConveyorMeta{},
-		switches:   map[Vec3i]bool{},
-		trades:     map[string]*Trade{},
-		boards:     map[string]*Board{},
-		signs:      map[Vec3i]*Sign{},
-		contracts:  map[string]*Contract{},
-		laws:       map[string]*Law{},
-		orgs:       map[string]*Organization{},
-		inbox:      make(chan ActionEnvelope, 1024),
-		join:       make(chan JoinRequest, 64),
-		attach:     make(chan AttachRequest, 64),
-		leave:      make(chan string, 64),
-		stop:       make(chan struct{}),
-		weather:    "CLEAR",
-		stats:      NewWorldStats(300, 72000),
-		structures: map[string]*Structure{},
+		cfg:          cfg,
+		catalogs:     cats,
+		chunks:       NewChunkStore(gen),
+		smeltByInput: smeltByInput,
+		agents:       map[string]*Agent{},
+		clients:      map[string]*clientState{},
+		claims:       map[string]*LandClaim{},
+		containers:   map[Vec3i]*Container{},
+		items:        map[string]*ItemEntity{},
+		itemsAt:      map[Vec3i][]string{},
+		conveyors:    map[Vec3i]ConveyorMeta{},
+		switches:     map[Vec3i]bool{},
+		trades:       map[string]*Trade{},
+		boards:       map[string]*Board{},
+		signs:        map[Vec3i]*Sign{},
+		contracts:    map[string]*Contract{},
+		laws:         map[string]*Law{},
+		orgs:         map[string]*Organization{},
+		inbox:        make(chan ActionEnvelope, 1024),
+		join:         make(chan JoinRequest, 64),
+		attach:       make(chan AttachRequest, 64),
+		admin:        make(chan adminSnapshotReq, 16),
+		leave:        make(chan string, 64),
+		stop:         make(chan struct{}),
+		weather:      "CLEAR",
+		stats:        NewWorldStats(300, 72000),
+		structures:   map[string]*Structure{},
 	}
 	return w, nil
 }
@@ -369,6 +389,7 @@ func (w *World) Run(ctx context.Context) error {
 	var pendingActions []ActionEnvelope
 	var pendingJoins []JoinRequest
 	var pendingLeaves []string
+	var pendingAdmin []adminSnapshotReq
 
 	for {
 		select {
@@ -382,13 +403,17 @@ func (w *World) Run(ctx context.Context) error {
 			w.handleAttach(req)
 		case id := <-w.leave:
 			pendingLeaves = append(pendingLeaves, id)
+		case req := <-w.admin:
+			pendingAdmin = append(pendingAdmin, req)
 		case env := <-w.inbox:
 			pendingActions = append(pendingActions, env)
 		case <-ticker.C:
 			w.step(pendingJoins, pendingLeaves, pendingActions)
+			w.handleAdminSnapshotRequests(pendingAdmin)
 			pendingJoins = pendingJoins[:0]
 			pendingLeaves = pendingLeaves[:0]
 			pendingActions = pendingActions[:0]
+			pendingAdmin = pendingAdmin[:0]
 		}
 	}
 }
@@ -463,6 +488,11 @@ func (w *World) joinAgent(name string, delta bool, out chan []byte) JoinResponse
 	tuningCat := w.tuningCatalogMsg()
 	welcome.Catalogs.TuningDigest = tuningCat.Digest
 
+	recipesCat := w.recipesCatalogMsg()
+	blueprintsCat := w.blueprintsCatalogMsg()
+	lawsCat := w.lawTemplatesCatalogMsg()
+	eventsCat := w.eventsCatalogMsg()
+
 	catalogMsgs := []protocol.CatalogMsg{
 		{
 			Type:            protocol.TypeCatalog,
@@ -483,6 +513,10 @@ func (w *World) joinAgent(name string, delta bool, out chan []byte) JoinResponse
 			Data:            w.catalogs.Items.Palette,
 		},
 		tuningCat,
+		recipesCat,
+		blueprintsCat,
+		lawsCat,
+		eventsCat,
 	}
 
 	return JoinResponse{Welcome: welcome, Catalogs: catalogMsgs}
@@ -561,6 +595,11 @@ func (w *World) handleAttach(req AttachRequest) {
 	tuningCat := w.tuningCatalogMsg()
 	welcome.Catalogs.TuningDigest = tuningCat.Digest
 
+	recipesCat := w.recipesCatalogMsg()
+	blueprintsCat := w.blueprintsCatalogMsg()
+	lawsCat := w.lawTemplatesCatalogMsg()
+	eventsCat := w.eventsCatalogMsg()
+
 	catalogMsgs := []protocol.CatalogMsg{
 		{
 			Type:            protocol.TypeCatalog,
@@ -581,6 +620,10 @@ func (w *World) handleAttach(req AttachRequest) {
 			Data:            w.catalogs.Items.Palette,
 		},
 		tuningCat,
+		recipesCat,
+		blueprintsCat,
+		lawsCat,
+		eventsCat,
 	}
 
 	if req.Resp != nil {
@@ -593,6 +636,7 @@ func (w *World) handleLeave(agentID string) {
 }
 
 func (w *World) step(joins []JoinRequest, leaves []string, actions []ActionEnvelope) {
+	stepStart := time.Now()
 	nowTick := w.tick.Load()
 
 	// Season rollover happens at tick boundaries before processing joins/leaves/actions for this tick.
@@ -675,7 +719,50 @@ func (w *World) step(joins []JoinRequest, leaves []string, actions []ActionEnvel
 		}
 	}
 
-	w.tick.Add(1)
+	stepMS := float64(time.Since(stepStart).Microseconds()) / 1000.0
+	nextTick := w.tick.Add(1)
+
+	sum := StatsBucket{}
+	windowTicks := uint64(0)
+	if w.stats != nil {
+		sum = w.stats.Summarize(nowTick)
+		windowTicks = w.stats.WindowTicks()
+	}
+
+	dm := w.computeDirectorMetrics(nowTick)
+	w.metrics.Store(WorldMetrics{
+		Tick:         nextTick,
+		Agents:       len(w.agents),
+		Clients:      len(w.clients),
+		LoadedChunks: len(w.chunks.chunks),
+		QueueDepths: QueueDepths{
+			Inbox:  len(w.inbox),
+			Join:   len(w.join),
+			Leave:  len(w.leave),
+			Attach: len(w.attach),
+		},
+		StepMS:           stepMS,
+		StatsWindowTicks: windowTicks,
+		StatsWindow:      sum,
+		Director: DirectorMetrics{
+			Trade:       dm.Trade,
+			Conflict:    dm.Conflict,
+			Exploration: dm.Exploration,
+			Inequality:  dm.Inequality,
+			PublicInfra: dm.PublicInfra,
+		},
+		Weather:          w.weather,
+		WeatherUntilTick: w.weatherUntilTick,
+		ActiveEventID:    w.activeEventID,
+		ActiveEventStart: w.activeEventStart,
+		ActiveEventEnds:  w.activeEventEnds,
+		ActiveEventCenter: [3]int{
+			w.activeEventCenter.X,
+			w.activeEventCenter.Y,
+			w.activeEventCenter.Z,
+		},
+		ActiveEventRadius: w.activeEventRadius,
+	})
 }
 
 // StepOnce advances the world by a single tick using the same ordering semantics as the server.
@@ -722,21 +809,51 @@ func (w *World) applyAct(a *Agent, act protocol.ActMsg, nowTick uint64) {
 func (w *World) applyInstant(a *Agent, inst protocol.InstantReq, nowTick uint64) {
 	switch inst.Type {
 	case "SAY":
-		if ok, cd := a.RateLimitAllow("SAY", nowTick, uint64(w.cfg.RateLimits.SayWindowTicks), w.cfg.RateLimits.SayMax); !ok {
-			ev := actionResult(nowTick, inst.ID, false, "E_RATE_LIMIT", "too many SAY")
+		if inst.Text == "" {
+			a.AddEvent(actionResult(nowTick, inst.ID, false, "E_BAD_REQUEST", "missing text"))
+			return
+		}
+		ch := strings.ToUpper(strings.TrimSpace(inst.Channel))
+		if ch == "" {
+			ch = "LOCAL"
+		}
+		switch ch {
+		case "LOCAL", "CITY", "MARKET":
+		default:
+			a.AddEvent(actionResult(nowTick, inst.ID, false, "E_BAD_REQUEST", "invalid channel"))
+			return
+		}
+		if ch == "CITY" {
+			if a.OrgID == "" || !w.isOrgMember(a.ID, a.OrgID) {
+				a.AddEvent(actionResult(nowTick, inst.ID, false, "E_NO_PERMISSION", "not in org"))
+				return
+			}
+		}
+		if ch == "MARKET" {
+			if _, perms := w.permissionsFor(a.ID, a.Pos); !perms["can_trade"] {
+				a.AddEvent(actionResult(nowTick, inst.ID, false, "E_NO_PERMISSION", "market chat not allowed here"))
+				return
+			}
+		}
+
+		rlKind := "SAY"
+		window := uint64(w.cfg.RateLimits.SayWindowTicks)
+		max := w.cfg.RateLimits.SayMax
+		msg := "too many SAY"
+		if ch == "MARKET" {
+			rlKind = "SAY_MARKET"
+			window = uint64(w.cfg.RateLimits.MarketSayWindowTicks)
+			max = w.cfg.RateLimits.MarketSayMax
+			msg = "too many SAY (MARKET)"
+		}
+		if ok, cd := a.RateLimitAllow(rlKind, nowTick, window, max); !ok {
+			ev := actionResult(nowTick, inst.ID, false, "E_RATE_LIMIT", msg)
 			ev["cooldown_ticks"] = cd
 			ev["cooldown_until_tick"] = nowTick + cd
 			a.AddEvent(ev)
 			return
 		}
-		if inst.Text == "" {
-			a.AddEvent(actionResult(nowTick, inst.ID, false, "E_BAD_REQUEST", "missing text"))
-			return
-		}
-		ch := inst.Channel
-		if ch == "" {
-			ch = "LOCAL"
-		}
+
 		w.broadcastChat(nowTick, a, ch, inst.Text)
 		a.AddEvent(actionResult(nowTick, inst.ID, true, "", "ok"))
 
@@ -934,15 +1051,19 @@ func (w *World) applyInstant(a *Agent, inst protocol.InstantReq, nowTick uint64)
 		applyTransferWithTax(a.Inventory, from.Inventory, tr.Request, taxSink, taxRate)
 		delete(w.trades, inst.TradeID)
 
+		mutualOK, vOffer, vReq := w.tradeMutualBenefit(tr.Offer, tr.Request)
 		w.auditEvent(nowTick, a.ID, "TRADE", Vec3i{}, "ACCEPT_TRADE", map[string]any{
-			"trade_id":     tr.TradeID,
-			"from":         tr.From,
-			"to":           tr.To,
-			"offer":        encodeItemPairs(tr.Offer),
-			"request":      encodeItemPairs(tr.Request),
-			"tax_rate":     taxRate,
-			"tax_paid_off": encodeItemPairs(calcTax(tr.Offer, taxRate)),
-			"tax_paid_req": encodeItemPairs(calcTax(tr.Request, taxRate)),
+			"trade_id":       tr.TradeID,
+			"from":           tr.From,
+			"to":             tr.To,
+			"offer":          encodeItemPairs(tr.Offer),
+			"request":        encodeItemPairs(tr.Request),
+			"value_offer":    vOffer,
+			"value_request":  vReq,
+			"mutual_benefit": mutualOK,
+			"tax_rate":       taxRate,
+			"tax_paid_off":   encodeItemPairs(calcTax(tr.Offer, taxRate)),
+			"tax_paid_req":   encodeItemPairs(calcTax(tr.Request, taxRate)),
 			"land_id": func() string {
 				if landFrom != nil {
 					return landFrom.LandID
@@ -960,20 +1081,24 @@ func (w *World) applyInstant(a *Agent, inst protocol.InstantReq, nowTick uint64)
 		// Reputation: successful trade increases trade/social credit.
 		w.bumpRepTrade(from.ID, 2)
 		w.bumpRepTrade(a.ID, 2)
-		w.bumpRepSocial(from.ID, 1)
-		w.bumpRepSocial(a.ID, 1)
+		if mutualOK {
+			w.bumpRepSocial(from.ID, 1)
+			w.bumpRepSocial(a.ID, 1)
+		}
 		if w.stats != nil {
 			w.stats.RecordTrade(nowTick)
 		}
-		w.funOnTrade(from, nowTick)
-		w.funOnTrade(a, nowTick)
-		if w.activeEventID == "MARKET_WEEK" && nowTick < w.activeEventEnds {
-			w.funOnWorldEventParticipation(from, w.activeEventID, nowTick)
-			w.funOnWorldEventParticipation(a, w.activeEventID, nowTick)
-			w.addFun(from, nowTick, "NARRATIVE", "market_week_trade", w.funDecay(from, "narrative:market_week_trade", 5, nowTick))
-			w.addFun(a, nowTick, "NARRATIVE", "market_week_trade", w.funDecay(a, "narrative:market_week_trade", 5, nowTick))
-			from.AddEvent(protocol.Event{"t": nowTick, "type": "EVENT_GOAL", "event_id": w.activeEventID, "kind": "TRADE"})
-			a.AddEvent(protocol.Event{"t": nowTick, "type": "EVENT_GOAL", "event_id": w.activeEventID, "kind": "TRADE"})
+		if mutualOK {
+			w.funOnTrade(from, nowTick)
+			w.funOnTrade(a, nowTick)
+			if w.activeEventID == "MARKET_WEEK" && nowTick < w.activeEventEnds {
+				w.funOnWorldEventParticipation(from, w.activeEventID, nowTick)
+				w.funOnWorldEventParticipation(a, w.activeEventID, nowTick)
+				w.addFun(from, nowTick, "NARRATIVE", "market_week_trade", w.funDecay(from, "narrative:market_week_trade", 5, nowTick))
+				w.addFun(a, nowTick, "NARRATIVE", "market_week_trade", w.funDecay(a, "narrative:market_week_trade", 5, nowTick))
+				from.AddEvent(protocol.Event{"t": nowTick, "type": "EVENT_GOAL", "event_id": w.activeEventID, "kind": "TRADE"})
+				a.AddEvent(protocol.Event{"t": nowTick, "type": "EVENT_GOAL", "event_id": w.activeEventID, "kind": "TRADE"})
+			}
 		}
 
 		from.AddEvent(protocol.Event{"t": nowTick, "type": "TRADE_DONE", "trade_id": tr.TradeID, "with": a.ID})
@@ -1446,6 +1571,12 @@ func (w *World) applyInstant(a *Agent, inst protocol.InstantReq, nowTick uint64)
 			ok = hasAvailable(term, c.Requirements)
 		case "BUILD":
 			ok = w.checkBlueprintPlaced(c.BlueprintID, c.Anchor, c.Rotation)
+			if ok {
+				bp, okBP := w.catalogs.Blueprints.ByID[c.BlueprintID]
+				if okBP && !w.structureStable(&bp, c.Anchor, c.Rotation) {
+					ok = false
+				}
+			}
 		}
 		if !ok {
 			a.AddEvent(actionResult(nowTick, inst.ID, false, "E_BLOCKED", "requirements not met"))
@@ -1479,6 +1610,12 @@ func (w *World) applyInstant(a *Agent, inst protocol.InstantReq, nowTick uint64)
 			a.Inventory[item] += n
 		}
 		c.State = ContractCompleted
+		switch c.Kind {
+		case "GATHER", "DELIVER":
+			w.addTradeCredit(nowTick, a.ID, c.Poster, c.Kind)
+		case "BUILD":
+			w.addBuildCredit(nowTick, a.ID, c.Poster, c.Kind)
+		}
 		w.auditEvent(nowTick, a.ID, "CONTRACT_COMPLETE", term.Pos, "SUBMIT_CONTRACT", map[string]any{
 			"contract_id": c.ContractID,
 			"terminal_id": term.ID(),
@@ -1515,6 +1652,93 @@ func (w *World) applyInstant(a *Agent, inst protocol.InstantReq, nowTick uint64)
 			land.Flags.AllowTrade = v
 		}
 		a.AddEvent(actionResult(nowTick, inst.ID, true, "", "ok"))
+
+	case "UPGRADE_CLAIM":
+		if inst.LandID == "" || inst.Radius <= 0 {
+			a.AddEvent(actionResult(nowTick, inst.ID, false, "E_BAD_REQUEST", "missing land_id/radius"))
+			return
+		}
+		land := w.claims[inst.LandID]
+		if land == nil {
+			a.AddEvent(actionResult(nowTick, inst.ID, false, "E_INVALID_TARGET", "land not found"))
+			return
+		}
+		if !w.isLandAdmin(a.ID, land) {
+			a.AddEvent(actionResult(nowTick, inst.ID, false, "E_NO_PERMISSION", "not land admin"))
+			return
+		}
+		if land.MaintenanceStage >= 1 {
+			a.AddEvent(actionResult(nowTick, inst.ID, false, "E_NO_PERMISSION", "land maintenance stage disallows expansion"))
+			return
+		}
+		target := inst.Radius
+		if target != 64 && target != 128 {
+			a.AddEvent(actionResult(nowTick, inst.ID, false, "E_BAD_REQUEST", "radius must be 64 or 128"))
+			return
+		}
+		if target <= land.Radius {
+			a.AddEvent(actionResult(nowTick, inst.ID, false, "E_BAD_REQUEST", "radius must increase"))
+			return
+		}
+		// Claim Totem must still exist at the anchor.
+		if w.blockName(w.chunks.GetBlock(land.Anchor)) != "CLAIM_TOTEM" {
+			a.AddEvent(actionResult(nowTick, inst.ID, false, "E_INVALID_TARGET", "claim totem missing"))
+			return
+		}
+
+		// Compute incremental upgrade cost (in steps 32->64, 64->128).
+		cost := map[string]int{}
+		addCost := func(item string, n int) {
+			if item == "" || n <= 0 {
+				return
+			}
+			cost[item] += n
+		}
+		if land.Radius < 64 && target >= 64 {
+			addCost("BATTERY", 1)
+			addCost("CRYSTAL_SHARD", 2)
+		}
+		if land.Radius < 128 && target >= 128 {
+			addCost("BATTERY", 2)
+			addCost("CRYSTAL_SHARD", 4)
+		}
+		if len(cost) == 0 {
+			a.AddEvent(actionResult(nowTick, inst.ID, false, "E_BAD_REQUEST", "no upgrade needed"))
+			return
+		}
+		for item, n := range cost {
+			if a.Inventory[item] < n {
+				a.AddEvent(actionResult(nowTick, inst.ID, false, "E_NO_RESOURCE", "missing upgrade materials"))
+				return
+			}
+		}
+
+		// Must not overlap other claims.
+		for _, c := range w.claims {
+			if c == nil || c.LandID == land.LandID {
+				continue
+			}
+			if abs(land.Anchor.X-c.Anchor.X) <= target+c.Radius && abs(land.Anchor.Z-c.Anchor.Z) <= target+c.Radius {
+				a.AddEvent(actionResult(nowTick, inst.ID, false, "E_CONFLICT", "claim overlaps existing land"))
+				return
+			}
+		}
+
+		for item, n := range cost {
+			a.Inventory[item] -= n
+			if a.Inventory[item] <= 0 {
+				delete(a.Inventory, item)
+			}
+		}
+		from := land.Radius
+		land.Radius = target
+		w.auditEvent(nowTick, a.ID, "CLAIM_UPGRADE", land.Anchor, "UPGRADE_CLAIM", map[string]any{
+			"land_id": inst.LandID,
+			"from":    from,
+			"to":      target,
+			"cost":    encodeItemPairs(cost),
+		})
+		a.AddEvent(protocol.Event{"t": nowTick, "type": "ACTION_RESULT", "ref": inst.ID, "ok": true, "land_id": inst.LandID, "radius": target})
 
 	case "ADD_MEMBER":
 		if inst.LandID == "" || inst.MemberID == "" {
@@ -2151,6 +2375,10 @@ func (w *World) applyTaskReq(a *Agent, tr protocol.TaskReq, nowTick uint64) {
 			a.AddEvent(actionResult(nowTick, tr.ID, false, "E_BAD_REQUEST", "missing item_id/count"))
 			return
 		}
+		if _, ok := w.smeltByInput[tr.ItemID]; !ok {
+			a.AddEvent(actionResult(nowTick, tr.ID, false, "E_INVALID_TARGET", "unsupported smelt item"))
+			return
+		}
 		taskID := w.newTaskID()
 		a.WorkTask = &tasks.WorkTask{
 			TaskID:      taskID,
@@ -2326,6 +2554,23 @@ func (w *World) systemMovement(nowTick uint64) {
 		}
 		next.Y = w.surfaceY(next.X, next.Z)
 
+		// Reputation consequence: low Law rep agents may be blocked from entering a CITY core area.
+		// This is a system-level "wanted" restriction separate from access passes.
+		if toLand := w.landAt(next); toLand != nil && w.landCoreContains(toLand, next) && !w.isLandMember(a.ID, toLand) {
+			if org := w.orgByID(toLand.Owner); org != nil && org.Kind == OrgCity {
+				fromLand := w.landAt(a.Pos)
+				entering := fromLand == nil || fromLand.LandID != toLand.LandID || !w.landCoreContains(toLand, a.Pos)
+				if entering && a.RepLaw > 0 && a.RepLaw < 200 {
+					a.MoveTask = nil
+					if w.stats != nil {
+						w.stats.RecordDenied(nowTick)
+					}
+					a.AddEvent(protocol.Event{"t": nowTick, "type": "TASK_FAIL", "task_id": mt.TaskID, "code": "E_NO_PERMISSION", "message": "wanted: law reputation too low"})
+					continue
+				}
+			}
+		}
+
 		// Land core access pass (law): charge ticket on core entry for non-members.
 		if toLand := w.landAt(next); toLand != nil && toLand.AccessPassEnabled && w.landCoreContains(toLand, next) && !w.isLandMember(a.ID, toLand) {
 			fromLand := w.landAt(a.Pos)
@@ -2455,15 +2700,18 @@ func (w *World) tickMine(a *Agent, wt *tasks.WorkTask, nowTick uint64) {
 	}
 	blockName := w.blockName(b)
 
+	family := mineToolFamilyForBlock(blockName)
+	tier := bestToolTier(a.Inventory, family)
+	mineWorkNeeded, mineCost := mineParamsForTier(tier)
+
 	// Mining costs stamina; if too tired, wait and recover.
-	const mineCost = 15
 	if a.StaminaMilli < mineCost {
 		return
 	}
 	a.StaminaMilli -= mineCost
 
 	wt.WorkTicks++
-	if wt.WorkTicks < 10 {
+	if wt.WorkTicks < mineWorkNeeded {
 		return
 	}
 
@@ -2505,6 +2753,8 @@ func (w *World) tickMine(a *Agent, wt *tasks.WorkTask, nowTick uint64) {
 			w.removeConveyor(nowTick, a.ID, pos, "MINE")
 		case "SWITCH":
 			w.removeSwitch(nowTick, a.ID, pos, "MINE")
+		case "CLAIM_TOTEM":
+			w.removeClaimByAnchor(nowTick, a.ID, pos, "MINE")
 		}
 	}
 
@@ -2864,41 +3114,35 @@ func (w *World) tickSmelt(a *Agent, wt *tasks.WorkTask, nowTick uint64) {
 		a.AddEvent(protocol.Event{"t": nowTick, "type": "TASK_FAIL", "task_id": wt.TaskID, "code": "E_BLOCKED", "message": "need furnace nearby"})
 		return
 	}
-	wt.WorkTicks++
-	if wt.WorkTicks < 10 {
-		return
-	}
-	wt.WorkTicks = 0
 
-	// Very simplified: iron ore -> iron ingot, copper ore -> copper ingot, raw meat -> cooked meat.
-	in := wt.ItemID
-	if a.Inventory[in] <= 0 {
-		a.WorkTask = nil
-		a.AddEvent(protocol.Event{"t": nowTick, "type": "TASK_FAIL", "task_id": wt.TaskID, "code": "E_NO_RESOURCE", "message": "missing item"})
-		return
-	}
-	if a.Inventory["COAL"] <= 0 {
-		a.WorkTask = nil
-		a.AddEvent(protocol.Event{"t": nowTick, "type": "TASK_FAIL", "task_id": wt.TaskID, "code": "E_NO_RESOURCE", "message": "missing fuel (COAL)"})
-		return
-	}
-	out := ""
-	switch in {
-	case "IRON_ORE":
-		out = "IRON_INGOT"
-	case "COPPER_ORE":
-		out = "COPPER_INGOT"
-	case "RAW_MEAT":
-		out = "COOKED_MEAT"
-	default:
+	rec, ok := w.smeltByInput[wt.ItemID]
+	if !ok {
 		a.WorkTask = nil
 		a.AddEvent(protocol.Event{"t": nowTick, "type": "TASK_FAIL", "task_id": wt.TaskID, "code": "E_INVALID_TARGET", "message": "unsupported smelt item"})
 		return
 	}
+	wt.WorkTicks++
+	if wt.WorkTicks < rec.TimeTicks {
+		return
+	}
+	wt.WorkTicks = 0
 
-	a.Inventory[in]--
-	a.Inventory["COAL"]--
-	a.Inventory[out]++
+	// Check + consume inputs.
+	for _, in := range rec.Inputs {
+		if a.Inventory[in.Item] < in.Count {
+			a.WorkTask = nil
+			a.AddEvent(protocol.Event{"t": nowTick, "type": "TASK_FAIL", "task_id": wt.TaskID, "code": "E_NO_RESOURCE", "message": "missing inputs"})
+			return
+		}
+	}
+	for _, in := range rec.Inputs {
+		a.Inventory[in.Item] -= in.Count
+	}
+	for _, out := range rec.Outputs {
+		a.Inventory[out.Item] += out.Count
+	}
+	w.funOnRecipe(a, rec.RecipeID, rec.Tier, nowTick)
+
 	wt.Count--
 	if wt.Count <= 0 {
 		a.WorkTask = nil
@@ -3359,6 +3603,9 @@ func (w *World) buildObs(a *Agent, cl *clientState, nowTick uint64) protocol.Obs
 			if other.OrgID != "" {
 				tags = append(tags, "org:"+other.OrgID)
 			}
+			if other.RepLaw > 0 && other.RepLaw < 200 {
+				tags = append(tags, "wanted")
+			}
 			ents = append(ents, protocol.EntityObs{
 				ID:             other.ID,
 				Type:           "AGENT",
@@ -3548,7 +3795,7 @@ func (w *World) buildObs(a *Agent, cl *clientState, nowTick uint64) protocol.Obs
 		World: protocol.WorldObs{
 			TimeOfDay:           float64(int(nowTick)%w.cfg.DayTicks) / float64(w.cfg.DayTicks),
 			Weather:             w.weather,
-			SeasonDay:           int(nowTick/uint64(w.cfg.DayTicks))%7 + 1,
+			SeasonDay:           w.seasonDay(nowTick),
 			Biome:               biomeFrom(hash2(w.cfg.Seed, a.Pos.X, a.Pos.Z)),
 			ActiveEvent:         w.activeEventID,
 			ActiveEventEndsTick: w.activeEventEnds,
@@ -3661,8 +3908,15 @@ func actionResult(tick uint64, ref string, ok bool, code string, message string)
 
 func (w *World) broadcastChat(tick uint64, from *Agent, channel string, text string) {
 	for _, a := range w.agents {
-		if channel == "LOCAL" && Manhattan(a.Pos, from.Pos) > 32 {
-			continue
+		switch channel {
+		case "LOCAL":
+			if Manhattan(a.Pos, from.Pos) > 32 {
+				continue
+			}
+		case "CITY":
+			if from.OrgID == "" || !w.isOrgMember(a.ID, from.OrgID) {
+				continue
+			}
 		}
 		a.AddEvent(protocol.Event{
 			"t":       tick,
@@ -3675,12 +3929,16 @@ func (w *World) broadcastChat(tick uint64, from *Agent, channel string, text str
 }
 
 func (w *World) surfaceY(x, z int) int {
-	// Find the topmost solid block in a small vertical scan around expected height.
-	// For generated terrain this is cheap; for modified terrain it's "good enough".
-	for y := w.cfg.Height - 2; y >= 1; y-- {
+	// Return an "air" cell just above the topmost non-air block (including water).
+	// This keeps spawns/movement out of water by default without needing fluid physics.
+	for y := w.cfg.Height - 1; y >= 1; y-- {
 		b := w.chunks.GetBlock(Vec3i{X: x, Y: y, Z: z})
-		if b != w.chunks.gen.Air && b != w.chunks.gen.Water {
-			return y + 1
+		if b != w.chunks.gen.Air {
+			continue
+		}
+		below := w.chunks.GetBlock(Vec3i{X: x, Y: y - 1, Z: z})
+		if below != w.chunks.gen.Air {
+			return y
 		}
 	}
 	return 1

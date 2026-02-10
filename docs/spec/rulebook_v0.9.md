@@ -50,6 +50,9 @@
 - 工作站约束（MVP）：
   - CRAFT 需在 Crafting Bench 2 格内
   - SMELT 需在 Furnace 2 格内
+- 工具（MVP）：
+  - 不新增 `EQUIP` 动作：挖掘会从背包中**隐式选择**匹配方块类型的最优工具（IRON>STONE>WOOD）
+  - 工具会降低挖掘所需 tick 数与每 tick 的体力消耗（见实现与测试）
 
 ## 1.6 建造、蓝图与宏动作（AI 友好核心）
 

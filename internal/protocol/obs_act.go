@@ -183,6 +183,7 @@ type InstantReq struct {
 	Policy   map[string]bool `json:"policy,omitempty"`
 	MemberID string          `json:"member_id,omitempty"`
 	NewOwner string          `json:"new_owner,omitempty"`
+	Radius   int             `json:"radius,omitempty"`
 
 	OrgID   string `json:"org_id,omitempty"`
 	OrgKind string `json:"org_kind,omitempty"`

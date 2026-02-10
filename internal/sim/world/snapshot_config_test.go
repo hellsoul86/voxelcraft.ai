@@ -13,20 +13,22 @@ func TestSnapshotImport_RestoresOperationalConfig(t *testing.T) {
 	}
 
 	cfg := WorldConfig{
-		ID:         "test",
-		TickRateHz: 5,
-		DayTicks:   6000,
+		ID:                "test",
+		TickRateHz:        5,
+		DayTicks:          6000,
 		SeasonLengthTicks: 18000,
-		ObsRadius:  7,
-		Height:     64,
-		Seed:       42,
-		BoundaryR:  4000,
+		ObsRadius:         7,
+		Height:            64,
+		Seed:              42,
+		BoundaryR:         4000,
 
 		SnapshotEveryTicks: 123,
 		DirectorEveryTicks: 456,
 		RateLimits: RateLimitConfig{
 			SayWindowTicks:        7,
 			SayMax:                2,
+			MarketSayWindowTicks:  8,
+			MarketSayMax:          1,
 			WhisperWindowTicks:    9,
 			WhisperMax:            3,
 			OfferTradeWindowTicks: 11,
@@ -63,6 +65,8 @@ func TestSnapshotImport_RestoresOperationalConfig(t *testing.T) {
 	cfg2.SeasonLengthTicks = 999
 	cfg2.RateLimits.SayWindowTicks = 99
 	cfg2.RateLimits.SayMax = 99
+	cfg2.RateLimits.MarketSayWindowTicks = 99
+	cfg2.RateLimits.MarketSayMax = 99
 	cfg2.RateLimits.WhisperWindowTicks = 99
 	cfg2.RateLimits.WhisperMax = 99
 	cfg2.RateLimits.OfferTradeWindowTicks = 99
@@ -101,6 +105,12 @@ func TestSnapshotImport_RestoresOperationalConfig(t *testing.T) {
 	}
 	if got, want := w2.cfg.RateLimits.SayMax, cfg.RateLimits.SayMax; got != want {
 		t.Fatalf("RateLimits.SayMax: got %d want %d", got, want)
+	}
+	if got, want := w2.cfg.RateLimits.MarketSayWindowTicks, cfg.RateLimits.MarketSayWindowTicks; got != want {
+		t.Fatalf("RateLimits.MarketSayWindowTicks: got %d want %d", got, want)
+	}
+	if got, want := w2.cfg.RateLimits.MarketSayMax, cfg.RateLimits.MarketSayMax; got != want {
+		t.Fatalf("RateLimits.MarketSayMax: got %d want %d", got, want)
 	}
 	if got, want := w2.cfg.RateLimits.WhisperWindowTicks, cfg.RateLimits.WhisperWindowTicks; got != want {
 		t.Fatalf("RateLimits.WhisperWindowTicks: got %d want %d", got, want)

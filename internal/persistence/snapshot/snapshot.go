@@ -20,13 +20,13 @@ type Header struct {
 type SnapshotV1 struct {
 	Header Header `json:"header"`
 
-	Seed      int64 `json:"seed"`
-	TickRate  int   `json:"tick_rate_hz"`
-	DayTicks  int   `json:"day_ticks"`
-	SeasonLengthTicks int `json:"season_length_ticks,omitempty"`
-	ObsRadius int   `json:"obs_radius"`
-	Height    int   `json:"height"`
-	BoundaryR int   `json:"boundary_r"`
+	Seed              int64 `json:"seed"`
+	TickRate          int   `json:"tick_rate_hz"`
+	DayTicks          int   `json:"day_ticks"`
+	SeasonLengthTicks int   `json:"season_length_ticks,omitempty"`
+	ObsRadius         int   `json:"obs_radius"`
+	Height            int   `json:"height"`
+	BoundaryR         int   `json:"boundary_r"`
 
 	// Operational parameters (captured for deterministic replay/resume).
 	SnapshotEveryTicks int          `json:"snapshot_every_ticks,omitempty"`
@@ -78,6 +78,8 @@ type SnapshotV1 struct {
 type RateLimitsV1 struct {
 	SayWindowTicks        int `json:"say_window_ticks,omitempty"`
 	SayMax                int `json:"say_max,omitempty"`
+	MarketSayWindowTicks  int `json:"market_say_window_ticks,omitempty"`
+	MarketSayMax          int `json:"market_say_max,omitempty"`
 	WhisperWindowTicks    int `json:"whisper_window_ticks,omitempty"`
 	WhisperMax            int `json:"whisper_max,omitempty"`
 	OfferTradeWindowTicks int `json:"offer_trade_window_ticks,omitempty"`

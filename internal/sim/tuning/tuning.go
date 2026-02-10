@@ -12,13 +12,13 @@ import (
 type Tuning struct {
 	ProtocolVersion string `yaml:"protocol_version"`
 
-	TickRateHz     int   `yaml:"tick_rate_hz"`
-	TickDurationMs int   `yaml:"tick_duration_ms"`
-	DayTicks       int   `yaml:"day_ticks"`
-	SeasonLengthTicks int `yaml:"season_length_ticks"`
-	ChunkSize      []int `yaml:"chunk_size"`
-	ObsRadius      int   `yaml:"obs_radius"`
-	WorldBoundaryR int   `yaml:"world_boundary_r"`
+	TickRateHz        int   `yaml:"tick_rate_hz"`
+	TickDurationMs    int   `yaml:"tick_duration_ms"`
+	DayTicks          int   `yaml:"day_ticks"`
+	SeasonLengthTicks int   `yaml:"season_length_ticks"`
+	ChunkSize         []int `yaml:"chunk_size"`
+	ObsRadius         int   `yaml:"obs_radius"`
+	WorldBoundaryR    int   `yaml:"world_boundary_r"`
 
 	SnapshotEveryTicks int `yaml:"snapshot_every_ticks"`
 	DirectorEveryTicks int `yaml:"director_every_ticks"`
@@ -42,6 +42,8 @@ type Tuning struct {
 type RateLimits struct {
 	SayWindowTicks        int `yaml:"say_window_ticks"`
 	SayMax                int `yaml:"say_max"`
+	MarketSayWindowTicks  int `yaml:"market_say_window_ticks"`
+	MarketSayMax          int `yaml:"market_say_max"`
 	WhisperWindowTicks    int `yaml:"whisper_window_ticks"`
 	WhisperMax            int `yaml:"whisper_max"`
 	OfferTradeWindowTicks int `yaml:"offer_trade_window_ticks"`
@@ -69,13 +71,13 @@ func Defaults() Tuning {
 	return Tuning{
 		ProtocolVersion: protocol.Version,
 
-		TickRateHz:     5,
-		TickDurationMs: 200,
-		DayTicks:       6000,
+		TickRateHz:        5,
+		TickDurationMs:    200,
+		DayTicks:          6000,
 		SeasonLengthTicks: 6000 * 7, // 7 in-game days
-		ChunkSize:      []int{16, 16, 64},
-		ObsRadius:      7,
-		WorldBoundaryR: 4000,
+		ChunkSize:         []int{16, 16, 64},
+		ObsRadius:         7,
+		WorldBoundaryR:    4000,
 
 		SnapshotEveryTicks: 3000,
 		DirectorEveryTicks: 3000,
@@ -83,6 +85,8 @@ func Defaults() Tuning {
 		RateLimits: RateLimits{
 			SayWindowTicks:        50,
 			SayMax:                5,
+			MarketSayWindowTicks:  50,
+			MarketSayMax:          2,
 			WhisperWindowTicks:    50,
 			WhisperMax:            5,
 			OfferTradeWindowTicks: 50,
@@ -164,6 +168,9 @@ func (t Tuning) Validate() error {
 	}
 
 	if err := validateWindowMax("rate_limits.say", t.RateLimits.SayWindowTicks, t.RateLimits.SayMax); err != nil {
+		return err
+	}
+	if err := validateWindowMax("rate_limits.market_say", t.RateLimits.MarketSayWindowTicks, t.RateLimits.MarketSayMax); err != nil {
 		return err
 	}
 	if err := validateWindowMax("rate_limits.whisper", t.RateLimits.WhisperWindowTicks, t.RateLimits.WhisperMax); err != nil {
