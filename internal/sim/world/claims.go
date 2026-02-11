@@ -88,35 +88,25 @@ func (w *World) landAt(pos Vec3i) *LandClaim {
 func (w *World) permissionsFor(agentID string, pos Vec3i) (land *LandClaim, perms map[string]bool) {
 	land = w.landAt(pos)
 	if land == nil {
+		p := governance.WildPermissions()
 		return nil, map[string]bool{
-			"can_build":  true,
-			"can_break":  true,
-			"can_damage": false,
-			"can_trade":  true,
+			"can_build":  p.CanBuild,
+			"can_break":  p.CanBreak,
+			"can_damage": p.CanDamage,
+			"can_trade":  p.CanTrade,
 		}
 	}
-	// Maintenance downgrade: if land is unprotected, treat visitor permissions as "wild".
-	if land.MaintenanceStage >= 2 && !w.isLandMember(agentID, land) {
-		return land, map[string]bool{
-			"can_build":  true,
-			"can_break":  true,
-			"can_damage": false,
-			"can_trade":  true,
-		}
-	}
-	if w.isLandMember(agentID, land) {
-		return land, map[string]bool{
-			"can_build":  true,
-			"can_break":  true,
-			"can_damage": land.Flags.AllowDamage,
-			"can_trade":  true,
-		}
-	}
+	fp := governance.PermissionsForLand(w.isLandMember(agentID, land), land.MaintenanceStage, governance.ClaimFlags{
+		AllowBuild:  land.Flags.AllowBuild,
+		AllowBreak:  land.Flags.AllowBreak,
+		AllowDamage: land.Flags.AllowDamage,
+		AllowTrade:  land.Flags.AllowTrade,
+	})
 	return land, map[string]bool{
-		"can_build":  land.Flags.AllowBuild,
-		"can_break":  land.Flags.AllowBreak,
-		"can_damage": land.Flags.AllowDamage,
-		"can_trade":  land.Flags.AllowTrade,
+		"can_build":  fp.CanBuild,
+		"can_break":  fp.CanBreak,
+		"can_damage": fp.CanDamage,
+		"can_trade":  fp.CanTrade,
 	}
 }
 

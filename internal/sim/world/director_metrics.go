@@ -2,7 +2,6 @@ package world
 
 import (
 	featuredirector "voxelcraft.ai/internal/sim/world/feature/director"
-	"voxelcraft.ai/internal/sim/world/logic/directorcenter"
 )
 
 func (w *World) computeDirectorMetrics(nowTick uint64) directorMetrics {
@@ -21,45 +20,28 @@ func (w *World) computeDirectorMetrics(nowTick uint64) directorMetrics {
 		windowTicks = 72000
 	}
 
-	tradePerAgent := float64(sum.Trades) / float64(agents)
-	trade := directorcenter.Min01(tradePerAgent / 5.0)
-
-	deniedPerTickPerAgent := float64(sum.Denied) / float64(uint64(agents)*windowTicks)
-	conflict := directorcenter.Min01(deniedPerTickPerAgent * 100.0) // ~0.1 when ~1 denied / 1000 ticks / agent
-
-	chunksPerAgent := float64(sum.ChunksDiscovered) / float64(agents)
-	exploration := directorcenter.Min01(chunksPerAgent / 20.0)
-
-	infraPerAgent := float64(sum.BlueprintsComplete) / float64(agents)
-	publicInfra := directorcenter.Min01(infraPerAgent / 5.0)
-
-	inequality := giniWealth(w.sortedAgents())
-
-	return directorMetrics{
-		Trade:       trade,
-		Conflict:    conflict,
-		Exploration: exploration,
-		Inequality:  inequality,
-		PublicInfra: publicInfra,
-	}
-}
-
-func giniWealth(agents []*Agent) float64 {
-	values := make([]float64, 0, len(agents))
-	for _, a := range agents {
+	wealth := make([]float64, 0, len(w.agents))
+	for _, a := range w.sortedAgents() {
 		if a == nil {
 			continue
 		}
-		v := wealthValue(a.Inventory)
-		values = append(values, v)
+		wealth = append(wealth, featuredirector.InventoryValue(a.Inventory))
 	}
-	return directorcenter.Gini(values)
-}
+	m := featuredirector.ComputeMetrics(featuredirector.EvalInput{
+		Agents:      agents,
+		WindowTicks: windowTicks,
+		Trades:      sum.Trades,
+		Denied:      sum.Denied,
+		Chunks:      sum.ChunksDiscovered,
+		Blueprints:  sum.BlueprintsComplete,
+		Wealth:      wealth,
+	})
 
-func wealthValue(inv map[string]int) float64 {
-	return directorcenter.MapValue(inv, itemUnitValue)
-}
-
-func itemUnitValue(item string) float64 {
-	return featuredirector.ItemUnitValue(item)
+	return directorMetrics{
+		Trade:       m.Trade,
+		Conflict:    m.Conflict,
+		Exploration: m.Exploration,
+		Inequality:  m.Inequality,
+		PublicInfra: m.PublicInfra,
+	}
 }

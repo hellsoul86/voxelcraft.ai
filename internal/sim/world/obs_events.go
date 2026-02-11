@@ -2,136 +2,130 @@ package world
 
 import (
 	"sort"
-	"strings"
 
 	"voxelcraft.ai/internal/protocol"
-	"voxelcraft.ai/internal/sim/tasks"
 	featureobserver "voxelcraft.ai/internal/sim/world/feature/observer"
-	"voxelcraft.ai/internal/sim/world/logic/observerprogress"
 )
 
 func (w *World) buildObsTasks(a *Agent, nowTick uint64) []protocol.TaskObs {
-	tasksObs := make([]protocol.TaskObs, 0, 2)
+	var moveIn *featureobserver.MoveTaskInput
 	if a.MoveTask != nil {
-		mt := a.MoveTask
-		target := v3FromTask(mt.Target)
-		if mt.Kind == tasks.KindFollow {
-			if t, ok := w.followTargetPos(mt.TargetID); ok {
-				target = t
-			}
-			prog, eta := observerprogress.FollowProgress(
-				observerprogress.Vec3{X: a.Pos.X, Y: a.Pos.Y, Z: a.Pos.Z},
-				observerprogress.Vec3{X: target.X, Y: target.Y, Z: target.Z},
-				mt.Distance,
-			)
-			tasksObs = append(tasksObs, protocol.TaskObs{
-				TaskID:   mt.TaskID,
-				Kind:     string(mt.Kind),
-				Progress: prog,
-				Target:   target.ToArray(),
-				EtaTicks: eta,
-			})
-		} else {
-			start := v3FromTask(mt.StartPos)
-			prog, eta := observerprogress.MoveProgress(
-				observerprogress.Vec3{X: start.X, Y: start.Y, Z: start.Z},
-				observerprogress.Vec3{X: a.Pos.X, Y: a.Pos.Y, Z: a.Pos.Z},
-				observerprogress.Vec3{X: target.X, Y: target.Y, Z: target.Z},
-				mt.Tolerance,
-			)
-			tasksObs = append(tasksObs, protocol.TaskObs{
-				TaskID:   mt.TaskID,
-				Kind:     string(mt.Kind),
-				Progress: prog,
-				Target:   target.ToArray(),
-				EtaTicks: eta,
-			})
+		moveIn = &featureobserver.MoveTaskInput{
+			TaskID:    a.MoveTask.TaskID,
+			Kind:      string(a.MoveTask.Kind),
+			Target:    featureobserver.TaskVec3{X: a.MoveTask.Target.X, Y: a.MoveTask.Target.Y, Z: a.MoveTask.Target.Z},
+			StartPos:  featureobserver.TaskVec3{X: a.MoveTask.StartPos.X, Y: a.MoveTask.StartPos.Y, Z: a.MoveTask.StartPos.Z},
+			TargetID:  a.MoveTask.TargetID,
+			Distance:  a.MoveTask.Distance,
+			Tolerance: a.MoveTask.Tolerance,
 		}
 	}
+	var workIn *featureobserver.WorkTaskInput
 	if a.WorkTask != nil {
-		tasksObs = append(tasksObs, protocol.TaskObs{
+		workIn = &featureobserver.WorkTaskInput{
 			TaskID:   a.WorkTask.TaskID,
 			Kind:     string(a.WorkTask.Kind),
 			Progress: w.workProgressForAgent(a, a.WorkTask),
-		})
+		}
 	}
-	return tasksObs
+	return featureobserver.BuildTasks(featureobserver.BuildTasksInput{
+		SelfPos: featureobserver.TaskVec3{X: a.Pos.X, Y: a.Pos.Y, Z: a.Pos.Z},
+		Move:    moveIn,
+		Work:    workIn,
+	}, func(id string) (featureobserver.TaskVec3, bool) {
+		if t, ok := w.followTargetPos(id); ok {
+			return featureobserver.TaskVec3{X: t.X, Y: t.Y, Z: t.Z}, true
+		}
+		return featureobserver.TaskVec3{}, false
+	})
 }
 
 func (w *World) buildObsEntities(a *Agent, sensorsNear []Vec3i) []protocol.EntityObs {
-	ents := make([]protocol.EntityObs, 0, 16)
+	ents := make([]protocol.EntityObs, 0, 32)
+	selfPos := featureobserver.EntityPos{X: a.Pos.X, Y: a.Pos.Y, Z: a.Pos.Z}
+
+	agentInputs := make([]featureobserver.AgentEntityInput, 0, len(w.agents))
 	for _, other := range w.agents {
-		if other.ID == a.ID {
+		agentInputs = append(agentInputs, featureobserver.AgentEntityInput{
+			ID:       other.ID,
+			Pos:      featureobserver.EntityPos{X: other.Pos.X, Y: other.Pos.Y, Z: other.Pos.Z},
+			OrgID:    other.OrgID,
+			RepTrade: other.RepTrade,
+			RepLaw:   other.RepLaw,
+		})
+	}
+	ents = append(ents, featureobserver.BuildAgentEntities(a.ID, selfPos, agentInputs, 16)...)
+
+	containers := make([]featureobserver.SimpleEntityInput, 0, len(w.containers))
+	for _, c := range w.containers {
+		if !featureobserver.IsNear(selfPos, featureobserver.EntityPos{X: c.Pos.X, Y: c.Pos.Y, Z: c.Pos.Z}, 16) {
 			continue
 		}
-		if Manhattan(other.Pos, a.Pos) <= 16 {
-			tags := []string{}
-			if other.OrgID != "" {
-				tags = append(tags, "org:"+other.OrgID)
-			}
-			if other.RepLaw > 0 && other.RepLaw < 200 {
-				tags = append(tags, "wanted")
-			}
-			ents = append(ents, protocol.EntityObs{
-				ID:             other.ID,
-				Type:           "AGENT",
-				Pos:            other.Pos.ToArray(),
-				Tags:           tags,
-				ReputationHint: float64(other.RepTrade) / 1000.0,
-			})
-		}
+		containers = append(containers, featureobserver.SimpleEntityInput{
+			ID:   c.ID(),
+			Type: c.Type,
+			Pos:  featureobserver.EntityPos{X: c.Pos.X, Y: c.Pos.Y, Z: c.Pos.Z},
+		})
 	}
-	for _, c := range w.containers {
-		if Manhattan(c.Pos, a.Pos) <= 16 {
-			ents = append(ents, protocol.EntityObs{ID: c.ID(), Type: c.Type, Pos: c.Pos.ToArray()})
-		}
-	}
+	ents = append(ents, featureobserver.BuildSimpleEntities(containers)...)
+
 	if len(w.boards) > 0 {
-		boardIDs := make([]string, 0, len(w.boards))
+		boardEntries := make([]featureobserver.SimpleEntityInput, 0, len(w.boards))
 		for id := range w.boards {
 			typ, pos, ok := parseContainerID(id)
 			if !ok || typ != "BULLETIN_BOARD" {
 				continue
 			}
-			if Manhattan(pos, a.Pos) > 16 {
+			if !featureobserver.IsNear(selfPos, featureobserver.EntityPos{X: pos.X, Y: pos.Y, Z: pos.Z}, 16) {
 				continue
 			}
-			boardIDs = append(boardIDs, id)
+			boardEntries = append(boardEntries, featureobserver.SimpleEntityInput{
+				ID:   id,
+				Type: "BULLETIN_BOARD",
+				Pos:  featureobserver.EntityPos{X: pos.X, Y: pos.Y, Z: pos.Z},
+			})
 		}
-		sort.Strings(boardIDs)
-		for _, id := range boardIDs {
-			typ, pos, ok := parseContainerID(id)
-			if !ok || typ != "BULLETIN_BOARD" {
-				continue
-			}
-			ents = append(ents, protocol.EntityObs{ID: id, Type: "BULLETIN_BOARD", Pos: pos.ToArray()})
-		}
+		sort.Slice(boardEntries, func(i, j int) bool { return boardEntries[i].ID < boardEntries[j].ID })
+		ents = append(ents, featureobserver.BuildSimpleEntities(boardEntries)...)
 	}
 	if len(w.signs) > 0 {
+		signs := make([]featureobserver.SignEntityInput, 0, len(w.signs))
 		for _, p := range w.sortedSignPositionsNear(a.Pos, 16) {
 			s := w.signs[p]
-			tags := []string{}
-			if s != nil && strings.TrimSpace(s.Text) != "" {
-				tags = append(tags, "has_text")
+			text := ""
+			if s != nil {
+				text = s.Text
 			}
-			ents = append(ents, protocol.EntityObs{ID: signIDAt(p), Type: "SIGN", Pos: p.ToArray(), Tags: tags})
+			signs = append(signs, featureobserver.SignEntityInput{
+				ID:   signIDAt(p),
+				Pos:  featureobserver.EntityPos{X: p.X, Y: p.Y, Z: p.Z},
+				Text: text,
+			})
 		}
+		ents = append(ents, featureobserver.BuildSignEntities(signs)...)
 	}
 	if len(w.conveyors) > 0 {
+		conveyors := make([]featureobserver.ConveyorEntityInput, 0, len(w.conveyors))
 		for _, p := range w.sortedConveyorPositionsNear(a.Pos, 16) {
 			m := w.conveyors[p]
-			tags := []string{"dir:" + conveyorDirTag(m)}
-			ents = append(ents, protocol.EntityObs{ID: conveyorIDAt(p), Type: "CONVEYOR", Pos: p.ToArray(), Tags: tags})
+			conveyors = append(conveyors, featureobserver.ConveyorEntityInput{
+				ID:     conveyorIDAt(p),
+				Pos:    featureobserver.EntityPos{X: p.X, Y: p.Y, Z: p.Z},
+				DirTag: conveyorDirTag(m),
+			})
 		}
+		ents = append(ents, featureobserver.BuildConveyorEntities(conveyors)...)
 	}
 	if len(w.switches) > 0 {
+		switches := make([]featureobserver.SwitchEntityInput, 0, len(w.switches))
 		for _, p := range w.sortedSwitchPositionsNear(a.Pos, 16) {
-			state := "off"
-			if w.switches[p] {
-				state = "on"
-			}
-			ents = append(ents, protocol.EntityObs{ID: switchIDAt(p), Type: "SWITCH", Pos: p.ToArray(), Tags: []string{"state:" + state}})
+			switches = append(switches, featureobserver.SwitchEntityInput{
+				ID:  switchIDAt(p),
+				Pos: featureobserver.EntityPos{X: p.X, Y: p.Y, Z: p.Z},
+				On:  w.switches[p],
+			})
 		}
+		ents = append(ents, featureobserver.BuildSwitchEntities(switches)...)
 	}
 	if len(sensorsNear) > 0 {
 		sort.Slice(sensorsNear, func(i, j int) bool {
@@ -143,39 +137,33 @@ func (w *World) buildObsEntities(a *Agent, sensorsNear []Vec3i) []protocol.Entit
 			}
 			return sensorsNear[i].Z < sensorsNear[j].Z
 		})
+		sensors := make([]featureobserver.SensorEntityInput, 0, len(sensorsNear))
 		for _, p := range sensorsNear {
-			state := "off"
-			if w.sensorOn(p) {
-				state = "on"
-			}
-			ents = append(ents, protocol.EntityObs{ID: containerID("SENSOR", p), Type: "SENSOR", Pos: p.ToArray(), Tags: []string{"state:" + state}})
+			sensors = append(sensors, featureobserver.SensorEntityInput{
+				ID:  containerID("SENSOR", p),
+				Pos: featureobserver.EntityPos{X: p.X, Y: p.Y, Z: p.Z},
+				On:  w.sensorOn(p),
+			})
 		}
+		ents = append(ents, featureobserver.BuildSensorEntities(sensors)...)
 	}
 	if len(w.items) > 0 {
-		itemIDs := make([]string, 0, len(w.items))
-		for id, e := range w.items {
+		items := make([]featureobserver.ItemEntityInput, 0, len(w.items))
+		for _, e := range w.items {
 			if e == nil || e.Item == "" || e.Count <= 0 {
 				continue
 			}
-			if Manhattan(e.Pos, a.Pos) > 16 {
+			if !featureobserver.IsNear(selfPos, featureobserver.EntityPos{X: e.Pos.X, Y: e.Pos.Y, Z: e.Pos.Z}, 16) {
 				continue
 			}
-			itemIDs = append(itemIDs, id)
-		}
-		sort.Strings(itemIDs)
-		for _, id := range itemIDs {
-			e := w.items[id]
-			if e == nil || e.Item == "" || e.Count <= 0 {
-				continue
-			}
-			ents = append(ents, protocol.EntityObs{
+			items = append(items, featureobserver.ItemEntityInput{
 				ID:    e.EntityID,
-				Type:  "ITEM",
-				Pos:   e.Pos.ToArray(),
+				Pos:   featureobserver.EntityPos{X: e.Pos.X, Y: e.Pos.Y, Z: e.Pos.Z},
 				Item:  e.Item,
 				Count: e.Count,
 			})
 		}
+		ents = append(ents, featureobserver.BuildItemEntities(items)...)
 	}
 	return ents
 }

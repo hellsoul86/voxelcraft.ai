@@ -2,7 +2,6 @@ package world
 
 import (
 	"fmt"
-	"sort"
 	"strings"
 	"time"
 
@@ -117,11 +116,7 @@ func (w *World) joinAgent(name string, delta bool, out chan []byte) JoinResponse
 	a.CurrentWorldID = w.cfg.ID
 	// Starter items (operational config).
 	if w.cfg.StarterItems != nil {
-		keys := make([]string, 0, len(w.cfg.StarterItems))
-		for item := range w.cfg.StarterItems {
-			keys = append(keys, item)
-		}
-		sort.Strings(keys)
+		keys := session.SortedIDs(w.cfg.StarterItems)
 		for _, item := range keys {
 			n := w.cfg.StarterItems[item]
 			if item == "" || n <= 0 {
@@ -169,19 +164,15 @@ func (w *World) handleAttach(req AttachRequest) {
 	}
 
 	// Find agent deterministically by iterating sorted ids.
-	agentIDs := make([]string, 0, len(w.agents))
-	for id := range w.agents {
-		agentIDs = append(agentIDs, id)
-	}
-	sort.Strings(agentIDs)
-	var a *Agent
-	for _, id := range agentIDs {
-		aa := w.agents[id]
-		if aa != nil && aa.ResumeToken == token {
-			a = aa
-			break
+	candidates := make([]session.ResumeCandidate, 0, len(w.agents))
+	for id, aa := range w.agents {
+		if aa == nil {
+			continue
 		}
+		candidates = append(candidates, session.ResumeCandidate{ID: id, ResumeToken: aa.ResumeToken})
 	}
+	aid := session.FindResumeAgentID(candidates, token)
+	a := w.agents[aid]
 	if a == nil {
 		if req.Resp != nil {
 			req.Resp <- JoinResponse{}

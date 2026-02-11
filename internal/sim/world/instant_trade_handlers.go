@@ -97,8 +97,10 @@ func handleInstantAcceptTrade(w *World, a *Agent, inst protocol.InstantReq, nowT
 	}
 	taxRate := 0.0
 	var taxSink map[string]int
-	if landFrom != nil && landTo != nil && landFrom.LandID == landTo.LandID && landFrom.MarketTax > 0 {
-		taxRate = landFrom.MarketTax
+	if landFrom != nil && landTo != nil {
+		taxRate = economy.EffectiveMarketTax(landFrom.MarketTax, landFrom.LandID == landTo.LandID, w.activeEventID, nowTick, w.activeEventEnds)
+	}
+	if taxRate > 0 {
 		if landFrom.Owner != "" {
 			if owner := w.agents[landFrom.Owner]; owner != nil {
 				taxSink = owner.Inventory
@@ -106,10 +108,6 @@ func handleInstantAcceptTrade(w *World, a *Agent, inst protocol.InstantReq, nowT
 				taxSink = w.orgTreasury(org)
 			}
 		}
-	}
-	// Event: Market Week temporarily reduces market tax.
-	if taxRate > 0 && w.activeEventID == "MARKET_WEEK" && nowTick < w.activeEventEnds {
-		taxRate *= 0.5
 	}
 	economy.ApplyTransferWithTax(from.Inventory, a.Inventory, tr.Offer, taxSink, taxRate)
 	economy.ApplyTransferWithTax(a.Inventory, from.Inventory, tr.Request, taxSink, taxRate)

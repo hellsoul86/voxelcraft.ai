@@ -6,6 +6,7 @@ import (
 
 	"voxelcraft.ai/internal/protocol"
 	"voxelcraft.ai/internal/sim/world/feature/economy"
+	"voxelcraft.ai/internal/sim/world/feature/governance"
 )
 
 func (w *World) tickClaimsMaintenance(nowTick uint64) {
@@ -26,7 +27,7 @@ func (w *World) tickClaimsMaintenance(nowTick uint64) {
 			continue
 		}
 		if c.MaintenanceDueTick == 0 {
-			c.MaintenanceDueTick = nowTick + day
+			c.MaintenanceDueTick = governance.NextMaintenanceDue(nowTick, c.MaintenanceDueTick, day)
 			continue
 		}
 		if nowTick < c.MaintenanceDueTick {
@@ -36,13 +37,11 @@ func (w *World) tickClaimsMaintenance(nowTick uint64) {
 		status := "PAID"
 		if !w.payMaintenance(c) {
 			status = "LATE"
-			if c.MaintenanceStage < 2 {
-				c.MaintenanceStage++
-			}
+			c.MaintenanceStage = governance.NextMaintenanceStage(c.MaintenanceStage, false)
 		} else {
-			c.MaintenanceStage = 0
+			c.MaintenanceStage = governance.NextMaintenanceStage(c.MaintenanceStage, true)
 		}
-		c.MaintenanceDueTick += day
+		c.MaintenanceDueTick = governance.NextMaintenanceDue(nowTick, c.MaintenanceDueTick, day)
 
 		// Notify owner agent if present.
 		if owner := w.agents[c.Owner]; owner != nil {
@@ -67,11 +66,7 @@ func (w *World) payMaintenance(c *LandClaim) bool {
 		return false
 	}
 
-	cost := w.cfg.MaintenanceCost
-	if len(cost) == 0 {
-		// Defensive default (should be set by cfg.applyDefaults).
-		cost = map[string]int{"IRON_INGOT": 1, "COAL": 1}
-	}
+	cost := governance.EffectiveMaintenanceCost(w.cfg.MaintenanceCost)
 
 	// Prefer org treasury if claim is owned by an org id.
 	if org := w.orgByID(owner); org != nil {
@@ -79,7 +74,7 @@ func (w *World) payMaintenance(c *LandClaim) bool {
 		if tr == nil || !economy.HasItems(tr, cost) {
 			return false
 		}
-		deductItems(tr, cost)
+		economy.DeductItems(tr, cost)
 		return true
 	}
 
@@ -90,15 +85,6 @@ func (w *World) payMaintenance(c *LandClaim) bool {
 	if !economy.HasItems(a.Inventory, cost) {
 		return false
 	}
-	deductItems(a.Inventory, cost)
+	economy.DeductItems(a.Inventory, cost)
 	return true
-}
-
-func deductItems(inv map[string]int, cost map[string]int) {
-	for item, c := range cost {
-		inv[item] -= c
-		if inv[item] <= 0 {
-			delete(inv, item)
-		}
-	}
 }
