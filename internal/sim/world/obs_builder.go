@@ -4,6 +4,7 @@ import (
 	"sort"
 
 	"voxelcraft.ai/internal/protocol"
+	"voxelcraft.ai/internal/sim/world/feature/governance"
 )
 
 func (w *World) buildObs(a *Agent, cl *clientState, nowTick uint64) protocol.ObsMsg {
@@ -13,7 +14,7 @@ func (w *World) buildObs(a *Agent, cl *clientState, nowTick uint64) protocol.Obs
 	land, perms := w.permissionsFor(a.ID, a.Pos)
 	if land != nil && land.CurfewEnabled {
 		t := w.timeOfDay(nowTick)
-		if inWindow(t, land.CurfewStart, land.CurfewEnd) {
+		if governance.InWindow(t, land.CurfewStart, land.CurfewEnd) {
 			perms["can_build"] = false
 			perms["can_break"] = false
 		}

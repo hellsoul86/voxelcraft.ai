@@ -3,6 +3,7 @@ package world
 import (
 	"voxelcraft.ai/internal/protocol"
 	simenc "voxelcraft.ai/internal/sim/encoding"
+	"voxelcraft.ai/internal/sim/world/io/obscodec"
 )
 
 func (w *World) buildObsVoxels(center Vec3i, cl *clientState) (protocol.VoxelsObs, []Vec3i) {
@@ -46,18 +47,7 @@ func (w *World) buildObsVoxels(center Vec3i, cl *clientState) (protocol.VoxelsOb
 	}
 
 	if cl.DeltaVoxels && cl.LastVoxels != nil && len(cl.LastVoxels) == len(curr) {
-		ops := make([]protocol.VoxelDeltaOp, 0, 64)
-		i := 0
-		for dy := -r; dy <= r; dy++ {
-			for dz := -r; dz <= r; dz++ {
-				for dx := -r; dx <= r; dx++ {
-					if curr[i] != cl.LastVoxels[i] {
-						ops = append(ops, protocol.VoxelDeltaOp{D: [3]int{dx, dy, dz}, B: curr[i]})
-					}
-					i++
-				}
-			}
-		}
+		ops := obscodec.BuildDeltaOps(cl.LastVoxels, curr, r)
 		if len(ops) > 0 && len(ops) < len(curr)/2 {
 			vox.Encoding = "DELTA"
 			vox.Ops = ops

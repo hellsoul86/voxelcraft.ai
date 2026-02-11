@@ -1,6 +1,10 @@
 package world
 
-import "testing"
+import (
+	"testing"
+
+	"voxelcraft.ai/internal/sim/world/logic/blueprint"
+)
 
 func setAir(w *World, pos Vec3i) {
 	pos.Y = 0
@@ -18,11 +22,10 @@ func clearBlueprintFootprint(t *testing.T, w *World, blueprintID string, anchor 
 	if !ok {
 		t.Fatalf("missing blueprint %q", blueprintID)
 	}
-	rot := normalizeRotation(rotation)
+	rot := blueprint.NormalizeRotation(rotation)
 	for _, b := range bp.Blocks {
-		off := rotateOffset(b.Pos, rot)
+		off := blueprint.RotateOffset(b.Pos, rot)
 		p := Vec3i{X: anchor.X + off[0], Y: anchor.Y + off[1], Z: anchor.Z + off[2]}
 		setAir(w, p)
 	}
 }
-

@@ -1,6 +1,9 @@
 package world
 
-import "voxelcraft.ai/internal/protocol"
+import (
+	"voxelcraft.ai/internal/protocol"
+	"voxelcraft.ai/internal/sim/tasks"
+)
 
 func (w *World) applyAct(a *Agent, act protocol.ActMsg, nowTick uint64) {
 	// Staleness check: accept only [now-2, now].
@@ -71,4 +74,21 @@ func actionResult(tick uint64, ref string, ok bool, code string, message string)
 		e["message"] = message
 	}
 	return e
+}
+
+type taskReqHandler func(w *World, a *Agent, tr protocol.TaskReq, nowTick uint64)
+
+var taskReqDispatch = map[string]taskReqHandler{
+	TaskTypeStop:                     handleTaskStop,
+	string(tasks.KindMoveTo):         handleTaskMoveTo,
+	string(tasks.KindFollow):         handleTaskFollow,
+	string(tasks.KindMine):           handleTaskMine,
+	string(tasks.KindGather):         handleTaskGather,
+	string(tasks.KindPlace):          handleTaskPlace,
+	string(tasks.KindOpen):           handleTaskOpen,
+	string(tasks.KindTransfer):       handleTaskTransfer,
+	string(tasks.KindCraft):          handleTaskCraft,
+	string(tasks.KindSmelt):          handleTaskSmelt,
+	TaskTypeClaimLand:                handleTaskClaimLand,
+	string(tasks.KindBuildBlueprint): handleTaskBuildBlueprint,
 }

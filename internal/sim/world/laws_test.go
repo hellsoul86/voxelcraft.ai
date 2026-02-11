@@ -6,6 +6,7 @@ import (
 
 	"voxelcraft.ai/internal/protocol"
 	"voxelcraft.ai/internal/sim/catalogs"
+	"voxelcraft.ai/internal/sim/world/feature/governance"
 )
 
 func TestLawLifecycleAndActivation(t *testing.T) {
@@ -123,7 +124,7 @@ func TestLawLifecycleAndActivation(t *testing.T) {
 	if !land.CurfewEnabled {
 		t.Fatalf("expected curfew enabled")
 	}
-	if !inWindow(w.timeOfDay(5), land.CurfewStart, land.CurfewEnd) {
+	if !governance.InWindow(w.timeOfDay(5), land.CurfewStart, land.CurfewEnd) {
 		t.Fatalf("expected tick 5 in curfew window")
 	}
 	if w.canBuildAt(owner.ID, owner.Pos, 5) {

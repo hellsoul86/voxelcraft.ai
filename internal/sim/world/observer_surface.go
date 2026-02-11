@@ -1,6 +1,7 @@
 package world
 
 import "sort"
+import "voxelcraft.ai/internal/sim/world/logic/mathx"
 
 func (w *World) computeChunkSurface(cx, cz int) []surfaceCell {
 	ch := w.chunkForSurface(cx, cz)
@@ -109,7 +110,7 @@ func computeWantedChunks(agents []ChunkKey, radius int, maxChunks int) []ChunkKe
 		for dz := -radius; dz <= radius; dz++ {
 			for dx := -radius; dx <= radius; dx++ {
 				k := ChunkKey{CX: a.CX + dx, CZ: a.CZ + dz}
-				d := abs(dx) + abs(dz)
+				d := mathx.AbsInt(dx) + mathx.AbsInt(dz)
 				if prev, ok := distByKey[k]; !ok || d < prev {
 					distByKey[k] = d
 				}

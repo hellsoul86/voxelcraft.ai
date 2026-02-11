@@ -4,6 +4,8 @@ import (
 	"fmt"
 
 	"voxelcraft.ai/internal/sim/catalogs"
+	"voxelcraft.ai/internal/sim/world/feature/transfer"
+	featurework "voxelcraft.ai/internal/sim/world/feature/work"
 )
 
 func New(cfg WorldConfig, cats *catalogs.Catalogs) (*World, error) {
@@ -15,7 +17,7 @@ func New(cfg WorldConfig, cats *catalogs.Catalogs) (*World, error) {
 		return nil, err
 	}
 
-	smeltByInput, err := buildSmeltByInput(cats.Recipes.ByID)
+	smeltByInput, err := featurework.BuildSmeltByInput(cats.Recipes.ByID)
 	if err != nil {
 		return nil, err
 	}
@@ -89,7 +91,7 @@ func New(cfg WorldConfig, cats *catalogs.Catalogs) (*World, error) {
 		admin:         make(chan adminSnapshotReq, 16),
 		adminReset:    make(chan adminResetReq, 16),
 		agentPosReq:   make(chan agentPosReq, 64),
-		eventsReq:     make(chan eventsReq, 128),
+		eventsReq:     make(chan transfer.EventsReq, 128),
 		actDedupeReq:  make(chan actDedupeReq, 256),
 		orgMetaReq:    make(chan orgMetaReq, 64),
 		orgMetaUpsert: make(chan orgMetaUpsertReq, 64),

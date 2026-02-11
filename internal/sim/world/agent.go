@@ -5,6 +5,7 @@ import (
 
 	"voxelcraft.ai/internal/protocol"
 	"voxelcraft.ai/internal/sim/tasks"
+	"voxelcraft.ai/internal/sim/world/logic/rates"
 )
 
 type Agent struct {
@@ -186,16 +187,10 @@ func (a *Agent) RateLimitAllow(kind string, nowTick uint64, window uint64, max i
 	if w.Window == 0 || w.Max <= 0 {
 		return true, 0
 	}
-	if nowTick-w.StartTick >= w.Window {
-		w.StartTick = nowTick
-		w.Count = 0
-	}
-	w.Count++
-	if w.Count <= w.Max {
-		return true, 0
-	}
-	// Remaining ticks until the window resets (next tick >= StartTick+Window).
-	return false, (w.StartTick + w.Window) - nowTick
+	start, count, allow, cool := rates.Allow(nowTick, w.StartTick, w.Count, w.Window, w.Max)
+	w.StartTick = start
+	w.Count = count
+	return allow, cool
 }
 
 func (a *Agent) MemorySave(key, value string, ttlTicks int, nowTick uint64) {

@@ -1,11 +1,10 @@
 package world
 
 import (
-	"fmt"
-	"strconv"
-	"strings"
+	"sort"
 
 	"voxelcraft.ai/internal/protocol"
+	"voxelcraft.ai/internal/sim/world/logic/ids"
 )
 
 type Container struct {
@@ -27,7 +26,7 @@ func (c *Container) InventoryList() []protocol.ItemStack {
 		}
 		out = append(out, protocol.ItemStack{Item: item, Count: n})
 	}
-	sortItemStacks(out)
+	sort.Slice(out, func(i, j int) bool { return out[i].Item < out[j].Item })
 	return out
 }
 
@@ -90,24 +89,77 @@ func (c *Container) claimOwed(agentID string) map[string]int {
 }
 
 func containerID(typ string, pos Vec3i) string {
-	return fmt.Sprintf("%s@%d,%d,%d", typ, pos.X, pos.Y, pos.Z)
+	return ids.ContainerID(typ, pos.X, pos.Y, pos.Z)
 }
 
 func parseContainerID(id string) (typ string, pos Vec3i, ok bool) {
-	parts := strings.SplitN(id, "@", 2)
-	if len(parts) != 2 {
-		return "", Vec3i{}, false
-	}
-	typ = parts[0]
-	coord := strings.Split(parts[1], ",")
-	if len(coord) != 3 {
-		return "", Vec3i{}, false
-	}
-	x, err1 := strconv.Atoi(coord[0])
-	y, err2 := strconv.Atoi(coord[1])
-	z, err3 := strconv.Atoi(coord[2])
-	if err1 != nil || err2 != nil || err3 != nil {
+	typ, x, y, z, ok := ids.ParseContainerID(id)
+	if !ok {
 		return "", Vec3i{}, false
 	}
 	return typ, Vec3i{X: x, Y: y, Z: z}, true
+}
+
+func (w *World) ensureContainerForPlacedBlock(pos Vec3i, blockName string) {
+	switch blockName {
+	case "CHEST", "FURNACE", "CONTRACT_TERMINAL":
+		w.ensureContainer(pos, blockName)
+	case "BULLETIN_BOARD":
+		w.ensureBoard(pos)
+	case "SIGN":
+		w.ensureSign(pos)
+	case "CONVEYOR":
+		// Blueprint placements don't have a notion of placement yaw yet, so default to +X.
+		w.ensureConveyor(pos, 1, 0)
+	case "SWITCH":
+		w.ensureSwitch(pos, false)
+	}
+}
+
+func (w *World) ensureContainer(pos Vec3i, typ string) *Container {
+	c := w.containers[pos]
+	if c != nil {
+		// If the type changed (shouldn't happen), overwrite.
+		c.Type = typ
+		return c
+	}
+	c = &Container{
+		Type:      typ,
+		Pos:       pos,
+		Inventory: map[string]int{},
+	}
+	w.containers[pos] = c
+	return c
+}
+
+func (w *World) removeContainer(pos Vec3i) *Container {
+	c := w.containers[pos]
+	if c == nil {
+		return nil
+	}
+	delete(w.containers, pos)
+	return c
+}
+
+func (w *World) getContainerByID(id string) *Container {
+	typ, pos, ok := parseContainerID(id)
+	if !ok {
+		return nil
+	}
+	c := w.containers[pos]
+	if c == nil {
+		return nil
+	}
+	if c.Type != typ {
+		return nil
+	}
+	return c
+}
+
+func (w *World) canWithdrawFromContainer(agentID string, pos Vec3i) bool {
+	land := w.landAt(pos)
+	if land == nil {
+		return true
+	}
+	return w.isLandMember(agentID, land)
 }

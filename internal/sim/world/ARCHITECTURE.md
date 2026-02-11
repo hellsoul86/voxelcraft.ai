@@ -36,44 +36,81 @@ Per tick order in `stepInternal`:
 
 Do not change this order without explicit determinism review.
 
-## Module Map
+## Package Layout
+
+The package uses a "world facade + pure subpackages" layout.
+
+World facade (`internal/sim/world`):
+- Owns mutable runtime state and tick ordering.
+- Performs all state mutation, auditing, and event emission.
+- Adapts pure helpers from subpackages.
+
+Pure subpackages:
+- `internal/sim/world/logic/mathx`
+- `internal/sim/world/logic/ids` for stable identifier parsing/formatting
+- `internal/sim/world/logic/observerprogress`
+- `internal/sim/world/logic/conveyorpower`
+- `internal/sim/world/logic/directorcenter`
+- `internal/sim/world/logic/movement`
+- `internal/sim/world/logic/blueprint`
+- `internal/sim/world/logic/rates`
+- `internal/sim/world/io/snapshotcodec`
+- `internal/sim/world/io/obscodec`
+- `internal/sim/world/io/digestcodec`
+- `internal/sim/world/policy/rules`
+- `internal/sim/world/feature/admin`
+- `internal/sim/world/feature/session`
+- `internal/sim/world/feature/transfer`
+- `internal/sim/world/feature/movement`
+- `internal/sim/world/feature/work`
+- `internal/sim/world/feature/economy`
+- `internal/sim/world/feature/contracts`
+- `internal/sim/world/feature/governance`
+- `internal/sim/world/feature/director`
+- `internal/sim/world/feature/observer`
+
+Dependency rules:
+1. `world` can import subpackages.
+2. Subpackages do not import `internal/sim/world`.
+3. `feature/*`, `io/*` and `policy/*` may depend on `logic/*`.
+4. `feature/*` stays stateless and receives data/callbacks from `world` facade.
+5. `logic/*` packages stay pure and deterministic.
+
+## Main Runtime Modules
 
 Core runtime:
 - `world.go`: world construction (`New`) only
 - `types_world_runtime.go`: runtime state shape (`World`)
-- `types_public.go`: public structs used by transport/persistence
-- `runtime_api.go`: lightweight API/accessor methods
+- `runtime_loop.go`, `runtime_step.go`, `runtime_api.go`
+- `session_lifecycle.go`
 
 Action handling:
-- `action_apply.go`: ACT/instant/task entry dispatch
-- `instant_*.go`: instant behavior handlers
-- `task_handlers.go`: task request handlers
+- `action_apply.go`: ACT entry + routing
+- `instant_dispatch.go` and `instant_*_handlers.go`
+- `task_handlers_*.go`
 - `action_types.go`: canonical action names and dispatch validation
 
 System loops:
-- `movement_system.go`, `movement_detour.go`
-- `work_system.go`
-- `work_ticks_mine_place.go`
-- `work_ticks_interact.go`
-- `work_ticks_craft_build.go`
-- `conveyor_system.go`
+- `movement_system.go` (uses `feature/movement` and `logic/movement`)
+- `task_handlers_work.go` + `work_ticks_mine_place.go` + `work_ticks_interact.go` + `work_tick_craft_smelt.go` + `work_tick_blueprint.go` (uses `logic/blueprint` and `feature/work`)
+- `conveyor_system.go` (uses `logic/conveyorpower`)
 - `environment_system.go`
+- `director_*.go` (uses `logic/directorcenter`)
 
-Observation path:
+Observation:
 - `obs_builder.go`: top-level OBS assembly
-- `obs_events.go`: tasks/entities/events/fun/memory projection
-- `obs_voxels.go`: voxel window + delta/RLE encoding
+- `obs_events.go`: task/entity/event projection
+- `obs_voxels.go`: voxel window + delta/RLE (uses `io/obscodec`)
+- `observer_*.go`: observer stream exports
 
 Determinism and persistence:
-- `state_digest.go`: canonical digest serialization
-- `snapshot_export.go`, `snapshot_import.go`
-- `audit_helpers.go`: audit event writes
+- `state_digest*.go` (uses `io/digestcodec`)
+- `snapshot_export*.go`, `snapshot_import*.go` (uses `io/snapshotcodec`)
+- `audit_helpers.go`
 
-Shared helpers:
-- `world_blocks.go`: terrain/block helpers
-- `world_helpers_runtime.go`: runtime utility helpers
-- `world_helpers_misc.go`: item parsing/tax/transfer helpers
-- `work_progress.go`: progress projection for OBS
+Domain types:
+- `feature/governance/laws.go` owns `Law`/`LawStatus`
+- `feature/contracts/*` owns contract-domain pure rules
 
 ## Invariants
 
@@ -88,8 +125,18 @@ Before moving/changing behavior:
 1. keep function signatures unchanged unless all call sites are updated in one change
 2. keep tick order and event ordering unchanged
 3. preserve key sorting in digest and payload assembly
-4. rerun package + full tests
+4. preserve OBS field ordering and voxel scan order
 5. rerun agent E2E and swarm gate
+
+## Testing Layout
+
+- Integration tests stay in `internal/sim/world` (they need unexported state + deterministic tick wiring).
+- Pure unit tests must live in their owning subpackages (`logic/*`, `feature/*`, `policy/*`, `io/*`).
+- In Go, colocated `_test.go` files are the default for white-box tests. Separation is done by package boundaries, not a global `/tests` folder.
+- New test default:
+  1. write unit test in subpackage first
+  2. add `world` integration test only for facade wiring
+  3. avoid duplicate assertions across both layers
 
 ## Validation Commands
 
@@ -100,4 +147,3 @@ go test ./internal/sim/world ./internal/sim/multiworld ./cmd/server
 go test ./...
 scripts/release_gate.sh --with-agent
 ```
-

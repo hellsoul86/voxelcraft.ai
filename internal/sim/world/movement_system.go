@@ -6,6 +6,8 @@ import (
 
 	"voxelcraft.ai/internal/protocol"
 	"voxelcraft.ai/internal/sim/tasks"
+	featuremovement "voxelcraft.ai/internal/sim/world/feature/movement"
+	"voxelcraft.ai/internal/sim/world/logic/mathx"
 )
 
 func (w *World) systemMovementImpl(nowTick uint64) {
@@ -79,7 +81,7 @@ func (w *World) systemMovementImpl(nowTick uint64) {
 		dx := target.X - a.Pos.X
 		dz := target.Z - a.Pos.Z
 
-		primaryX := abs(dx) >= abs(dz)
+		primaryX := mathx.AbsInt(dx) >= mathx.AbsInt(dz)
 		next := a.Pos
 		next1 := a.Pos
 		if primaryX {
@@ -125,8 +127,18 @@ func (w *World) systemMovementImpl(nowTick uint64) {
 		// If both primary+secondary are blocked, attempt a small deterministic detour so agents
 		// don't have to constantly re-issue MOVE_TO on cluttered terrain.
 		if w.blockSolid(w.chunks.GetBlock(next)) {
-			if alt, ok := w.detourStep2D(a.Pos, target, 16); ok {
-				next = alt
+			if alt, ok := featuremovement.DetourStep2D(
+				featuremovement.Pos{X: a.Pos.X, Y: a.Pos.Y, Z: a.Pos.Z},
+				featuremovement.Pos{X: target.X, Y: target.Y, Z: target.Z},
+				16,
+				func(p featuremovement.Pos) bool {
+					return w.chunks.inBounds(Vec3i{X: p.X, Y: p.Y, Z: p.Z})
+				},
+				func(p featuremovement.Pos) bool {
+					return w.blockSolid(w.chunks.GetBlock(Vec3i{X: p.X, Y: p.Y, Z: p.Z}))
+				},
+			); ok {
+				next = Vec3i{X: alt.X, Y: alt.Y, Z: alt.Z}
 			}
 		}
 

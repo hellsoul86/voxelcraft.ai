@@ -6,6 +6,7 @@ AGENT_DIR_DEFAULT="$(cd "${ROOT_DIR}/.." && pwd)/voxelcraft.agent"
 
 WITH_AGENT=0
 SKIP_RACE=0
+SKIP_PERF=0
 AGENT_DIR="${AGENT_DIR_DEFAULT}"
 AGENT_SCENARIO="multiworld_mine_trade_govern"
 AGENT_COUNT=50
@@ -18,6 +19,7 @@ Usage: scripts/release_gate.sh [options]
 Options:
   --with-agent           Run voxelcraft.agent e2e + swarm after Go tests.
   --skip-race            Skip go test -race stage.
+  --skip-perf            Skip benchmark performance sentinel stage.
   --agent-dir <path>     Path to voxelcraft.agent repo (default: ../voxelcraft.agent).
   --scenario <name>      Agent scenario (default: multiworld_mine_trade_govern).
   --count <n>            Swarm agent count (default: 50).
@@ -34,6 +36,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --skip-race)
       SKIP_RACE=1
+      shift
+      ;;
+    --skip-perf)
+      SKIP_PERF=1
       shift
       ;;
     --agent-dir)
@@ -76,6 +82,13 @@ else
   echo "[gate] stage=race-tests skipped"
 fi
 
+if [[ "${SKIP_PERF}" -eq 0 ]]; then
+  echo "[gate] stage=perf-sentinel"
+  scripts/perf_gate.sh
+else
+  echo "[gate] stage=perf-sentinel skipped"
+fi
+
 echo "[gate] stage=full-go-tests"
 go test ./...
 
@@ -99,4 +112,3 @@ else
 fi
 
 echo "[gate] done"
-

@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"voxelcraft.ai/internal/sim/catalogs"
+	"voxelcraft.ai/internal/sim/world/feature/governance"
 )
 
 func TestClaimType_HomesteadVisitorPermissions(t *testing.T) {
@@ -28,13 +29,19 @@ func TestClaimType_HomesteadVisitorPermissions(t *testing.T) {
 	visitor := &Agent{ID: "A2", Pos: owner.Pos}
 	w.agents[owner.ID] = owner
 	w.agents[visitor.ID] = visitor
+	homeFlags := governance.DefaultClaimFlags(ClaimTypeHomestead)
 	w.claims["LAND_HOME"] = &LandClaim{
 		LandID:    "LAND_HOME",
 		Owner:     owner.ID,
 		ClaimType: ClaimTypeHomestead,
 		Anchor:    owner.Pos,
 		Radius:    16,
-		Flags:     defaultClaimFlags(ClaimTypeHomestead),
+		Flags: ClaimFlags{
+			AllowBuild:  homeFlags.AllowBuild,
+			AllowBreak:  homeFlags.AllowBreak,
+			AllowDamage: homeFlags.AllowDamage,
+			AllowTrade:  homeFlags.AllowTrade,
+		},
 	}
 	_, perms := w.permissionsFor(visitor.ID, owner.Pos)
 	if perms["can_build"] || perms["can_break"] {
@@ -64,13 +71,19 @@ func TestClaimType_CityCoreTradeAndDamage(t *testing.T) {
 	visitor := &Agent{ID: "A2", Pos: owner.Pos}
 	w.agents[owner.ID] = owner
 	w.agents[visitor.ID] = visitor
+	cityFlags := governance.DefaultClaimFlags(ClaimTypeCityCore)
 	w.claims["LAND_CITY"] = &LandClaim{
 		LandID:    "LAND_CITY",
 		Owner:     owner.ID,
 		ClaimType: ClaimTypeCityCore,
 		Anchor:    owner.Pos,
 		Radius:    16,
-		Flags:     defaultClaimFlags(ClaimTypeCityCore),
+		Flags: ClaimFlags{
+			AllowBuild:  cityFlags.AllowBuild,
+			AllowBreak:  cityFlags.AllowBreak,
+			AllowDamage: cityFlags.AllowDamage,
+			AllowTrade:  cityFlags.AllowTrade,
+		},
 	}
 	_, perms := w.permissionsFor(visitor.ID, owner.Pos)
 	if !perms["can_trade"] {
@@ -99,13 +112,19 @@ func TestClaimType_SnapshotRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new world1: %v", err)
 	}
+	cityFlags := governance.DefaultClaimFlags(ClaimTypeCityCore)
 	w1.claims["LAND_X"] = &LandClaim{
 		LandID:    "LAND_X",
 		Owner:     "A1",
 		ClaimType: ClaimTypeCityCore,
 		Anchor:    Vec3i{X: 1, Y: 0, Z: 1},
 		Radius:    8,
-		Flags:     defaultClaimFlags(ClaimTypeCityCore),
+		Flags: ClaimFlags{
+			AllowBuild:  cityFlags.AllowBuild,
+			AllowBreak:  cityFlags.AllowBreak,
+			AllowDamage: cityFlags.AllowDamage,
+			AllowTrade:  cityFlags.AllowTrade,
+		},
 	}
 	snap := w1.ExportSnapshot(0)
 

@@ -2,6 +2,8 @@ package world
 
 import (
 	"sort"
+
+	"voxelcraft.ai/internal/sim/world/logic/ids"
 )
 
 type Sign struct {
@@ -12,7 +14,7 @@ type Sign struct {
 }
 
 func signIDAt(pos Vec3i) string {
-	return containerID("SIGN", pos)
+	return ids.SignIDAt(pos.X, pos.Y, pos.Z)
 }
 
 func (w *World) ensureSign(pos Vec3i) *Sign {

@@ -1,8 +1,12 @@
 package world
 
-import "sort"
+import (
+	"sort"
 
-func switchIDAt(pos Vec3i) string { return containerID("SWITCH", pos) }
+	"voxelcraft.ai/internal/sim/world/logic/ids"
+)
+
+func switchIDAt(pos Vec3i) string { return ids.SwitchIDAt(pos.X, pos.Y, pos.Z) }
 
 func (w *World) ensureSwitch(pos Vec3i, on bool) {
 	if w.switches == nil {

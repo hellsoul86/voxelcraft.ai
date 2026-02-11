@@ -4,6 +4,7 @@ import (
 	"sort"
 
 	"voxelcraft.ai/internal/protocol"
+	"voxelcraft.ai/internal/sim/world/feature/economy"
 )
 
 func (w *World) systemEnvironment(nowTick uint64) {
@@ -209,7 +210,7 @@ func (w *World) respawnAgent(nowTick uint64, a *Agent, reason string) {
 		"drop_pos": dropPos.ToArray(),
 	}
 	if len(lost) > 0 {
-		ev["lost"] = encodeItemPairs(lost)
+		ev["lost"] = economy.EncodeItemPairs(lost)
 	}
 	a.AddEvent(ev)
 }

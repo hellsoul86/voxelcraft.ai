@@ -7,12 +7,95 @@ import (
 	"time"
 
 	"voxelcraft.ai/internal/protocol"
+	"voxelcraft.ai/internal/sim/world/feature/session"
 )
 
+func (w *World) buildWelcome(agentID, resumeToken string) protocol.WelcomeMsg {
+	return session.BuildWelcome(session.WelcomeInput{
+		AgentID:            agentID,
+		ResumeToken:        resumeToken,
+		CurrentWorld:       w.cfg.ID,
+		WorldType:          w.cfg.WorldType,
+		SwitchCooldown:     w.cfg.SwitchCooldownTicks,
+		ResetEveryTicks:    w.cfg.ResetEveryTicks,
+		ResetNoticeTicks:   w.cfg.ResetNoticeTicks,
+		TickRateHz:         w.cfg.TickRateHz,
+		ObsRadius:          w.cfg.ObsRadius,
+		DayTicks:           w.cfg.DayTicks,
+		Seed:               w.cfg.Seed,
+		BlockPaletteDigest: w.catalogs.Blocks.PaletteDigest,
+		BlockPaletteCount:  len(w.catalogs.Blocks.Palette),
+		ItemPaletteDigest:  w.catalogs.Items.PaletteDigest,
+		ItemPaletteCount:   len(w.catalogs.Items.Palette),
+		RecipesDigest:      w.catalogs.Recipes.Digest,
+		BlueprintsDigest:   w.catalogs.Blueprints.Digest,
+		LawTemplatesDigest: w.catalogs.Laws.Digest,
+		EventsDigest:       w.catalogs.Events.Digest,
+	})
+}
+
+func (w *World) buildCatalogMsgs() ([]protocol.CatalogMsg, string) {
+	tuningCat := session.TuningCatalogMsg(session.TuningInput{
+		SnapshotEveryTicks: w.cfg.SnapshotEveryTicks,
+		DirectorEveryTicks: w.cfg.DirectorEveryTicks,
+		SeasonLengthTicks:  w.cfg.SeasonLengthTicks,
+		RateLimits: session.TuningRateLimits{
+			SayWindowTicks:        w.cfg.RateLimits.SayWindowTicks,
+			SayMax:                w.cfg.RateLimits.SayMax,
+			MarketSayWindowTicks:  w.cfg.RateLimits.MarketSayWindowTicks,
+			MarketSayMax:          w.cfg.RateLimits.MarketSayMax,
+			WhisperWindowTicks:    w.cfg.RateLimits.WhisperWindowTicks,
+			WhisperMax:            w.cfg.RateLimits.WhisperMax,
+			OfferTradeWindowTicks: w.cfg.RateLimits.OfferTradeWindowTicks,
+			OfferTradeMax:         w.cfg.RateLimits.OfferTradeMax,
+			PostBoardWindowTicks:  w.cfg.RateLimits.PostBoardWindowTicks,
+			PostBoardMax:          w.cfg.RateLimits.PostBoardMax,
+		},
+		LawNoticeTicks:         w.cfg.LawNoticeTicks,
+		LawVoteTicks:           w.cfg.LawVoteTicks,
+		BlueprintAutoPullRange: w.cfg.BlueprintAutoPullRange,
+		BlueprintBlocksPerTick: w.cfg.BlueprintBlocksPerTick,
+		AccessPassCoreRadius:   w.cfg.AccessPassCoreRadius,
+		MaintenanceCost:        w.cfg.MaintenanceCost,
+		FunDecayWindowTicks:    w.cfg.FunDecayWindowTicks,
+		FunDecayBase:           w.cfg.FunDecayBase,
+		StructureSurvivalTicks: w.cfg.StructureSurvivalTicks,
+	})
+	recipesCat := session.RecipesCatalogMsg(w.catalogs.Recipes.Digest, w.catalogs.Recipes.ByID)
+	blueprintsCat := session.BlueprintsCatalogMsg(w.catalogs.Blueprints.Digest, w.catalogs.Blueprints.ByID)
+	lawsCat := session.LawTemplatesCatalogMsg(w.catalogs.Laws.Digest, w.catalogs.Laws.Templates)
+	eventsCat := session.EventsCatalogMsg(w.catalogs.Events.Digest, w.catalogs.Events.ByID)
+
+	catalogMsgs := session.OrderedCatalogs(
+		protocol.CatalogMsg{
+			Type:            protocol.TypeCatalog,
+			ProtocolVersion: protocol.Version,
+			Name:            "block_palette",
+			Digest:          w.catalogs.Blocks.PaletteDigest,
+			Part:            1,
+			TotalParts:      1,
+			Data:            w.catalogs.Blocks.Palette,
+		},
+		protocol.CatalogMsg{
+			Type:            protocol.TypeCatalog,
+			ProtocolVersion: protocol.Version,
+			Name:            "item_palette",
+			Digest:          w.catalogs.Items.PaletteDigest,
+			Part:            1,
+			TotalParts:      1,
+			Data:            w.catalogs.Items.Palette,
+		},
+		tuningCat,
+		recipesCat,
+		blueprintsCat,
+		lawsCat,
+		eventsCat,
+	)
+	return catalogMsgs, tuningCat.Digest
+}
+
 func (w *World) joinAgent(name string, delta bool, out chan []byte) JoinResponse {
-	if name == "" {
-		name = "agent"
-	}
+	name = session.NormalizeAgentName(name)
 	nowTick := w.tick.Load()
 
 	idNum := w.nextAgentNum.Add(1)
@@ -62,73 +145,9 @@ func (w *World) joinAgent(name string, delta bool, out chan []byte) JoinResponse
 	token := fmt.Sprintf("resume_%s_%d", w.cfg.ID, time.Now().UnixNano())
 	a.ResumeToken = token
 
-	welcome := protocol.WelcomeMsg{
-		Type:            protocol.TypeWelcome,
-		ProtocolVersion: protocol.Version,
-		AgentID:         agentID,
-		ResumeToken:     token,
-		CurrentWorldID:  w.cfg.ID,
-		WorldManifest: []protocol.WorldRef{
-			{
-				WorldID:          w.cfg.ID,
-				WorldType:        w.cfg.WorldType,
-				EntryPointID:     "spawn",
-				SwitchCooldown:   w.cfg.SwitchCooldownTicks,
-				ResetEveryTicks:  w.cfg.ResetEveryTicks,
-				ResetNoticeTicks: w.cfg.ResetNoticeTicks,
-			},
-		},
-		WorldParams: protocol.WorldParams{
-			TickRateHz: w.cfg.TickRateHz,
-			ChunkSize:  [3]int{16, 16, 1},
-			Height:     1,
-			ObsRadius:  w.cfg.ObsRadius,
-			DayTicks:   w.cfg.DayTicks,
-			Seed:       w.cfg.Seed,
-		},
-		Catalogs: protocol.CatalogDigests{
-			BlockPalette:       protocol.DigestRef{Digest: w.catalogs.Blocks.PaletteDigest, Count: len(w.catalogs.Blocks.Palette)},
-			ItemPalette:        protocol.DigestRef{Digest: w.catalogs.Items.PaletteDigest, Count: len(w.catalogs.Items.Palette)},
-			RecipesDigest:      w.catalogs.Recipes.Digest,
-			BlueprintsDigest:   w.catalogs.Blueprints.Digest,
-			LawTemplatesDigest: w.catalogs.Laws.Digest,
-			EventsDigest:       w.catalogs.Events.Digest,
-		},
-	}
-
-	tuningCat := w.tuningCatalogMsg()
-	welcome.Catalogs.TuningDigest = tuningCat.Digest
-
-	recipesCat := w.recipesCatalogMsg()
-	blueprintsCat := w.blueprintsCatalogMsg()
-	lawsCat := w.lawTemplatesCatalogMsg()
-	eventsCat := w.eventsCatalogMsg()
-
-	catalogMsgs := []protocol.CatalogMsg{
-		{
-			Type:            protocol.TypeCatalog,
-			ProtocolVersion: protocol.Version,
-			Name:            "block_palette",
-			Digest:          w.catalogs.Blocks.PaletteDigest,
-			Part:            1,
-			TotalParts:      1,
-			Data:            w.catalogs.Blocks.Palette,
-		},
-		{
-			Type:            protocol.TypeCatalog,
-			ProtocolVersion: protocol.Version,
-			Name:            "item_palette",
-			Digest:          w.catalogs.Items.PaletteDigest,
-			Part:            1,
-			TotalParts:      1,
-			Data:            w.catalogs.Items.Palette,
-		},
-		tuningCat,
-		recipesCat,
-		blueprintsCat,
-		lawsCat,
-		eventsCat,
-	}
+	welcome := w.buildWelcome(agentID, token)
+	catalogMsgs, tuningDigest := w.buildCatalogMsgs()
+	welcome.Catalogs.TuningDigest = tuningDigest
 
 	return JoinResponse{Welcome: welcome, Catalogs: catalogMsgs}
 }
@@ -181,73 +200,9 @@ func (w *World) handleAttach(req AttachRequest) {
 	// If a world event is active, inform the resuming agent.
 	w.enqueueActiveEventForAgent(w.tick.Load(), a)
 
-	welcome := protocol.WelcomeMsg{
-		Type:            protocol.TypeWelcome,
-		ProtocolVersion: protocol.Version,
-		AgentID:         a.ID,
-		ResumeToken:     newToken,
-		CurrentWorldID:  w.cfg.ID,
-		WorldManifest: []protocol.WorldRef{
-			{
-				WorldID:          w.cfg.ID,
-				WorldType:        w.cfg.WorldType,
-				EntryPointID:     "spawn",
-				SwitchCooldown:   w.cfg.SwitchCooldownTicks,
-				ResetEveryTicks:  w.cfg.ResetEveryTicks,
-				ResetNoticeTicks: w.cfg.ResetNoticeTicks,
-			},
-		},
-		WorldParams: protocol.WorldParams{
-			TickRateHz: w.cfg.TickRateHz,
-			ChunkSize:  [3]int{16, 16, 1},
-			Height:     1,
-			ObsRadius:  w.cfg.ObsRadius,
-			DayTicks:   w.cfg.DayTicks,
-			Seed:       w.cfg.Seed,
-		},
-		Catalogs: protocol.CatalogDigests{
-			BlockPalette:       protocol.DigestRef{Digest: w.catalogs.Blocks.PaletteDigest, Count: len(w.catalogs.Blocks.Palette)},
-			ItemPalette:        protocol.DigestRef{Digest: w.catalogs.Items.PaletteDigest, Count: len(w.catalogs.Items.Palette)},
-			RecipesDigest:      w.catalogs.Recipes.Digest,
-			BlueprintsDigest:   w.catalogs.Blueprints.Digest,
-			LawTemplatesDigest: w.catalogs.Laws.Digest,
-			EventsDigest:       w.catalogs.Events.Digest,
-		},
-	}
-
-	tuningCat := w.tuningCatalogMsg()
-	welcome.Catalogs.TuningDigest = tuningCat.Digest
-
-	recipesCat := w.recipesCatalogMsg()
-	blueprintsCat := w.blueprintsCatalogMsg()
-	lawsCat := w.lawTemplatesCatalogMsg()
-	eventsCat := w.eventsCatalogMsg()
-
-	catalogMsgs := []protocol.CatalogMsg{
-		{
-			Type:            protocol.TypeCatalog,
-			ProtocolVersion: protocol.Version,
-			Name:            "block_palette",
-			Digest:          w.catalogs.Blocks.PaletteDigest,
-			Part:            1,
-			TotalParts:      1,
-			Data:            w.catalogs.Blocks.Palette,
-		},
-		{
-			Type:            protocol.TypeCatalog,
-			ProtocolVersion: protocol.Version,
-			Name:            "item_palette",
-			Digest:          w.catalogs.Items.PaletteDigest,
-			Part:            1,
-			TotalParts:      1,
-			Data:            w.catalogs.Items.Palette,
-		},
-		tuningCat,
-		recipesCat,
-		blueprintsCat,
-		lawsCat,
-		eventsCat,
-	}
+	welcome := w.buildWelcome(a.ID, newToken)
+	catalogMsgs, tuningDigest := w.buildCatalogMsgs()
+	welcome.Catalogs.TuningDigest = tuningDigest
 
 	if req.Resp != nil {
 		req.Resp <- JoinResponse{Welcome: welcome, Catalogs: catalogMsgs}

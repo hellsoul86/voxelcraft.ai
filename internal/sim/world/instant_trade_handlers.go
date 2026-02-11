@@ -1,6 +1,9 @@
 package world
 
-import "voxelcraft.ai/internal/protocol"
+import (
+	"voxelcraft.ai/internal/protocol"
+	"voxelcraft.ai/internal/sim/world/feature/economy"
+)
 
 func handleInstantOfferTrade(w *World, a *Agent, inst protocol.InstantReq, nowTick uint64) {
 	if !w.cfg.AllowTrade {
@@ -27,18 +30,18 @@ func handleInstantOfferTrade(w *World, a *Agent, inst protocol.InstantReq, nowTi
 		a.AddEvent(actionResult(nowTick, inst.ID, false, "E_INVALID_TARGET", "target not found"))
 		return
 	}
-	offer, err := parseItemPairs(inst.Offer)
+	offer, err := economy.ParseItemPairs(inst.Offer)
 	if err != nil || len(offer) == 0 {
 		a.AddEvent(actionResult(nowTick, inst.ID, false, "E_BAD_REQUEST", "bad offer"))
 		return
 	}
-	req, err := parseItemPairs(inst.Request)
+	req, err := economy.ParseItemPairs(inst.Request)
 	if err != nil || len(req) == 0 {
 		a.AddEvent(actionResult(nowTick, inst.ID, false, "E_BAD_REQUEST", "bad request"))
 		return
 	}
 
-	tradeID := w.newTradeID()
+	tradeID := economy.TradeID(w.nextTradeNum.Add(1))
 	w.trades[tradeID] = &Trade{
 		TradeID:     tradeID,
 		From:        a.ID,
@@ -52,8 +55,8 @@ func handleInstantOfferTrade(w *World, a *Agent, inst protocol.InstantReq, nowTi
 		"type":     "TRADE_OFFER",
 		"trade_id": tradeID,
 		"from":     a.ID,
-		"offer":    encodeItemPairs(offer),
-		"request":  encodeItemPairs(req),
+		"offer":    economy.EncodeItemPairs(offer),
+		"request":  economy.EncodeItemPairs(req),
 	})
 	a.AddEvent(protocol.Event{"t": nowTick, "type": "ACTION_RESULT", "ref": inst.ID, "ok": true, "trade_id": tradeID})
 }
@@ -88,7 +91,7 @@ func handleInstantAcceptTrade(w *World, a *Agent, inst protocol.InstantReq, nowT
 		a.AddEvent(actionResult(nowTick, inst.ID, false, "E_NO_PERMISSION", "trade not allowed here"))
 		return
 	}
-	if !hasItems(from.Inventory, tr.Offer) || !hasItems(a.Inventory, tr.Request) {
+	if !economy.HasItems(from.Inventory, tr.Offer) || !economy.HasItems(a.Inventory, tr.Request) {
 		a.AddEvent(actionResult(nowTick, inst.ID, false, "E_NO_RESOURCE", "missing items"))
 		return
 	}
@@ -108,23 +111,25 @@ func handleInstantAcceptTrade(w *World, a *Agent, inst protocol.InstantReq, nowT
 	if taxRate > 0 && w.activeEventID == "MARKET_WEEK" && nowTick < w.activeEventEnds {
 		taxRate *= 0.5
 	}
-	applyTransferWithTax(from.Inventory, a.Inventory, tr.Offer, taxSink, taxRate)
-	applyTransferWithTax(a.Inventory, from.Inventory, tr.Request, taxSink, taxRate)
+	economy.ApplyTransferWithTax(from.Inventory, a.Inventory, tr.Offer, taxSink, taxRate)
+	economy.ApplyTransferWithTax(a.Inventory, from.Inventory, tr.Request, taxSink, taxRate)
 	delete(w.trades, inst.TradeID)
 
-	mutualOK, vOffer, vReq := w.tradeMutualBenefit(tr.Offer, tr.Request)
+	vOffer := economy.TradeValue(tr.Offer, economy.ItemTradeValue)
+	vReq := economy.TradeValue(tr.Request, economy.ItemTradeValue)
+	mutualOK := economy.TradeMutualBenefit(vOffer, vReq)
 	w.auditEvent(nowTick, a.ID, "TRADE", Vec3i{}, "ACCEPT_TRADE", map[string]any{
 		"trade_id":       tr.TradeID,
 		"from":           tr.From,
 		"to":             tr.To,
-		"offer":          encodeItemPairs(tr.Offer),
-		"request":        encodeItemPairs(tr.Request),
+		"offer":          economy.EncodeItemPairs(tr.Offer),
+		"request":        economy.EncodeItemPairs(tr.Request),
 		"value_offer":    vOffer,
 		"value_request":  vReq,
 		"mutual_benefit": mutualOK,
 		"tax_rate":       taxRate,
-		"tax_paid_off":   encodeItemPairs(calcTax(tr.Offer, taxRate)),
-		"tax_paid_req":   encodeItemPairs(calcTax(tr.Request, taxRate)),
+		"tax_paid_off":   economy.EncodeItemPairs(economy.CalcTax(tr.Offer, taxRate)),
+		"tax_paid_req":   economy.EncodeItemPairs(economy.CalcTax(tr.Request, taxRate)),
 		"land_id": func() string {
 			if landFrom != nil {
 				return landFrom.LandID

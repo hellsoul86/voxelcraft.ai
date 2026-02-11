@@ -1,13 +1,13 @@
 package world
 
 import (
-	"fmt"
-	"math"
 	"sort"
 	"strings"
 
 	"voxelcraft.ai/internal/protocol"
 	"voxelcraft.ai/internal/sim/tasks"
+	featureobserver "voxelcraft.ai/internal/sim/world/feature/observer"
+	"voxelcraft.ai/internal/sim/world/logic/observerprogress"
 )
 
 func (w *World) buildObsTasks(a *Agent, nowTick uint64) []protocol.TaskObs {
@@ -19,19 +19,11 @@ func (w *World) buildObsTasks(a *Agent, nowTick uint64) []protocol.TaskObs {
 			if t, ok := w.followTargetPos(mt.TargetID); ok {
 				target = t
 			}
-			want := int(math.Ceil(mt.Distance))
-			if want < 1 {
-				want = 1
-			}
-			d := distXZ(a.Pos, target)
-			prog := 0.0
-			if d <= want {
-				prog = 1.0
-			}
-			eta := d - want
-			if eta < 0 {
-				eta = 0
-			}
+			prog, eta := observerprogress.FollowProgress(
+				observerprogress.Vec3{X: a.Pos.X, Y: a.Pos.Y, Z: a.Pos.Z},
+				observerprogress.Vec3{X: target.X, Y: target.Y, Z: target.Z},
+				mt.Distance,
+			)
 			tasksObs = append(tasksObs, protocol.TaskObs{
 				TaskID:   mt.TaskID,
 				Kind:     string(mt.Kind),
@@ -41,30 +33,12 @@ func (w *World) buildObsTasks(a *Agent, nowTick uint64) []protocol.TaskObs {
 			})
 		} else {
 			start := v3FromTask(mt.StartPos)
-			want := int(math.Ceil(mt.Tolerance))
-			if want < 1 {
-				want = 1
-			}
-			distStart := distXZ(start, target)
-			distCur := distXZ(a.Pos, target)
-			totalEff := distStart - want
-			if totalEff < 0 {
-				totalEff = 0
-			}
-			remEff := distCur - want
-			if remEff < 0 {
-				remEff = 0
-			}
-			prog := 1.0
-			if totalEff > 0 {
-				prog = float64(totalEff-remEff) / float64(totalEff)
-				if prog < 0 {
-					prog = 0
-				} else if prog > 1 {
-					prog = 1
-				}
-			}
-			eta := remEff
+			prog, eta := observerprogress.MoveProgress(
+				observerprogress.Vec3{X: start.X, Y: start.Y, Z: start.Z},
+				observerprogress.Vec3{X: a.Pos.X, Y: a.Pos.Y, Z: a.Pos.Z},
+				observerprogress.Vec3{X: target.X, Y: target.Y, Z: target.Z},
+				mt.Tolerance,
+			)
 			tasksObs = append(tasksObs, protocol.TaskObs{
 				TaskID:   mt.TaskID,
 				Kind:     string(mt.Kind),
@@ -210,18 +184,15 @@ func (w *World) attachObsEventsAndMeta(a *Agent, obs *protocol.ObsMsg, nowTick u
 	ev := a.TakeEvents()
 	obs.Events = ev
 	obs.EventsCursor = a.EventCursor
-	obs.ObsID = fmt.Sprintf("%s:%d:%d", a.ID, nowTick, a.EventCursor)
-
-	if a.Fun.Novelty != 0 || a.Fun.Creation != 0 || a.Fun.Social != 0 || a.Fun.Influence != 0 || a.Fun.Narrative != 0 || a.Fun.RiskRescue != 0 {
-		obs.FunScore = &protocol.FunScoreObs{
-			Novelty:    a.Fun.Novelty,
-			Creation:   a.Fun.Creation,
-			Social:     a.Fun.Social,
-			Influence:  a.Fun.Influence,
-			Narrative:  a.Fun.Narrative,
-			RiskRescue: a.Fun.RiskRescue,
-		}
-	}
+	obs.ObsID = featureobserver.ObsID(a.ID, nowTick, a.EventCursor)
+	obs.FunScore = featureobserver.FunScorePtr(
+		a.Fun.Novelty,
+		a.Fun.Creation,
+		a.Fun.Social,
+		a.Fun.Influence,
+		a.Fun.Narrative,
+		a.Fun.RiskRescue,
+	)
 
 	if len(a.PendingMemory) > 0 {
 		obs.Memory = a.PendingMemory

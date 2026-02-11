@@ -5,7 +5,14 @@ import (
 
 	"voxelcraft.ai/internal/persistence/snapshot"
 	"voxelcraft.ai/internal/sim/catalogs"
+	"voxelcraft.ai/internal/sim/world/feature/economy"
+	featureobserver "voxelcraft.ai/internal/sim/world/feature/observer"
+	"voxelcraft.ai/internal/sim/world/feature/transfer"
 )
+
+type Trade = economy.Trade
+type Board = featureobserver.Board
+type BoardPost = featureobserver.BoardPost
 
 // World is a single-threaded authoritative simulation.
 // All state must be accessed only from the world loop goroutine.
@@ -43,7 +50,7 @@ type World struct {
 	admin         chan adminSnapshotReq
 	adminReset    chan adminResetReq
 	agentPosReq   chan agentPosReq
-	eventsReq     chan eventsReq
+	eventsReq     chan transfer.EventsReq
 	actDedupeReq  chan actDedupeReq
 	orgMetaReq    chan orgMetaReq
 	orgMetaUpsert chan orgMetaUpsertReq

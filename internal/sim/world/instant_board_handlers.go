@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"voxelcraft.ai/internal/protocol"
+	featureobserver "voxelcraft.ai/internal/sim/world/feature/observer"
 )
 
 func handleInstantPostBoard(w *World, a *Agent, inst protocol.InstantReq, nowTick uint64) {
@@ -14,16 +15,9 @@ func handleInstantPostBoard(w *World, a *Agent, inst protocol.InstantReq, nowTic
 		a.AddEvent(ev)
 		return
 	}
-	boardID := strings.TrimSpace(inst.BoardID)
-	if strings.TrimSpace(inst.TargetID) != "" {
-		boardID = strings.TrimSpace(inst.TargetID)
-	}
-	if boardID == "" || inst.Title == "" || inst.Body == "" {
-		a.AddEvent(actionResult(nowTick, inst.ID, false, "E_BAD_REQUEST", "missing board_id/target_id/title/body"))
-		return
-	}
-	if len(inst.Title) > 80 || len(inst.Body) > 2000 {
-		a.AddEvent(actionResult(nowTick, inst.ID, false, "E_BAD_REQUEST", "post too large"))
+	boardID := featureobserver.ResolveBoardID(inst.BoardID, inst.TargetID)
+	if ok, code, message := featureobserver.ValidatePostInput(boardID, inst.Title, inst.Body); !ok {
+		a.AddEvent(actionResult(nowTick, inst.ID, false, code, message))
 		return
 	}
 
@@ -79,27 +73,14 @@ func handleInstantPostBoard(w *World, a *Agent, inst protocol.InstantReq, nowTic
 }
 
 func handleInstantSearchBoard(w *World, a *Agent, inst protocol.InstantReq, nowTick uint64) {
-	boardID := strings.TrimSpace(inst.BoardID)
-	if strings.TrimSpace(inst.TargetID) != "" {
-		boardID = strings.TrimSpace(inst.TargetID)
-	}
+	boardID := featureobserver.ResolveBoardID(inst.BoardID, inst.TargetID)
 	query := strings.TrimSpace(inst.Text)
-	if boardID == "" || query == "" {
-		a.AddEvent(actionResult(nowTick, inst.ID, false, "E_BAD_REQUEST", "missing board_id/target_id/text"))
-		return
-	}
-	if len(query) > 120 {
-		a.AddEvent(actionResult(nowTick, inst.ID, false, "E_BAD_REQUEST", "query too large"))
+	if ok, code, message := featureobserver.ValidateSearchInput(boardID, query); !ok {
+		a.AddEvent(actionResult(nowTick, inst.ID, false, code, message))
 		return
 	}
 
-	limit := inst.Limit
-	if limit <= 0 {
-		limit = 20
-	}
-	if limit > 50 {
-		limit = 50
-	}
+	limit := featureobserver.NormalizeBoardSearchLimit(inst.Limit)
 
 	// Physical bulletin boards are addressed by id "BULLETIN_BOARD@x,y,z" and require proximity.
 	if typ, pos, ok := parseContainerID(boardID); ok && typ == "BULLETIN_BOARD" {
@@ -123,28 +104,7 @@ func handleInstantSearchBoard(w *World, a *Agent, inst protocol.InstantReq, nowT
 		return
 	}
 
-	q := strings.ToLower(query)
-	results := make([]map[string]any, 0, limit)
-	// Newest first.
-	for i := len(b.Posts) - 1; i >= 0 && len(results) < limit; i-- {
-		p := b.Posts[i]
-		if q == "" {
-			continue
-		}
-		if strings.Contains(strings.ToLower(p.Title), q) || strings.Contains(strings.ToLower(p.Body), q) {
-			body := p.Body
-			if len(body) > 400 {
-				body = body[:400]
-			}
-			results = append(results, map[string]any{
-				"post_id": p.PostID,
-				"author":  p.Author,
-				"title":   p.Title,
-				"body":    body,
-				"tick":    p.Tick,
-			})
-		}
-	}
+	results := featureobserver.MatchBoardPosts(b.Posts, query, limit)
 	a.AddEvent(protocol.Event{
 		"t":           nowTick,
 		"type":        "BOARD_SEARCH",

@@ -3,6 +3,7 @@ package world
 import (
 	"voxelcraft.ai/internal/protocol"
 	"voxelcraft.ai/internal/sim/tasks"
+	"voxelcraft.ai/internal/sim/world/feature/economy"
 )
 
 func (w *World) tickOpen(a *Agent, wt *tasks.WorkTask, nowTick uint64) {
@@ -111,7 +112,7 @@ func (w *World) tickOpen(a *Agent, wt *tasks.WorkTask, nowTick uint64) {
 	// Include owed summary for this agent.
 	if c.Owed != nil {
 		if owed := c.Owed[a.ID]; owed != nil {
-			ev["owed"] = encodeItemPairs(owed)
+			ev["owed"] = economy.EncodeItemPairs(owed)
 		}
 	}
 	// Include contract summaries if it's a terminal.

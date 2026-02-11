@@ -1,6 +1,10 @@
 package world
 
-import "fmt"
+import (
+	"fmt"
+
+	"voxelcraft.ai/internal/sim/world/feature/governance"
+)
 
 type ClaimFlags struct {
 	AllowBuild  bool
@@ -45,28 +49,6 @@ type LandClaim struct {
 	MaintenanceStage   int
 }
 
-func defaultClaimTypeForWorld(worldType string) string {
-	switch worldType {
-	case "OVERWORLD":
-		return ClaimTypeHomestead
-	case "CITY_HUB":
-		return ClaimTypeCityCore
-	default:
-		return ClaimTypeDefault
-	}
-}
-
-func defaultClaimFlags(claimType string) ClaimFlags {
-	switch claimType {
-	case ClaimTypeCityCore:
-		return ClaimFlags{AllowBuild: false, AllowBreak: false, AllowDamage: false, AllowTrade: true}
-	case ClaimTypeHomestead:
-		return ClaimFlags{AllowBuild: false, AllowBreak: false, AllowDamage: false, AllowTrade: false}
-	default:
-		return ClaimFlags{AllowBuild: false, AllowBreak: false, AllowDamage: false, AllowTrade: false}
-	}
-}
-
 func (c *LandClaim) Contains(pos Vec3i) bool {
 	dx := pos.X - c.Anchor.X
 	if dx < 0 {
@@ -80,37 +62,18 @@ func (c *LandClaim) Contains(pos Vec3i) bool {
 }
 
 func (w *World) landCoreRadius(c *LandClaim) int {
-	// MVP default: fixed core radius (configurable), capped by land radius.
 	if c == nil {
 		return 0
 	}
-	r := w.cfg.AccessPassCoreRadius
-	if r <= 0 {
-		r = 16
-	}
-	if c.Radius < r {
-		r = c.Radius
-	}
-	if r < 0 {
-		r = 0
-	}
-	return r
+	return governance.CoreRadius(c.Radius, w.cfg.AccessPassCoreRadius)
 }
 
 func (w *World) landCoreContains(c *LandClaim, pos Vec3i) bool {
 	r := w.landCoreRadius(c)
-	if r <= 0 || c == nil {
+	if c == nil {
 		return false
 	}
-	dx := pos.X - c.Anchor.X
-	if dx < 0 {
-		dx = -dx
-	}
-	dz := pos.Z - c.Anchor.Z
-	if dz < 0 {
-		dz = -dz
-	}
-	return dx <= r && dz <= r
+	return governance.CoreContains(c.Anchor.X, c.Anchor.Z, pos.X, pos.Z, r)
 }
 
 func (w *World) landAt(pos Vec3i) *LandClaim {
@@ -159,40 +122,34 @@ func (w *World) permissionsFor(agentID string, pos Vec3i) (land *LandClaim, perm
 
 func (w *World) canBuildAt(agentID string, pos Vec3i, nowTick uint64) bool {
 	land, perms := w.permissionsFor(agentID, pos)
-	if !perms["can_build"] {
-		return false
+	if land == nil {
+		return perms["can_build"]
 	}
-	if land == nil || !land.CurfewEnabled {
-		return true
-	}
-	t := w.timeOfDay(nowTick)
-	if inWindow(t, land.CurfewStart, land.CurfewEnd) {
-		return false
-	}
-	return true
+	return governance.CanActionWithCurfew(
+		perms["can_build"],
+		land.CurfewEnabled,
+		w.timeOfDay(nowTick),
+		land.CurfewStart,
+		land.CurfewEnd,
+	)
 }
 
 func (w *World) canBreakAt(agentID string, pos Vec3i, nowTick uint64) bool {
 	land, perms := w.permissionsFor(agentID, pos)
-	if !perms["can_break"] {
-		return false
+	if land == nil {
+		return perms["can_break"]
 	}
-	if land == nil || !land.CurfewEnabled {
-		return true
-	}
-	t := w.timeOfDay(nowTick)
-	if inWindow(t, land.CurfewStart, land.CurfewEnd) {
-		return false
-	}
-	return true
+	return governance.CanActionWithCurfew(
+		perms["can_break"],
+		land.CurfewEnabled,
+		w.timeOfDay(nowTick),
+		land.CurfewStart,
+		land.CurfewEnd,
+	)
 }
 
 func (w *World) timeOfDay(nowTick uint64) float64 {
-	if w.cfg.DayTicks <= 0 {
-		return 0
-	}
-	day := uint64(w.cfg.DayTicks)
-	return float64(nowTick%day) / float64(day)
+	return governance.TimeOfDay(nowTick, w.cfg.DayTicks)
 }
 
 func (w *World) newLandID(owner string) string {
@@ -234,12 +191,4 @@ func (w *World) removeClaimByAnchor(nowTick uint64, actor string, anchor Vec3i, 
 	w.auditEvent(nowTick, actor, "CLAIM_REMOVE", anchor, reason, map[string]any{
 		"land_id": landID,
 	})
-}
-
-func inWindow(t, start, end float64) bool {
-	if start <= end {
-		return t >= start && t <= end
-	}
-	// Wrap-around window.
-	return t >= start || t <= end
 }

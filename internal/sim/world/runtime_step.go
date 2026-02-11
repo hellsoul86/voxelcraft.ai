@@ -3,6 +3,8 @@ package world
 import (
 	"encoding/json"
 	"time"
+
+	featuredirector "voxelcraft.ai/internal/sim/world/feature/director"
 )
 
 func (w *World) stepInternal(joins []JoinRequest, leaves []string, actions []ActionEnvelope, transferOutReqs []transferOutReq, transferInReqs []transferInReq, injectEvents []injectEventReq) {
@@ -74,7 +76,12 @@ func (w *World) stepInternal(joins []JoinRequest, leaves []string, actions []Act
 	w.tickContracts(nowTick)
 	w.systemFun(nowTick)
 	if w.stats != nil {
-		w.stats.ObserveAgents(nowTick, w.agents)
+		for _, a := range w.agents {
+			if a == nil {
+				continue
+			}
+			w.stats.ObservePos(nowTick, a.Pos.X, a.Pos.Z)
+		}
 	}
 
 	// Build + send OBS for each agent.
@@ -171,41 +178,15 @@ func (w *World) stepInternal(joins []JoinRequest, leaves []string, actions []Act
 
 func (w *World) computeResourceDensity() map[string]float64 {
 	targets := []string{"COAL_ORE", "IRON_ORE", "COPPER_ORE", "CRYSTAL_ORE", "STONE", "LOG"}
-	out := map[string]float64{}
-	for _, name := range targets {
-		out[name] = 0
-	}
 	if w == nil || w.chunks == nil || len(w.chunks.chunks) == 0 {
-		return out
+		return featuredirector.ComputeResourceDensity(targets, nil, nil)
 	}
-	idToName := map[uint16]string{}
-	for _, name := range targets {
-		if id, ok := w.catalogs.Blocks.Index[name]; ok {
-			idToName[id] = name
-		}
-	}
-	if len(idToName) == 0 {
-		return out
-	}
-	counts := map[string]int{}
-	total := 0
+	chunks := make([][]uint16, 0, len(w.chunks.chunks))
 	for _, ch := range w.chunks.chunks {
 		if ch == nil {
 			continue
 		}
-		for _, b := range ch.Blocks {
-			total++
-			if name, ok := idToName[b]; ok {
-				counts[name]++
-			}
-		}
+		chunks = append(chunks, ch.Blocks)
 	}
-	if total == 0 {
-		return out
-	}
-	denom := float64(total)
-	for _, name := range targets {
-		out[name] = float64(counts[name]) / denom
-	}
-	return out
+	return featuredirector.ComputeResourceDensity(targets, w.catalogs.Blocks.Index, chunks)
 }

@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"voxelcraft.ai/internal/protocol"
+	"voxelcraft.ai/internal/sim/world/feature/economy"
 )
 
 func (w *World) tickClaimsMaintenance(nowTick uint64) {
@@ -75,7 +76,7 @@ func (w *World) payMaintenance(c *LandClaim) bool {
 	// Prefer org treasury if claim is owned by an org id.
 	if org := w.orgByID(owner); org != nil {
 		tr := w.orgTreasury(org)
-		if tr == nil || !hasItems(tr, cost) {
+		if tr == nil || !economy.HasItems(tr, cost) {
 			return false
 		}
 		deductItems(tr, cost)
@@ -86,7 +87,7 @@ func (w *World) payMaintenance(c *LandClaim) bool {
 	if a == nil {
 		return false
 	}
-	if !hasItems(a.Inventory, cost) {
+	if !economy.HasItems(a.Inventory, cost) {
 		return false
 	}
 	deductItems(a.Inventory, cost)

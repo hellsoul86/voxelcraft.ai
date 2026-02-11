@@ -2,9 +2,9 @@ package world
 
 import (
 	"fmt"
-	"strings"
 
 	"voxelcraft.ai/internal/protocol"
+	"voxelcraft.ai/internal/sim/world/feature/session"
 )
 
 func handleInstantSay(w *World, a *Agent, inst protocol.InstantReq, nowTick uint64) {
@@ -12,13 +12,8 @@ func handleInstantSay(w *World, a *Agent, inst protocol.InstantReq, nowTick uint
 		a.AddEvent(actionResult(nowTick, inst.ID, false, "E_BAD_REQUEST", "missing text"))
 		return
 	}
-	ch := strings.ToUpper(strings.TrimSpace(inst.Channel))
-	if ch == "" {
-		ch = "LOCAL"
-	}
-	switch ch {
-	case "LOCAL", "CITY", "MARKET":
-	default:
+	ch, ok := session.NormalizeChatChannel(inst.Channel)
+	if !ok {
 		a.AddEvent(actionResult(nowTick, inst.ID, false, "E_BAD_REQUEST", "invalid channel"))
 		return
 	}
@@ -39,18 +34,14 @@ func handleInstantSay(w *World, a *Agent, inst protocol.InstantReq, nowTick uint
 		}
 	}
 
-	rlKind := "SAY"
-	window := uint64(w.cfg.RateLimits.SayWindowTicks)
-	max := w.cfg.RateLimits.SayMax
-	msg := "too many SAY"
-	if ch == "MARKET" {
-		rlKind = "SAY_MARKET"
-		window = uint64(w.cfg.RateLimits.MarketSayWindowTicks)
-		max = w.cfg.RateLimits.MarketSayMax
-		msg = "too many SAY (MARKET)"
-	}
-	if ok, cd := a.RateLimitAllow(rlKind, nowTick, window, max); !ok {
-		ev := actionResult(nowTick, inst.ID, false, "E_RATE_LIMIT", msg)
+	rl := session.ChatLimitSpec(ch, session.ChatRateLimits{
+		SayWindowTicks:       uint64(w.cfg.RateLimits.SayWindowTicks),
+		SayMax:               w.cfg.RateLimits.SayMax,
+		MarketSayWindowTicks: uint64(w.cfg.RateLimits.MarketSayWindowTicks),
+		MarketSayMax:         w.cfg.RateLimits.MarketSayMax,
+	})
+	if ok, cd := a.RateLimitAllow(rl.Kind, nowTick, rl.Window, rl.Max); !ok {
+		ev := actionResult(nowTick, inst.ID, false, "E_RATE_LIMIT", rl.RateErrMsg)
 		ev["cooldown_ticks"] = cd
 		ev["cooldown_until_tick"] = nowTick + cd
 		a.AddEvent(ev)
@@ -93,16 +84,13 @@ func handleInstantEat(w *World, a *Agent, inst protocol.InstantReq, nowTick uint
 		a.AddEvent(actionResult(nowTick, inst.ID, false, "E_BAD_REQUEST", "missing item_id"))
 		return
 	}
-	n := inst.Count
-	if n <= 0 {
-		n = 1
-	}
+	n := session.NormalizeConsumeCount(inst.Count)
 	def, ok := w.catalogs.Items.Defs[inst.ItemID]
 	if !ok {
 		a.AddEvent(actionResult(nowTick, inst.ID, false, "E_INVALID_TARGET", "unknown item"))
 		return
 	}
-	if def.Kind != "FOOD" || def.EdibleHP <= 0 {
+	if !session.IsFood(def.Kind, def.EdibleHP) {
 		a.AddEvent(actionResult(nowTick, inst.ID, false, "E_BAD_REQUEST", "item not edible"))
 		return
 	}
@@ -115,23 +103,15 @@ func handleInstantEat(w *World, a *Agent, inst protocol.InstantReq, nowTick uint
 		if a.Inventory[inst.ItemID] <= 0 {
 			delete(a.Inventory, inst.ItemID)
 		}
-		a.HP += def.EdibleHP
-		if a.HP > 20 {
-			a.HP = 20
-		}
-		hg := def.EdibleHP * 2
-		if hg < 1 {
-			hg = 1
-		}
-		a.Hunger += hg
-		if a.Hunger > 20 {
-			a.Hunger = 20
-		}
-		a.StaminaMilli += def.EdibleHP * 50
-		if a.StaminaMilli > 1000 {
-			a.StaminaMilli = 1000
-		}
 	}
+	next := session.ApplyFood(session.EatState{
+		HP:           a.HP,
+		Hunger:       a.Hunger,
+		StaminaMilli: a.StaminaMilli,
+	}, def.EdibleHP, n)
+	a.HP = next.HP
+	a.Hunger = next.Hunger
+	a.StaminaMilli = next.StaminaMilli
 	a.AddEvent(actionResult(nowTick, inst.ID, true, "", "ok"))
 }
 
@@ -140,8 +120,12 @@ func handleInstantSaveMemory(a *Agent, inst protocol.InstantReq, nowTick uint64)
 		a.AddEvent(actionResult(nowTick, inst.ID, false, "E_BAD_REQUEST", "missing key"))
 		return
 	}
+	mem := map[string]string{}
+	for k, v := range a.Memory {
+		mem[k] = v.Value
+	}
 	// Enforce a very small budget (64KB total).
-	if overMemoryBudget(a.Memory, inst.Key, inst.Value, 64*1024) {
+	if session.OverMemoryBudget(mem, inst.Key, inst.Value, 64*1024) {
 		a.AddEvent(actionResult(nowTick, inst.ID, false, "E_NO_RESOURCE", "memory budget exceeded"))
 		return
 	}

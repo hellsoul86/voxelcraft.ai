@@ -92,9 +92,16 @@ scripts/release_gate.sh --with-agent
 
 Optional flags:
 - `--skip-race`
+- `--skip-perf`
 - `--agent-dir /path/to/voxelcraft.agent`
 - `--scenario multiworld_mine_trade_govern`
 - `--count 50 --duration 60`
+
+Performance sentinel thresholds (optional env overrides):
+- `VC_BENCH_MAX_WORLD_STEP_NS` (default `500000`)
+- `VC_BENCH_MAX_SNAPSHOT_EXPORT_NS` (default `500000`)
+- `VC_BENCH_MAX_SNAPSHOT_IMPORT_NS` (default `500000`)
+- `VC_BENCH_MAX_EVENT_CURSOR_NS` (default `20000`)
 
 ## GitHub Actions
 

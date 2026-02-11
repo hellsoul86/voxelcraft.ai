@@ -1,6 +1,10 @@
 package world
 
-import "sort"
+import (
+	"sort"
+
+	"voxelcraft.ai/internal/sim/world/logic/ids"
+)
 
 // ConveyorMeta stores minimal runtime metadata for a conveyor block.
 // We keep it intentionally small and deterministic: a single cardinal direction.
@@ -9,7 +13,7 @@ type ConveyorMeta struct {
 	DZ int8 // -1,0,1
 }
 
-func conveyorIDAt(pos Vec3i) string { return containerID("CONVEYOR", pos) }
+func conveyorIDAt(pos Vec3i) string { return ids.ConveyorIDAt(pos.X, pos.Y, pos.Z) }
 
 func (w *World) ensureConveyor(pos Vec3i, dx, dz int) {
 	if dx > 1 {

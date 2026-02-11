@@ -1,5 +1,7 @@
 package world
 
+import "voxelcraft.ai/internal/sim/world/logic/mathx"
+
 func (w *World) surfaceY(x, z int) int {
 	// Pure 2D world: the only valid y coordinate is 0.
 	_ = x
@@ -19,7 +21,7 @@ func (w *World) findSpawnAir(x, z int, maxR int) (int, int) {
 		for dz := -r; dz <= r; dz++ {
 			for dx := -r; dx <= r; dx++ {
 				// Check the perimeter only (square spiral) for deterministic order.
-				if abs(dx) != r && abs(dz) != r {
+				if mathx.AbsInt(dx) != r && mathx.AbsInt(dz) != r {
 					continue
 				}
 				px := x + dx

@@ -1,6 +1,10 @@
 package world
 
-import "sort"
+import (
+	"sort"
+
+	"voxelcraft.ai/internal/sim/world/logic/conveyorpower"
+)
 
 // systemConveyors moves dropped item entities along conveyor blocks.
 //
@@ -157,111 +161,80 @@ func pickAvailableContainerItem(c *Container) string {
 	return keys[0]
 }
 
-func (w *World) conveyorEnabled(pos Vec3i) bool {
-	dirs := []Vec3i{
-		{X: 1, Y: 0, Z: 0},
-		{X: -1, Y: 0, Z: 0},
-		{X: 0, Y: 0, Z: 1},
-		{X: 0, Y: 0, Z: -1},
-	}
-
-	// Rule 1: adjacent control blocks act as direct enable signals.
-	// If any adjacent switch/sensor exists, require at least one to be ON.
-	foundControl := false
-	for _, d := range dirs {
-		p := Vec3i{X: pos.X + d.X, Y: pos.Y + d.Y, Z: pos.Z + d.Z}
-		switch w.blockName(w.chunks.GetBlock(p)) {
-		case "SWITCH":
-			foundControl = true
-			if w.switches[p] {
-				return true
-			}
-		case "SENSOR":
-			foundControl = true
-			if w.sensorOn(p) {
-				return true
-			}
-		}
-	}
-	if foundControl {
-		return false
-	}
-
-	// Rule 2: adjacent wires form a simple network; if any adjacent wire exists, require the
-	// wire network to connect to an ON switch or active sensor (within a capped BFS budget).
-	wireStarts := make([]Vec3i, 0, 4)
-	for _, d := range dirs {
-		p := Vec3i{X: pos.X + d.X, Y: pos.Y + d.Y, Z: pos.Z + d.Z}
-		if w.blockName(w.chunks.GetBlock(p)) == "WIRE" {
-			wireStarts = append(wireStarts, p)
-		}
-	}
-	if len(wireStarts) > 0 {
-		return w.wirePoweredBySwitch(wireStarts, 1024)
-	}
-
-	// No control blocks nearby -> enabled by default.
-	return true
+type conveyorEnvAdapter struct {
+	w *World
 }
 
-func (w *World) wirePoweredBySwitch(starts []Vec3i, maxNodes int) bool {
-	if len(starts) == 0 || maxNodes <= 0 {
+func (a conveyorEnvAdapter) BlockName(p conveyorpower.Pos) string {
+	return a.w.blockName(a.w.chunks.GetBlock(Vec3i{X: p.X, Y: p.Y, Z: p.Z}))
+}
+
+func (a conveyorEnvAdapter) SwitchOn(p conveyorpower.Pos) bool {
+	return a.w.switches[Vec3i{X: p.X, Y: p.Y, Z: p.Z}]
+}
+
+func (a conveyorEnvAdapter) SensorOn(p conveyorpower.Pos) bool {
+	return a.w.sensorOn(Vec3i{X: p.X, Y: p.Y, Z: p.Z})
+}
+
+func (w *World) conveyorEnabled(pos Vec3i) bool {
+	return conveyorpower.Enabled(
+		conveyorEnvAdapter{w: w},
+		conveyorpower.Pos{X: pos.X, Y: pos.Y, Z: pos.Z},
+		1024,
+	)
+}
+
+// sensorOn reports whether the sensor block at pos currently outputs an "ON" signal.
+//
+// MVP behavior (no configuration UI yet):
+// - ON if there is any non-empty dropped item entity on the sensor block or adjacent to it.
+// - ON if there is any adjacent container with at least 1 available item (inventory minus reserved).
+func (w *World) sensorOn(pos Vec3i) bool {
+	if w == nil {
 		return false
 	}
+	if w.blockName(w.chunks.GetBlock(pos)) != "SENSOR" {
+		return false
+	}
+
 	dirs := []Vec3i{
+		{X: 0, Y: 0, Z: 0},
 		{X: 1, Y: 0, Z: 0},
 		{X: -1, Y: 0, Z: 0},
+		{X: 0, Y: 1, Z: 0},
+		{X: 0, Y: -1, Z: 0},
 		{X: 0, Y: 0, Z: 1},
 		{X: 0, Y: 0, Z: -1},
 	}
 
-	visited := map[Vec3i]bool{}
-	q := make([]Vec3i, 0, len(starts))
-	for _, p := range starts {
-		if w.blockName(w.chunks.GetBlock(p)) != "WIRE" {
-			continue
+	hasLiveItemAt := func(p Vec3i) bool {
+		ids := w.itemsAt[p]
+		if len(ids) == 0 {
+			return false
 		}
-		if visited[p] {
-			continue
+		for _, id := range ids {
+			e := w.items[id]
+			if e != nil && e.Item != "" && e.Count > 0 {
+				return true
+			}
 		}
-		visited[p] = true
-		q = append(q, p)
+		return false
 	}
 
-	for len(q) > 0 && len(visited) <= maxNodes {
-		p := q[0]
-		q = q[1:]
-
-		// Check adjacent switches/sensors.
-		for _, d := range dirs {
-			sp := Vec3i{X: p.X + d.X, Y: p.Y + d.Y, Z: p.Z + d.Z}
-			switch w.blockName(w.chunks.GetBlock(sp)) {
-			case "SWITCH":
-				if w.switches[sp] {
-					return true
-				}
-			case "SENSOR":
-				if w.sensorOn(sp) {
+	for _, d := range dirs {
+		p := Vec3i{X: pos.X + d.X, Y: pos.Y + d.Y, Z: pos.Z + d.Z}
+		if hasLiveItemAt(p) {
+			return true
+		}
+		if c := w.containers[p]; c != nil && len(c.Inventory) > 0 {
+			for item := range c.Inventory {
+				if c.availableCount(item) > 0 {
 					return true
 				}
 			}
 		}
-
-		// Expand to neighboring wires.
-		for _, d := range dirs {
-			np := Vec3i{X: p.X + d.X, Y: p.Y + d.Y, Z: p.Z + d.Z}
-			if visited[np] {
-				continue
-			}
-			if w.blockName(w.chunks.GetBlock(np)) != "WIRE" {
-				continue
-			}
-			visited[np] = true
-			q = append(q, np)
-			if len(visited) > maxNodes {
-				break
-			}
-		}
 	}
+
 	return false
 }
