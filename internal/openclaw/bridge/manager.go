@@ -90,6 +90,14 @@ func (m *Manager) GetCatalog(ctx context.Context, sessionKey, name string) (Cata
 	return s.GetCatalog(ctx, name)
 }
 
+func (m *Manager) GetEvents(ctx context.Context, sessionKey string, sinceCursor uint64, limit int) (GetEventsResult, error) {
+	s, err := m.getOrCreateSession(sessionKey)
+	if err != nil {
+		return GetEventsResult{}, err
+	}
+	return s.GetEvents(ctx, sinceCursor, limit)
+}
+
 func (m *Manager) Act(ctx context.Context, sessionKey string, args ActArgs) (ActResult, error) {
 	s, err := m.getOrCreateSession(sessionKey)
 	if err != nil {

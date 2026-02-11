@@ -1,0 +1,114 @@
+name: CI Full
+
+on:
+  workflow_dispatch:
+    inputs:
+      with_agent:
+        description: "Run voxelcraft.agent e2e + swarm after full Go gate"
+        required: false
+        type: boolean
+        default: false
+      agent_repo:
+        description: "Repository containing voxelcraft.agent (owner/name)"
+        required: false
+        type: string
+        default: ""
+      agent_scenario:
+        description: "Agent scenario name"
+        required: false
+        type: string
+        default: "multiworld_mine_trade_govern"
+      agent_count:
+        description: "Swarm agent count"
+        required: false
+        type: string
+        default: "50"
+      agent_duration:
+        description: "Swarm duration in seconds"
+        required: false
+        type: string
+        default: "60"
+  push:
+    branches:
+      - main
+      - master
+  schedule:
+    # 03:00 UTC daily
+    - cron: "0 3 * * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-full-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  full:
+    name: Full Gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      DEFAULT_AGENT_REPO: ${{ github.repository_owner }}/voxelcraft.agent
+      WITH_AGENT: ${{ github.event_name == 'workflow_dispatch' && inputs.with_agent || 'false' }}
+      AGENT_REPO_INPUT: ${{ github.event_name == 'workflow_dispatch' && inputs.agent_repo || '' }}
+      AGENT_SCENARIO: ${{ github.event_name == 'workflow_dispatch' && inputs.agent_scenario || 'multiworld_mine_trade_govern' }}
+      AGENT_COUNT: ${{ github.event_name == 'workflow_dispatch' && inputs.agent_count || '50' }}
+      AGENT_DURATION: ${{ github.event_name == 'workflow_dispatch' && inputs.agent_duration || '60' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Run Full Release Gate (Go + race)
+        run: scripts/release_gate.sh
+
+      - name: Resolve agent repo
+        if: env.WITH_AGENT == 'true'
+        id: agent_repo
+        run: |
+          if [ -n "${AGENT_REPO_INPUT}" ]; then
+            echo "repo=${AGENT_REPO_INPUT}" >> "$GITHUB_OUTPUT"
+          else
+            echo "repo=${DEFAULT_AGENT_REPO}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Checkout voxelcraft.agent
+        if: env.WITH_AGENT == 'true'
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ steps.agent_repo.outputs.repo }}
+          path: voxelcraft.agent
+
+      - name: Setup Node 24
+        if: env.WITH_AGENT == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - name: Setup pnpm
+        if: env.WITH_AGENT == 'true'
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Install agent deps
+        if: env.WITH_AGENT == 'true'
+        run: pnpm install --no-frozen-lockfile
+        working-directory: voxelcraft.agent
+
+      - name: Agent E2E scenario
+        if: env.WITH_AGENT == 'true'
+        run: pnpm run e2e -- --scenario "${AGENT_SCENARIO}"
+        working-directory: voxelcraft.agent
+
+      - name: Agent swarm
+        if: env.WITH_AGENT == 'true'
+        run: pnpm run e2e:swarm -- --count "${AGENT_COUNT}" --duration_sec "${AGENT_DURATION}" --scenario "${AGENT_SCENARIO}"
+        working-directory: voxelcraft.agent
+

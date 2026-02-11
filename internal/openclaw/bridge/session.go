@@ -51,14 +51,22 @@ type Session struct {
 
 	agentID     string
 	resumeToken string
+	protocolVersion string
 	welcome     protocol.WelcomeMsg
 
 	catalogs map[string]catalogEntry
 
 	lastObsTick uint64
+	lastObsID   string
+	lastObsWorldID string
+	lastEventsCursor uint64
 	lastObsRaw  json.RawMessage
 
 	obsNotify chan struct{}
+	ackNotify chan struct{}
+	acksByActID map[string]protocol.AckMsg
+
+	eventRing []EventResult
 
 	lastUsedAt time.Time
 }
@@ -96,6 +104,9 @@ func NewSession(cfg SessionConfig, onUpdate onUpdateFn) *Session {
 		resumeToken: cfg.ResumeToken,
 		catalogs:    map[string]catalogEntry{},
 		obsNotify:   make(chan struct{}, 1),
+		ackNotify:   make(chan struct{}, 1),
+		acksByActID: map[string]protocol.AckMsg{},
+		protocolVersion: protocol.Version,
 		lastUsedAt:  time.Now(),
 	}
 	return s
@@ -172,7 +183,10 @@ func (s *Session) Status() Status {
 		AgentID:        s.agentID,
 		ResumeToken:    s.resumeToken,
 		WorldWSURL:     s.cfg.WorldWSURL,
+		ProtocolVersion: s.protocolVersion,
 		LastObsTick:    s.lastObsTick,
+		LastObsID:      s.lastObsID,
+		LastEventsCursor: s.lastEventsCursor,
 		CurrentWorldID: s.welcome.CurrentWorldID,
 		CatalogDigests: dig,
 		LastError:      s.lastErr,
@@ -224,12 +238,17 @@ func (s *Session) GetObs(ctx context.Context, opts GetObsOpts) (ObsResult, error
 	}
 
 	if tick == 0 || len(raw) == 0 {
-		return ObsResult{Tick: 0, AgentID: s.agentID, Obs: nil}, nil
+		return ObsResult{Tick: 0, AgentID: s.agentID, ObsID: "", EventsCursor: s.lastEventsCursor, Obs: nil}, nil
 	}
 
 	switch opts.Mode {
 	case ObsModeFull:
-		return ObsResult{Tick: tick, AgentID: agentID, Obs: raw}, nil
+		var meta struct {
+			ObsID        string `json:"obs_id"`
+			EventsCursor uint64 `json:"events_cursor"`
+		}
+		_ = json.Unmarshal(raw, &meta)
+		return ObsResult{Tick: tick, AgentID: agentID, ObsID: meta.ObsID, EventsCursor: meta.EventsCursor, Obs: raw}, nil
 	case ObsModeNoVoxels:
 		var o protocol.ObsMsg
 		if err := json.Unmarshal(raw, &o); err != nil {
@@ -238,7 +257,7 @@ func (s *Session) GetObs(ctx context.Context, opts GetObsOpts) (ObsResult, error
 		o.Voxels.Data = ""
 		o.Voxels.Ops = nil
 		b, _ := json.Marshal(o)
-		return ObsResult{Tick: tick, AgentID: agentID, Obs: b}, nil
+		return ObsResult{Tick: tick, AgentID: agentID, ObsID: o.ObsID, EventsCursor: o.EventsCursor, Obs: b}, nil
 	case ObsModeSummary:
 		var o protocol.ObsMsg
 		if err := json.Unmarshal(raw, &o); err != nil {
@@ -266,7 +285,7 @@ func (s *Session) GetObs(ctx context.Context, opts GetObsOpts) (ObsResult, error
 			PublicBoards:    o.PublicBoards,
 		}
 		b, _ := json.Marshal(sum)
-		return ObsResult{Tick: tick, AgentID: agentID, Obs: b}, nil
+		return ObsResult{Tick: tick, AgentID: agentID, ObsID: o.ObsID, EventsCursor: o.EventsCursor, Obs: b}, nil
 	default:
 		return ObsResult{}, fmt.Errorf("unknown mode: %s", opts.Mode)
 	}
@@ -364,15 +383,34 @@ func (s *Session) Act(ctx context.Context, args ActArgs) (ActResult, error) {
 	if err != nil {
 		return ActResult{}, err
 	}
+	obsID, worldID := s.latestObsMeta()
 
 	act := protocol.ActMsg{
 		Type:            protocol.TypeAct,
-		ProtocolVersion: protocol.Version,
+		ProtocolVersion: s.latestProtocolVersion(),
+		ActID:           strings.TrimSpace(args.ActID),
+		BasedOnObsID:    strings.TrimSpace(args.BasedOnObsID),
+		IdempotencyKey:  strings.TrimSpace(args.IdempotencyKey),
 		Tick:            tickUsed,
 		AgentID:         agentID,
+		ExpectedWorldID: strings.TrimSpace(args.ExpectedWorldID),
 		Instants:        instants,
 		Tasks:           tasks,
 		Cancel:          args.Cancel,
+	}
+	if act.ProtocolVersion == "1.1" {
+		if act.ActID == "" {
+			act.ActID = fmt.Sprintf("ACT_%d_%d", time.Now().UnixMilli(), tickUsed)
+		}
+		if act.BasedOnObsID == "" {
+			act.BasedOnObsID = obsID
+		}
+		if act.IdempotencyKey == "" {
+			act.IdempotencyKey = act.ActID
+		}
+		if act.ExpectedWorldID == "" {
+			act.ExpectedWorldID = worldID
+		}
 	}
 	b, _ := json.Marshal(act)
 
@@ -388,13 +426,46 @@ func (s *Session) Act(ctx context.Context, args ActArgs) (ActResult, error) {
 	if err := conn.WriteMessage(websocket.TextMessage, b); err != nil {
 		return ActResult{}, err
 	}
-	return ActResult{Sent: true, TickUsed: tickUsed, AgentID: agentID}, nil
+	res := ActResult{Sent: true, TickUsed: tickUsed, AgentID: agentID, ActID: act.ActID}
+	if act.ProtocolVersion == "1.1" && act.ActID != "" {
+		waitMS := args.WaitAckMS
+		if waitMS <= 0 {
+			waitMS = 2000
+		}
+		ack, err := s.waitAck(ctx, act.ActID, time.Duration(waitMS)*time.Millisecond)
+		if err != nil {
+			return ActResult{}, err
+		}
+		if !ack.Accepted {
+			return ActResult{}, fmt.Errorf("act rejected code=%s message=%s", ack.Code, ack.Message)
+		}
+		res.Ack = ack
+	}
+	return res, nil
 }
 
 func (s *Session) latestObs() (tick uint64, raw json.RawMessage, agentID string) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.lastObsTick, append(json.RawMessage(nil), s.lastObsRaw...), s.agentID
+}
+
+func (s *Session) latestObsMeta() (obsID string, worldID string) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.lastObsWorldID != "" {
+		return s.lastObsID, s.lastObsWorldID
+	}
+	return s.lastObsID, s.welcome.CurrentWorldID
+}
+
+func (s *Session) latestProtocolVersion() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.protocolVersion == "" {
+		return protocol.Version
+	}
+	return s.protocolVersion
 }
 
 func (s *Session) latestObsTick() uint64 {
@@ -436,6 +507,33 @@ func (s *Session) waitObsAfter(ctx context.Context, start uint64, timeout time.D
 		case <-s.obsNotify:
 		}
 	}
+}
+
+func (s *Session) waitAck(ctx context.Context, actID string, timeout time.Duration) (protocol.AckMsg, error) {
+	deadline := time.NewTimer(timeout)
+	defer deadline.Stop()
+	for {
+		if ack, ok := s.lookupAck(actID); ok {
+			return ack, nil
+		}
+		select {
+		case <-ctx.Done():
+			return protocol.AckMsg{}, ctx.Err()
+		case <-deadline.C:
+			if ack, ok := s.lookupAck(actID); ok {
+				return ack, nil
+			}
+			return protocol.AckMsg{}, fmt.Errorf("timeout waiting for ack")
+		case <-s.ackNotify:
+		}
+	}
+}
+
+func (s *Session) lookupAck(actID string) (protocol.AckMsg, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	ack, ok := s.acksByActID[actID]
+	return ack, ok
 }
 
 func (s *Session) catalog(name string) (catalogEntry, bool) {
@@ -496,11 +594,17 @@ func (s *Session) connectAndReadLoop() error {
 
 	hello := protocol.HelloMsg{
 		Type:            protocol.TypeHello,
-		ProtocolVersion: protocol.Version,
+		ProtocolVersion: "1.1",
+		SupportedVersions: []string{"1.1", "1.0"},
 		AgentName:       s.cfg.Key,
 		Capabilities: protocol.HelloCapabilities{
 			DeltaVoxels: true,
 			MaxQueue:    64,
+		},
+		ClientCapabilities: protocol.HelloClientCapabilities{
+			DeltaVoxels: true,
+			AckRequired: true,
+			EventCursor: true,
 		},
 	}
 	s.mu.RLock()
@@ -553,6 +657,11 @@ func (s *Session) connectAndReadLoop() error {
 			s.welcome = w
 			s.agentID = w.AgentID
 			s.resumeToken = w.ResumeToken
+			if w.SelectedVersion != "" {
+				s.protocolVersion = w.SelectedVersion
+			} else if w.ProtocolVersion != "" {
+				s.protocolVersion = w.ProtocolVersion
+			}
 			s.connected = true
 			s.lastConnectedAt = now
 			s.mu.Unlock()
@@ -580,13 +689,55 @@ func (s *Session) connectAndReadLoop() error {
 			s.catalogs[name] = catalogEntry{Digest: c.Digest, Data: append(json.RawMessage(nil), c.Data...)}
 			s.mu.Unlock()
 
+		case protocol.TypeAck:
+			var ack protocol.AckMsg
+			if err := json.Unmarshal(msg, &ack); err != nil {
+				continue
+			}
+			if ack.AckFor == "" {
+				continue
+			}
+			s.mu.Lock()
+			s.acksByActID[ack.AckFor] = ack
+			if len(s.acksByActID) > 4096 {
+				trim := map[string]protocol.AckMsg{ack.AckFor: ack}
+				s.acksByActID = trim
+			}
+			s.mu.Unlock()
+			select {
+			case s.ackNotify <- struct{}{}:
+			default:
+			}
+
 		case protocol.TypeObs:
-			var o obsTickOnly
+			var o protocol.ObsMsg
 			if err := json.Unmarshal(msg, &o); err != nil {
 				continue
 			}
 			s.mu.Lock()
 			s.lastObsTick = o.Tick
+			s.lastObsID = o.ObsID
+			if o.WorldID != "" {
+				s.lastObsWorldID = o.WorldID
+			}
+			base := s.lastEventsCursor
+			if o.EventsCursor > 0 && o.EventsCursor >= uint64(len(o.Events)) {
+				base = o.EventsCursor - uint64(len(o.Events))
+			}
+			cursor := base
+			for _, ev := range o.Events {
+				cursor++
+				b, _ := json.Marshal(ev)
+				s.eventRing = append(s.eventRing, EventResult{Cursor: cursor, Event: b})
+			}
+			if o.EventsCursor > 0 {
+				s.lastEventsCursor = o.EventsCursor
+			} else {
+				s.lastEventsCursor = cursor
+			}
+			if len(s.eventRing) > 4096 {
+				s.eventRing = append([]EventResult(nil), s.eventRing[len(s.eventRing)-4096:]...)
+			}
 			s.lastObsRaw = append(json.RawMessage(nil), msg...)
 			// agent_id may be empty if client is very early; keep latest welcome agent_id.
 			if o.AgentID != "" {
@@ -610,4 +761,32 @@ func (s *Session) catalogsList() []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+func (s *Session) GetEvents(ctx context.Context, sinceCursor uint64, limit int) (GetEventsResult, error) {
+	s.touch()
+	_ = ctx
+	if limit <= 0 {
+		limit = 100
+	}
+	if limit > 1000 {
+		limit = 1000
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]EventResult, 0, limit)
+	for _, ev := range s.eventRing {
+		if ev.Cursor <= sinceCursor {
+			continue
+		}
+		out = append(out, ev)
+		if len(out) >= limit {
+			break
+		}
+	}
+	next := sinceCursor
+	if len(out) > 0 {
+		next = out[len(out)-1].Cursor
+	}
+	return GetEventsResult{Events: out, NextCursor: next}, nil
 }

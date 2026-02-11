@@ -178,6 +178,27 @@ func runMultiWorld(rtCfg serverRuntimeConfig, cfg multiworld.Config, tune tuning
 		}
 	}()
 
+	mux := buildMultiWorldMux(mgr, logger)
+	srv := &http.Server{
+		Addr:              rtCfg.Addr,
+		Handler:           mux,
+		ReadHeaderTimeout: 5 * time.Second,
+	}
+
+	go func() {
+		<-ctx.Done()
+		ctx2, cancel2 := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel2()
+		_ = srv.Shutdown(ctx2)
+	}()
+
+	logger.Printf("multi-world mode listening on %s worlds=%v", rtCfg.Addr, mgr.WorldIDs())
+	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		logger.Fatalf("ListenAndServe: %v", err)
+	}
+}
+
+func buildMultiWorldMux(mgr *multiworld.Manager, logger *log.Logger) *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", func(rw http.ResponseWriter, r *http.Request) {
 		rw.WriteHeader(200)
@@ -239,26 +260,7 @@ func runMultiWorld(rtCfg serverRuntimeConfig, cfg multiworld.Config, tune tuning
 			return
 		}
 		worldID := r.URL.Query().Get("world")
-		rt := mgr.Runtime(worldID)
-		if rt == nil || rt.World == nil {
-			http.Error(rw, "world not found", http.StatusNotFound)
-			return
-		}
-		if !rt.Spec.AllowAdminReset {
-			http.Error(rw, "reset forbidden for this world", http.StatusForbidden)
-			return
-		}
-		// 1.0: trigger an immediate reset at tick boundary.
-		ctx2, cancel2 := context.WithTimeout(r.Context(), 5*time.Second)
-		defer cancel2()
-		tick, err := rt.World.RequestReset(ctx2)
-		rw.Header().Set("Content-Type", "application/json")
-		if err != nil {
-			rw.WriteHeader(http.StatusServiceUnavailable)
-			_ = json.NewEncoder(rw).Encode(map[string]any{"ok": false, "world": worldID, "tick": tick, "error": err.Error()})
-			return
-		}
-		_ = json.NewEncoder(rw).Encode(map[string]any{"ok": true, "world": worldID, "tick": tick, "note": "world reset completed"})
+		handleWorldReset(rw, r, mgr, worldID)
 	})
 	mux.HandleFunc("/admin/v1/worlds/", func(rw http.ResponseWriter, r *http.Request) {
 		// Pattern: /admin/v1/worlds/{id}/reset
@@ -277,25 +279,7 @@ func runMultiWorld(rtCfg serverRuntimeConfig, cfg multiworld.Config, tune tuning
 			return
 		}
 		worldID := parts[0]
-		rt := mgr.Runtime(worldID)
-		if rt == nil || rt.World == nil {
-			http.Error(rw, "world not found", http.StatusNotFound)
-			return
-		}
-		if !rt.Spec.AllowAdminReset {
-			http.Error(rw, "reset forbidden for this world", http.StatusForbidden)
-			return
-		}
-		ctx2, cancel2 := context.WithTimeout(r.Context(), 5*time.Second)
-		defer cancel2()
-		tick, err := rt.World.RequestReset(ctx2)
-		rw.Header().Set("Content-Type", "application/json")
-		if err != nil {
-			rw.WriteHeader(http.StatusServiceUnavailable)
-			_ = json.NewEncoder(rw).Encode(map[string]any{"ok": false, "world": worldID, "tick": tick, "error": err.Error()})
-			return
-		}
-		_ = json.NewEncoder(rw).Encode(map[string]any{"ok": true, "world": worldID, "tick": tick, "note": "world reset completed"})
+		handleWorldReset(rw, r, mgr, worldID)
 	})
 	mux.HandleFunc("/admin/v1/agents/", func(rw http.ResponseWriter, r *http.Request) {
 		// Pattern: /admin/v1/agents/{id}/move_world
@@ -337,22 +321,27 @@ func runMultiWorld(rtCfg serverRuntimeConfig, cfg multiworld.Config, tune tuning
 	mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
 	mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
 	mux.HandleFunc("/v1/ws", ws.NewManagedServer(mgr, logger).Handler())
+	return mux
+}
 
-	srv := &http.Server{
-		Addr:              rtCfg.Addr,
-		Handler:           mux,
-		ReadHeaderTimeout: 5 * time.Second,
+func handleWorldReset(rw http.ResponseWriter, r *http.Request, mgr *multiworld.Manager, worldID string) {
+	rt := mgr.Runtime(worldID)
+	if rt == nil || rt.World == nil {
+		http.Error(rw, "world not found", http.StatusNotFound)
+		return
 	}
-
-	go func() {
-		<-ctx.Done()
-		ctx2, cancel2 := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel2()
-		_ = srv.Shutdown(ctx2)
-	}()
-
-	logger.Printf("multi-world mode listening on %s worlds=%v", rtCfg.Addr, mgr.WorldIDs())
-	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-		logger.Fatalf("ListenAndServe: %v", err)
+	if !rt.Spec.AllowAdminReset {
+		http.Error(rw, "reset forbidden for this world", http.StatusForbidden)
+		return
 	}
+	ctx2, cancel2 := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel2()
+	tick, err := rt.World.RequestReset(ctx2)
+	rw.Header().Set("Content-Type", "application/json")
+	if err != nil {
+		rw.WriteHeader(http.StatusServiceUnavailable)
+		_ = json.NewEncoder(rw).Encode(map[string]any{"ok": false, "world": worldID, "tick": tick, "error": err.Error()})
+		return
+	}
+	_ = json.NewEncoder(rw).Encode(map[string]any{"ok": true, "world": worldID, "tick": tick, "note": "world reset completed"})
 }

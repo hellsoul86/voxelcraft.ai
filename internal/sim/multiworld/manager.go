@@ -27,7 +27,12 @@ type Runtime struct {
 	World *world.World
 }
 
-const stateVersion = 2
+const (
+	stateVersion            = 2
+	worldRequestTimeout     = 3 * time.Second
+	worldLeaveSendTimeout   = 300 * time.Millisecond
+	worldInjectEventTimeout = 2 * time.Second
+)
 
 type persistedResidency struct {
 	AgentToWorld  map[string]string `json:"agent_to_world"`
@@ -242,8 +247,13 @@ func (m *Manager) RefreshOrgMeta(ctx context.Context) error {
 				candidate.Members[aid] = role
 			}
 			meta := merged[org.OrgID]
-			if chooseNewerOrgMeta(meta, candidate) {
+			switch {
+			case stringsTrim(meta.OrgID) == "":
 				merged[org.OrgID] = candidate
+			case candidate.MetaVersion > meta.MetaVersion:
+				merged[org.OrgID] = candidate
+			case candidate.MetaVersion == meta.MetaVersion:
+				merged[org.OrgID] = mergeOrgMetaSameVersion(meta, candidate)
 			}
 		}
 	}
@@ -313,13 +323,18 @@ func (m *Manager) Join(name string, delta bool, out chan []byte, worldPreference
 	}
 
 	respCh := make(chan world.JoinResponse, 1)
-	rt.World.Join() <- world.JoinRequest{
+	req := world.JoinRequest{
 		Name:        name,
 		DeltaVoxels: delta,
 		Out:         out,
 		Resp:        respCh,
 	}
-	resp := <-respCh
+	ctx, cancel := m.requestCtx(context.Background())
+	defer cancel()
+	resp, err := m.sendJoinRequest(ctx, rt, req)
+	if err != nil {
+		return Session{}, world.JoinResponse{}, fmt.Errorf("join request failed: %w", err)
+	}
 	if resp.Welcome.AgentID == "" {
 		return Session{}, world.JoinResponse{}, fmt.Errorf("join failed")
 	}
@@ -355,13 +370,18 @@ func (m *Manager) Attach(resumeToken string, delta bool, out chan []byte) (Sessi
 			continue
 		}
 		respCh := make(chan world.JoinResponse, 1)
-		rt.World.Attach() <- world.AttachRequest{
+		req := world.AttachRequest{
 			ResumeToken: resumeToken,
 			DeltaVoxels: delta,
 			Out:         out,
 			Resp:        respCh,
 		}
-		resp := <-respCh
+		ctx, cancel := m.requestCtx(context.Background())
+		resp, err := m.sendAttachRequest(ctx, rt, req)
+		cancel()
+		if err != nil {
+			continue
+		}
 		if resp.Welcome.AgentID == "" {
 			continue
 		}
@@ -382,7 +402,12 @@ func (m *Manager) Attach(resumeToken string, delta bool, out chan []byte) (Sessi
 func (m *Manager) Leave(s Session) {
 	rt := m.runtime(s.CurrentWorld)
 	if rt != nil {
-		rt.World.Leave() <- s.AgentID
+		timer := time.NewTimer(worldLeaveSendTimeout)
+		defer timer.Stop()
+		select {
+		case rt.World.Leave() <- s.AgentID:
+		case <-timer.C:
+		}
 	}
 }
 
@@ -419,7 +444,9 @@ func (m *Manager) RouteAct(ctx context.Context, s *Session, act protocol.ActMsg)
 	if rt == nil {
 		return s.CurrentWorld, fmt.Errorf("world not found: %s", s.CurrentWorld)
 	}
-	rt.World.Inbox() <- world.ActionEnvelope{AgentID: s.AgentID, Act: act}
+	if err := m.sendActionEnvelope(ctx, rt, world.ActionEnvelope{AgentID: s.AgentID, Act: act}); err != nil {
+		return s.CurrentWorld, m.injectActionResult(context.Background(), s.CurrentWorld, s.AgentID, actionResult(0, "ACT", false, "E_WORLD_BUSY", "world inbox busy"))
+	}
 	if hasOrgMutation(filteredInstants) {
 		m.scheduleOrgRefresh()
 	}
@@ -443,7 +470,7 @@ func (m *Manager) switchWorld(ctx context.Context, s *Session, target, entryPoin
 		return m.injectActionResult(ctx, s.CurrentWorld, s.AgentID, actionResult(0, ref, false, "E_WORLD_NOT_FOUND", "target world not found"))
 	}
 
-	timeoutCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	timeoutCtx, cancel := m.requestCtx(ctx)
 	defer cancel()
 
 	pos, err := src.World.RequestAgentPos(timeoutCtx, s.AgentID)
@@ -573,7 +600,62 @@ func (m *Manager) injectActionResult(ctx context.Context, worldID, agentID strin
 	if _, ok := ev["t"]; !ok {
 		ev["t"] = now
 	}
-	return rt.World.RequestInjectEvent(ctx, agentID, ev)
+	reqCtx, cancel := m.injectCtx(ctx)
+	defer cancel()
+	return rt.World.RequestInjectEvent(reqCtx, agentID, ev)
+}
+
+func (m *Manager) requestCtx(parent context.Context) (context.Context, context.CancelFunc) {
+	if parent == nil {
+		parent = context.Background()
+	}
+	return context.WithTimeout(parent, worldRequestTimeout)
+}
+
+func (m *Manager) injectCtx(parent context.Context) (context.Context, context.CancelFunc) {
+	if parent == nil {
+		parent = context.Background()
+	}
+	return context.WithTimeout(parent, worldInjectEventTimeout)
+}
+
+func (m *Manager) sendJoinRequest(ctx context.Context, rt *Runtime, req world.JoinRequest) (world.JoinResponse, error) {
+	select {
+	case rt.World.Join() <- req:
+	case <-ctx.Done():
+		return world.JoinResponse{}, ctx.Err()
+	}
+	select {
+	case resp := <-req.Resp:
+		return resp, nil
+	case <-ctx.Done():
+		return world.JoinResponse{}, ctx.Err()
+	}
+}
+
+func (m *Manager) sendAttachRequest(ctx context.Context, rt *Runtime, req world.AttachRequest) (world.JoinResponse, error) {
+	select {
+	case rt.World.Attach() <- req:
+	case <-ctx.Done():
+		return world.JoinResponse{}, ctx.Err()
+	}
+	select {
+	case resp := <-req.Resp:
+		return resp, nil
+	case <-ctx.Done():
+		return world.JoinResponse{}, ctx.Err()
+	}
+}
+
+func (m *Manager) sendActionEnvelope(ctx context.Context, rt *Runtime, env world.ActionEnvelope) error {
+	reqCtx, cancel := m.requestCtx(ctx)
+	defer cancel()
+	select {
+	case rt.World.Inbox() <- env:
+		return nil
+	case <-reqCtx.Done():
+		return reqCtx.Err()
+	}
 }
 
 func (m *Manager) runtime(id string) *Runtime {
@@ -1145,6 +1227,35 @@ func chooseNewerOrgMeta(current, candidate OrgMeta) bool {
 	}
 	// Deterministic tie-break for concurrent same-version writes.
 	return orgMetaDigest(candidate) > orgMetaDigest(current)
+}
+
+func mergeOrgMetaSameVersion(a, b OrgMeta) OrgMeta {
+	if stringsTrim(a.OrgID) == "" {
+		return b
+	}
+	if stringsTrim(b.OrgID) == "" {
+		return a
+	}
+	out := a
+	if out.Members == nil {
+		out.Members = map[string]world.OrgRole{}
+	}
+	if out.Kind == "" && b.Kind != "" {
+		out.Kind = b.Kind
+	}
+	if stringsTrim(out.Name) == "" && stringsTrim(b.Name) != "" {
+		out.Name = b.Name
+	}
+	if out.CreatedTick == 0 || (b.CreatedTick != 0 && b.CreatedTick < out.CreatedTick) {
+		out.CreatedTick = b.CreatedTick
+	}
+	for aid, role := range b.Members {
+		if stringsTrim(aid) == "" || role == "" {
+			continue
+		}
+		out.Members[aid] = role
+	}
+	return out
 }
 
 func orgMetaDigest(m OrgMeta) string {

@@ -40,6 +40,8 @@ type Agent struct {
 	WorkTask *tasks.WorkTask
 
 	Events []protocol.Event
+	// Monotonic count of events delivered to this agent via OBS.
+	EventCursor uint64
 
 	// Rate limiting windows (per action type).
 	rl map[string]*rateWindow

@@ -29,6 +29,13 @@ func (stubBridge) GetObs(ctx context.Context, sessionKey string, opts bridge.Get
 	_ = opts
 	return bridge.ObsResult{Tick: 0, AgentID: "A1", Obs: nil}, nil
 }
+func (stubBridge) GetEvents(ctx context.Context, sessionKey string, sinceCursor uint64, limit int) (bridge.GetEventsResult, error) {
+	_ = ctx
+	_ = sessionKey
+	_ = sinceCursor
+	_ = limit
+	return bridge.GetEventsResult{Events: nil, NextCursor: 0}, nil
+}
 func (stubBridge) GetCatalog(ctx context.Context, sessionKey, name string) (bridge.CatalogResult, error) {
 	_ = ctx
 	_ = sessionKey
@@ -104,8 +111,8 @@ func TestMCP_Initialize_And_ListTools(t *testing.T) {
 	if !ok {
 		t.Fatalf("missing tools array")
 	}
-	if len(tools) != 6 {
-		t.Fatalf("expected 6 tools, got %d", len(tools))
+	if len(tools) != 7 {
+		t.Fatalf("expected 7 tools, got %d", len(tools))
 	}
 }
 

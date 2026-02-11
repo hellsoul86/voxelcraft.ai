@@ -4,8 +4,10 @@ package protocol
 type HelloMsg struct {
 	Type            string            `json:"type"`
 	ProtocolVersion string            `json:"protocol_version"`
+	SupportedVersions []string        `json:"supported_versions,omitempty"`
 	AgentName       string            `json:"agent_name"`
 	Capabilities    HelloCapabilities `json:"capabilities"`
+	ClientCapabilities HelloClientCapabilities `json:"client_capabilities,omitempty"`
 	Auth            *HelloAuth        `json:"auth,omitempty"`
 	WorldPreference string            `json:"world_preference,omitempty"`
 }
@@ -13,6 +15,12 @@ type HelloMsg struct {
 type HelloCapabilities struct {
 	DeltaVoxels bool `json:"delta_voxels,omitempty"`
 	MaxQueue    int  `json:"max_queue,omitempty"`
+}
+
+type HelloClientCapabilities struct {
+	DeltaVoxels bool `json:"delta_voxels,omitempty"`
+	AckRequired bool `json:"ack_required,omitempty"`
+	EventCursor bool `json:"event_cursor,omitempty"`
 }
 
 type HelloAuth struct {
@@ -23,12 +31,21 @@ type HelloAuth struct {
 type WelcomeMsg struct {
 	Type            string         `json:"type"`
 	ProtocolVersion string         `json:"protocol_version"`
+	SelectedVersion string         `json:"selected_version,omitempty"`
+	ServerCapabilities ServerCapabilities `json:"server_capabilities,omitempty"`
+	SessionID       string         `json:"session_id,omitempty"`
 	AgentID         string         `json:"agent_id"`
 	ResumeToken     string         `json:"resume_token"`
 	WorldParams     WorldParams    `json:"world_params"`
 	Catalogs        CatalogDigests `json:"catalogs"`
 	CurrentWorldID  string         `json:"current_world_id,omitempty"`
 	WorldManifest   []WorldRef     `json:"world_manifest,omitempty"`
+}
+
+type ServerCapabilities struct {
+	Ack         bool `json:"ack,omitempty"`
+	EventBatch  bool `json:"event_batch,omitempty"`
+	Idempotency bool `json:"idempotency,omitempty"`
 }
 
 type WorldRef struct {
@@ -75,4 +92,15 @@ type CatalogMsg struct {
 	Part            int         `json:"part"`
 	TotalParts      int         `json:"total_parts"`
 	Data            interface{} `json:"data"`
+}
+
+type AckMsg struct {
+	Type            string `json:"type"`
+	ProtocolVersion string `json:"protocol_version"`
+	AckFor          string `json:"ack_for"`
+	Accepted        bool   `json:"accepted"`
+	Code            string `json:"code,omitempty"`
+	Message         string `json:"message,omitempty"`
+	ServerTick      uint64 `json:"server_tick,omitempty"`
+	WorldID         string `json:"world_id,omitempty"`
 }

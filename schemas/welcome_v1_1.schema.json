@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": ["type", "protocol_version", "selected_version", "agent_id", "resume_token", "world_params", "catalogs"],
+  "properties": {
+    "type": {"const": "WELCOME"},
+    "protocol_version": {"const": "1.1"},
+    "selected_version": {"const": "1.1"},
+    "session_id": {"type": "string"},
+    "server_capabilities": {
+      "type": "object",
+      "properties": {
+        "ack": {"type": "boolean"},
+        "event_batch": {"type": "boolean"},
+        "idempotency": {"type": "boolean"}
+      },
+      "additionalProperties": true
+    },
+    "agent_id": {"type": "string"},
+    "resume_token": {"type": "string"},
+    "world_params": {"type": "object"},
+    "catalogs": {"type": "object"},
+    "current_world_id": {"type": "string"},
+    "world_manifest": {"type": "array"}
+  },
+  "additionalProperties": true
+}

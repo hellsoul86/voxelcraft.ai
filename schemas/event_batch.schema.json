@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": ["events", "next_cursor"],
+  "properties": {
+    "events": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["cursor", "event"],
+        "properties": {
+          "cursor": {"type": "integer", "minimum": 0},
+          "event": {}
+        },
+        "additionalProperties": true
+      }
+    },
+    "next_cursor": {"type": "integer", "minimum": 0}
+  },
+  "additionalProperties": true
+}

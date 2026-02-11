@@ -53,9 +53,17 @@ Endpoints:
 - `GET /metrics` (Prometheus text)
 - `GET /admin/v1/state` (loopback-only)
 - `POST /admin/v1/snapshot` (loopback-only; force a snapshot)
+- Multi-world mode:
+  - `GET /admin/v1/worlds/state` (loopback-only)
+  - `POST /admin/v1/worlds/{id}/reset` (loopback-only; guarded by `allow_admin_reset`)
+  - `POST /admin/v1/agents/{id}/move_world?target_world=<id>` (loopback-only; operator rescue)
 - `GET /admin/v1/observer/bootstrap` (loopback-only; observer bootstrap)
 - `WS /admin/v1/observer/ws` (loopback-only; observer stream)
 - `GET /debug/pprof/` (pprof)
+
+Default reset guard in `configs/worlds.yaml`:
+- `OVERWORLD`, `CITY_HUB`: reset disabled (`403`)
+- `MINE_L1/L2/L3`: reset enabled
 
 Local admin smoke test:
 ```bash
@@ -69,6 +77,39 @@ Or via CLI:
 go run ./cmd/admin state -url http://127.0.0.1:8080
 go run ./cmd/admin snapshot -url http://127.0.0.1:8080
 ```
+
+## Release Gate (local)
+
+Run deterministic + regression checks before cutting a release:
+
+```bash
+# core + race + full go test
+scripts/release_gate.sh
+
+# include voxelcraft.agent e2e and swarm
+scripts/release_gate.sh --with-agent
+```
+
+Optional flags:
+- `--skip-race`
+- `--agent-dir /path/to/voxelcraft.agent`
+- `--scenario multiworld_mine_trade_govern`
+- `--count 50 --duration 60`
+
+## GitHub Actions
+
+Two workflows are wired:
+
+- `CI Fast` (`.github/workflows/ci-fast.yml`)
+  - triggers on PR and push to `main/master`
+  - runs `scripts/release_gate.sh --skip-race`
+  - intended for fast feedback
+
+- `CI Full` (`.github/workflows/ci-full.yml`)
+  - triggers on push to `main/master`, daily schedule, and manual dispatch
+  - runs `scripts/release_gate.sh` (includes `-race`)
+  - manual dispatch can enable optional `voxelcraft.agent` e2e + swarm
+  - agent repo defaults to `<owner>/voxelcraft.agent` and can be overridden by input
 
 Persistence (defaults under `./data`):
 - tick log: `data/worlds/<world>/events/*.jsonl.zst`
@@ -92,6 +133,7 @@ Rollback limitations (v0.9):
 See:
 - `docs/spec/agent_protocol_v0.9.md`
 - `schemas/*.schema.json`
+- `internal/sim/world/ARCHITECTURE.md` (world package structure and tick lifecycle)
 
 OpenClaw/ClawHub (MCP sidecar):
 - `POST /mcp` on the sidecar (default: `http://127.0.0.1:8090/mcp`)

@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": ["type", "protocol_version", "act_id", "based_on_obs_id", "tick", "agent_id", "expected_world_id"],
+  "properties": {
+    "type": {"const": "ACT"},
+    "protocol_version": {"const": "1.1"},
+    "act_id": {"type": "string", "minLength": 1},
+    "based_on_obs_id": {"type": "string", "minLength": 1},
+    "idempotency_key": {"type": "string"},
+    "tick": {"type": "integer", "minimum": 0},
+    "agent_id": {"type": "string"},
+    "expected_world_id": {"type": "string"},
+    "instants": {"type": "array"},
+    "tasks": {"type": "array"},
+    "cancel": {"type": "array"}
+  },
+  "additionalProperties": true
+}

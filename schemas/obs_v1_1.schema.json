@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": ["type", "protocol_version", "tick", "agent_id", "obs_id", "events_cursor", "world", "self", "inventory", "equipment", "local_rules", "voxels", "entities", "events", "tasks"],
+  "properties": {
+    "type": {"const": "OBS"},
+    "protocol_version": {"const": "1.1"},
+    "tick": {"type": "integer", "minimum": 0},
+    "agent_id": {"type": "string"},
+    "obs_id": {"type": "string"},
+    "events_cursor": {"type": "integer", "minimum": 0},
+    "world_id": {"type": "string"},
+    "world_clock": {"type": "integer", "minimum": 0},
+    "world": {"type": "object"},
+    "self": {"type": "object"},
+    "inventory": {"type": "array"},
+    "equipment": {"type": "object"},
+    "local_rules": {"type": "object"},
+    "voxels": {"type": "object"},
+    "entities": {"type": "array"},
+    "events": {"type": "array"},
+    "tasks": {"type": "array"}
+  },
+  "additionalProperties": true
+}

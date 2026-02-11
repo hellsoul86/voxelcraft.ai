@@ -5,6 +5,8 @@ type ObsMsg struct {
 	ProtocolVersion string `json:"protocol_version"`
 	Tick            uint64 `json:"tick"`
 	AgentID         string `json:"agent_id"`
+	ObsID           string `json:"obs_id,omitempty"`
+	EventsCursor    uint64 `json:"events_cursor,omitempty"`
 	WorldID         string `json:"world_id,omitempty"`
 	WorldClock      uint64 `json:"world_clock,omitempty"`
 
@@ -138,6 +140,9 @@ type FunScoreObs struct {
 type ActMsg struct {
 	Type            string       `json:"type"`
 	ProtocolVersion string       `json:"protocol_version"`
+	ActID           string       `json:"act_id,omitempty"`
+	BasedOnObsID    string       `json:"based_on_obs_id,omitempty"`
+	IdempotencyKey  string       `json:"idempotency_key,omitempty"`
 	Tick            uint64       `json:"tick"`
 	AgentID         string       `json:"agent_id"`
 	ExpectedWorldID string       `json:"expected_world_id,omitempty"`

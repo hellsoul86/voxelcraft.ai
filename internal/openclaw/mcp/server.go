@@ -16,6 +16,7 @@ type Bridge interface {
 	GetStatus(ctx context.Context, sessionKey string) (bridge.Status, error)
 	ListWorlds(ctx context.Context, sessionKey string) ([]bridge.WorldInfo, error)
 	GetObs(ctx context.Context, sessionKey string, opts bridge.GetObsOpts) (bridge.ObsResult, error)
+	GetEvents(ctx context.Context, sessionKey string, sinceCursor uint64, limit int) (bridge.GetEventsResult, error)
 	GetCatalog(ctx context.Context, sessionKey, name string) (bridge.CatalogResult, error)
 	Act(ctx context.Context, sessionKey string, args bridge.ActArgs) (bridge.ActResult, error)
 	Disconnect(ctx context.Context, sessionKey string) error
@@ -165,6 +166,17 @@ func (s *Server) toolsList() []map[string]any {
 			},
 		},
 		{
+			"name":        "voxelcraft.get_events",
+			"description": "Get reliable event batches using cursor pagination.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"since_cursor": map[string]any{"type": "integer"},
+					"limit":        map[string]any{"type": "integer"},
+				},
+			},
+		},
+		{
 			"name":        "voxelcraft.get_catalog",
 			"description": "Get a catalog (block_palette/item_palette/tuning/recipes/blueprints/law_templates/events).",
 			"inputSchema": map[string]any{
@@ -224,6 +236,22 @@ func (s *Server) callTool(ctx context.Context, sessionKey string, name string, a
 		}
 		return res, nil
 
+	case "voxelcraft.get_events":
+		var p struct {
+			SinceCursor uint64 `json:"since_cursor"`
+			Limit       int    `json:"limit"`
+		}
+		if len(args) > 0 {
+			if err := json.Unmarshal(args, &p); err != nil {
+				return nil, fmt.Errorf("bad arguments: %w", err)
+			}
+		}
+		res, err := s.bridge.GetEvents(ctx, sessionKey, p.SinceCursor, p.Limit)
+		if err != nil {
+			return nil, err
+		}
+		return res, nil
+
 	case "voxelcraft.get_catalog":
 		var p struct {
 			Name string `json:"name"`
@@ -269,6 +297,7 @@ func isKnownTool(name string) bool {
 	case "voxelcraft.get_status",
 		"voxelcraft.list_worlds",
 		"voxelcraft.get_obs",
+		"voxelcraft.get_events",
 		"voxelcraft.get_catalog",
 		"voxelcraft.act",
 		"voxelcraft.disconnect":

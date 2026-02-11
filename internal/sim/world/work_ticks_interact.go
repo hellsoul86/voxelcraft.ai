@@ -1,0 +1,223 @@
+package world
+
+import (
+	"voxelcraft.ai/internal/protocol"
+	"voxelcraft.ai/internal/sim/tasks"
+)
+
+func (w *World) tickOpen(a *Agent, wt *tasks.WorkTask, nowTick uint64) {
+	c := w.getContainerByID(wt.TargetID)
+	if c == nil {
+		// Fallback: allow OPEN on bulletin boards ("BULLETIN_BOARD@x,y,z") to read posts.
+		if typ, pos, ok := parseContainerID(wt.TargetID); ok && typ == "BULLETIN_BOARD" {
+			if w.blockName(w.chunks.GetBlock(pos)) != "BULLETIN_BOARD" {
+				a.WorkTask = nil
+				a.AddEvent(protocol.Event{"t": nowTick, "type": "TASK_FAIL", "task_id": wt.TaskID, "code": "E_INVALID_TARGET", "message": "board not found"})
+				return
+			}
+			if Manhattan(a.Pos, pos) > 3 {
+				a.WorkTask = nil
+				a.AddEvent(protocol.Event{"t": nowTick, "type": "TASK_FAIL", "task_id": wt.TaskID, "code": "E_BLOCKED", "message": "too far"})
+				return
+			}
+			bid := boardIDAt(pos)
+			b := w.boards[bid]
+			if b == nil {
+				b = w.ensureBoard(pos)
+			}
+
+			// Return up to the 20 newest posts.
+			posts := make([]map[string]any, 0, 20)
+			start := 0
+			if n := len(b.Posts); n > 20 {
+				start = n - 20
+			}
+			for i := start; i < len(b.Posts); i++ {
+				p := b.Posts[i]
+				posts = append(posts, map[string]any{
+					"post_id": p.PostID,
+					"author":  p.Author,
+					"title":   p.Title,
+					"body":    p.Body,
+					"tick":    p.Tick,
+				})
+			}
+			a.AddEvent(protocol.Event{
+				"t":           nowTick,
+				"type":        "BOARD",
+				"board_id":    bid,
+				"pos":         pos.ToArray(),
+				"total_posts": len(b.Posts),
+				"posts":       posts,
+			})
+			a.WorkTask = nil
+			a.AddEvent(protocol.Event{"t": nowTick, "type": "TASK_DONE", "task_id": wt.TaskID, "kind": string(wt.Kind)})
+			return
+		}
+
+		// Fallback: allow OPEN on signs ("SIGN@x,y,z") to read text.
+		if typ, pos, ok := parseContainerID(wt.TargetID); ok && typ == "SIGN" {
+			if w.blockName(w.chunks.GetBlock(pos)) != "SIGN" {
+				a.WorkTask = nil
+				a.AddEvent(protocol.Event{"t": nowTick, "type": "TASK_FAIL", "task_id": wt.TaskID, "code": "E_INVALID_TARGET", "message": "sign not found"})
+				return
+			}
+			if Manhattan(a.Pos, pos) > 3 {
+				a.WorkTask = nil
+				a.AddEvent(protocol.Event{"t": nowTick, "type": "TASK_FAIL", "task_id": wt.TaskID, "code": "E_BLOCKED", "message": "too far"})
+				return
+			}
+			s := w.signs[pos]
+			text := ""
+			updatedTick := uint64(0)
+			updatedBy := ""
+			if s != nil {
+				text = s.Text
+				updatedTick = s.UpdatedTick
+				updatedBy = s.UpdatedBy
+			}
+			a.AddEvent(protocol.Event{
+				"t":            nowTick,
+				"type":         "SIGN",
+				"sign_id":      signIDAt(pos),
+				"pos":          pos.ToArray(),
+				"text":         text,
+				"updated_tick": updatedTick,
+				"updated_by":   updatedBy,
+			})
+			a.WorkTask = nil
+			a.AddEvent(protocol.Event{"t": nowTick, "type": "TASK_DONE", "task_id": wt.TaskID, "kind": string(wt.Kind)})
+			return
+		}
+
+		a.WorkTask = nil
+		a.AddEvent(protocol.Event{"t": nowTick, "type": "TASK_FAIL", "task_id": wt.TaskID, "code": "E_INVALID_TARGET", "message": "container not found"})
+		return
+	}
+	if Manhattan(a.Pos, c.Pos) > 3 {
+		a.WorkTask = nil
+		a.AddEvent(protocol.Event{"t": nowTick, "type": "TASK_FAIL", "task_id": wt.TaskID, "code": "E_BLOCKED", "message": "too far"})
+		return
+	}
+
+	ev := protocol.Event{
+		"t":              nowTick,
+		"type":           "CONTAINER",
+		"container":      c.ID(),
+		"container_type": c.Type,
+		"pos":            c.Pos.ToArray(),
+		"inventory":      c.InventoryList(),
+	}
+	// Include owed summary for this agent.
+	if c.Owed != nil {
+		if owed := c.Owed[a.ID]; owed != nil {
+			ev["owed"] = encodeItemPairs(owed)
+		}
+	}
+	// Include contract summaries if it's a terminal.
+	if c.Type == "CONTRACT_TERMINAL" {
+		ev["contracts"] = w.contractSummariesForTerminal(c.Pos)
+	}
+	a.AddEvent(ev)
+	w.onContainerOpenedDuringEvent(a, c, nowTick)
+
+	a.WorkTask = nil
+	a.AddEvent(protocol.Event{"t": nowTick, "type": "TASK_DONE", "task_id": wt.TaskID, "kind": string(wt.Kind)})
+}
+
+func (w *World) tickTransfer(a *Agent, wt *tasks.WorkTask, nowTick uint64) {
+	srcID := wt.SrcContainer
+	dstID := wt.DstContainer
+	item := wt.ItemID
+	n := wt.Count
+
+	if srcID == "SELF" && dstID == "SELF" {
+		a.WorkTask = nil
+		a.AddEvent(protocol.Event{"t": nowTick, "type": "TASK_FAIL", "task_id": wt.TaskID, "code": "E_BAD_REQUEST", "message": "no-op transfer"})
+		return
+	}
+
+	var srcC *Container
+	var dstC *Container
+	if srcID != "SELF" {
+		srcC = w.getContainerByID(srcID)
+		if srcC == nil {
+			a.WorkTask = nil
+			a.AddEvent(protocol.Event{"t": nowTick, "type": "TASK_FAIL", "task_id": wt.TaskID, "code": "E_INVALID_TARGET", "message": "src container not found"})
+			return
+		}
+		if Manhattan(a.Pos, srcC.Pos) > 3 {
+			a.WorkTask = nil
+			a.AddEvent(protocol.Event{"t": nowTick, "type": "TASK_FAIL", "task_id": wt.TaskID, "code": "E_BLOCKED", "message": "too far from src"})
+			return
+		}
+	}
+	if dstID != "SELF" {
+		dstC = w.getContainerByID(dstID)
+		if dstC == nil {
+			a.WorkTask = nil
+			a.AddEvent(protocol.Event{"t": nowTick, "type": "TASK_FAIL", "task_id": wt.TaskID, "code": "E_INVALID_TARGET", "message": "dst container not found"})
+			return
+		}
+		if Manhattan(a.Pos, dstC.Pos) > 3 {
+			a.WorkTask = nil
+			a.AddEvent(protocol.Event{"t": nowTick, "type": "TASK_FAIL", "task_id": wt.TaskID, "code": "E_BLOCKED", "message": "too far from dst"})
+			return
+		}
+	}
+
+	// Withdraw permission and escrow protection.
+	if srcC != nil {
+		if !w.canWithdrawFromContainer(a.ID, srcC.Pos) {
+			a.WorkTask = nil
+			a.AddEvent(protocol.Event{"t": nowTick, "type": "TASK_FAIL", "task_id": wt.TaskID, "code": "E_NO_PERMISSION", "message": "withdraw denied"})
+			return
+		}
+		if srcC.availableCount(item) < n {
+			a.WorkTask = nil
+			a.AddEvent(protocol.Event{"t": nowTick, "type": "TASK_FAIL", "task_id": wt.TaskID, "code": "E_NO_RESOURCE", "message": "insufficient src items"})
+			return
+		}
+	} else {
+		if a.Inventory[item] < n {
+			a.WorkTask = nil
+			a.AddEvent(protocol.Event{"t": nowTick, "type": "TASK_FAIL", "task_id": wt.TaskID, "code": "E_NO_RESOURCE", "message": "insufficient self items"})
+			return
+		}
+	}
+
+	// Execute transfer.
+	if srcC != nil {
+		srcC.Inventory[item] -= n
+		if srcC.Inventory[item] <= 0 {
+			delete(srcC.Inventory, item)
+		}
+	} else {
+		a.Inventory[item] -= n
+	}
+	if dstC != nil {
+		if dstC.Inventory == nil {
+			dstC.Inventory = map[string]int{}
+		}
+		dstC.Inventory[item] += n
+	} else {
+		a.Inventory[item] += n
+	}
+
+	// Audit the transfer for dispute resolution.
+	ap := a.Pos
+	if dstC != nil {
+		ap = dstC.Pos
+	} else if srcC != nil {
+		ap = srcC.Pos
+	}
+	w.auditEvent(nowTick, a.ID, "TRANSFER", ap, "TRANSFER", map[string]any{
+		"src":   srcID,
+		"dst":   dstID,
+		"item":  item,
+		"count": n,
+	})
+
+	a.WorkTask = nil
+	a.AddEvent(protocol.Event{"t": nowTick, "type": "TASK_DONE", "task_id": wt.TaskID, "kind": string(wt.Kind)})
+}

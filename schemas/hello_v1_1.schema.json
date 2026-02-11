@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": ["type", "protocol_version", "agent_name", "capabilities"],
+  "properties": {
+    "type": {"const": "HELLO"},
+    "protocol_version": {"const": "1.1"},
+    "supported_versions": {
+      "type": "array",
+      "items": {"type": "string"}
+    },
+    "agent_name": {"type": "string", "minLength": 1},
+    "capabilities": {
+      "type": "object",
+      "properties": {
+        "delta_voxels": {"type": "boolean"},
+        "max_queue": {"type": "integer", "minimum": 1}
+      },
+      "additionalProperties": true
+    },
+    "client_capabilities": {
+      "type": "object",
+      "properties": {
+        "delta_voxels": {"type": "boolean"},
+        "ack_required": {"type": "boolean"},
+        "event_cursor": {"type": "boolean"}
+      },
+      "additionalProperties": true
+    },
+    "auth": {
+      "type": "object",
+      "properties": {
+        "token": {"type": "string"}
+      },
+      "additionalProperties": true
+    },
+    "world_preference": {"type": "string"}
+  },
+  "additionalProperties": true
+}

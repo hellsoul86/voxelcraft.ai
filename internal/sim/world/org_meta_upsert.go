@@ -90,16 +90,6 @@ func (w *World) handleOrgMetaUpsertReq(req orgMetaUpsertReq) {
 		if src.MetaVersion < dst.MetaVersion {
 			continue
 		}
-		if src.MetaVersion == dst.MetaVersion && srcDigest(src) <= srcDigest(OrgTransfer{
-			OrgID:       dst.OrgID,
-			Kind:        dst.Kind,
-			Name:        dst.Name,
-			CreatedTick: dst.CreatedTick,
-			MetaVersion: dst.MetaVersion,
-			Members:     dst.Members,
-		}) {
-			continue
-		}
 		if src.Kind != "" {
 			dst.Kind = src.Kind
 		}
@@ -168,18 +158,4 @@ func (w *World) handleOrgMetaUpsertReq(req orgMetaUpsertReq) {
 			a.OrgID = ""
 		}
 	}
-}
-
-func srcDigest(org OrgTransfer) string {
-	memberIDs := make([]string, 0, len(org.Members))
-	for aid := range org.Members {
-		memberIDs = append(memberIDs, aid)
-	}
-	sort.Strings(memberIDs)
-	out := string(org.Kind) + "|" + org.Name + "|" + org.OrgID
-	for _, aid := range memberIDs {
-		role := org.Members[aid]
-		out += "|" + aid + ":" + string(role)
-	}
-	return out
 }
