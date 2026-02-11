@@ -49,22 +49,23 @@ type Session struct {
 	conn    *websocket.Conn
 	writeMu sync.Mutex
 
-	agentID     string
-	resumeToken string
+	agentID         string
+	resumeToken     string
 	protocolVersion string
-	welcome     protocol.WelcomeMsg
+	welcome         protocol.WelcomeMsg
 
 	catalogs map[string]catalogEntry
 
-	lastObsTick uint64
-	lastObsID   string
-	lastObsWorldID string
+	lastObsTick      uint64
+	lastObsID        string
+	lastObsWorldID   string
 	lastEventsCursor uint64
-	lastObsRaw  json.RawMessage
+	lastObsRaw       json.RawMessage
 
-	obsNotify chan struct{}
-	ackNotify chan struct{}
-	acksByActID map[string]protocol.AckMsg
+	obsNotify         chan struct{}
+	ackNotify         chan struct{}
+	acksByActID       map[string]protocol.AckMsg
+	eventBatchWaiters map[string]chan protocol.EventBatchMsg
 
 	eventRing []EventResult
 
@@ -96,18 +97,19 @@ func NewSession(cfg SessionConfig, onUpdate onUpdateFn) *Session {
 		cfg.Key = "default"
 	}
 	s := &Session{
-		cfg:         cfg,
-		onUpdate:    onUpdate,
-		stop:        make(chan struct{}),
-		done:        make(chan struct{}),
-		agentID:     cfg.AgentIDHint,
-		resumeToken: cfg.ResumeToken,
-		catalogs:    map[string]catalogEntry{},
-		obsNotify:   make(chan struct{}, 1),
-		ackNotify:   make(chan struct{}, 1),
-		acksByActID: map[string]protocol.AckMsg{},
-		protocolVersion: protocol.Version,
-		lastUsedAt:  time.Now(),
+		cfg:               cfg,
+		onUpdate:          onUpdate,
+		stop:              make(chan struct{}),
+		done:              make(chan struct{}),
+		agentID:           cfg.AgentIDHint,
+		resumeToken:       cfg.ResumeToken,
+		catalogs:          map[string]catalogEntry{},
+		obsNotify:         make(chan struct{}, 1),
+		ackNotify:         make(chan struct{}, 1),
+		acksByActID:       map[string]protocol.AckMsg{},
+		eventBatchWaiters: map[string]chan protocol.EventBatchMsg{},
+		protocolVersion:   protocol.Version,
+		lastUsedAt:        time.Now(),
 	}
 	return s
 }
@@ -179,17 +181,17 @@ func (s *Session) Status() Status {
 	}
 
 	return Status{
-		Connected:      s.connected,
-		AgentID:        s.agentID,
-		ResumeToken:    s.resumeToken,
-		WorldWSURL:     s.cfg.WorldWSURL,
-		ProtocolVersion: s.protocolVersion,
-		LastObsTick:    s.lastObsTick,
-		LastObsID:      s.lastObsID,
+		Connected:        s.connected,
+		AgentID:          s.agentID,
+		ResumeToken:      s.resumeToken,
+		WorldWSURL:       s.cfg.WorldWSURL,
+		ProtocolVersion:  s.protocolVersion,
+		LastObsTick:      s.lastObsTick,
+		LastObsID:        s.lastObsID,
 		LastEventsCursor: s.lastEventsCursor,
-		CurrentWorldID: s.welcome.CurrentWorldID,
-		CatalogDigests: dig,
-		LastError:      s.lastErr,
+		CurrentWorldID:   s.welcome.CurrentWorldID,
+		CatalogDigests:   dig,
+		LastError:        s.lastErr,
 	}
 }
 
@@ -593,10 +595,10 @@ func (s *Session) connectAndReadLoop() error {
 	}
 
 	hello := protocol.HelloMsg{
-		Type:            protocol.TypeHello,
-		ProtocolVersion: "1.1",
+		Type:              protocol.TypeHello,
+		ProtocolVersion:   "1.1",
 		SupportedVersions: []string{"1.1", "1.0"},
-		AgentName:       s.cfg.Key,
+		AgentName:         s.cfg.Key,
 		Capabilities: protocol.HelloCapabilities{
 			DeltaVoxels: true,
 			MaxQueue:    64,
@@ -709,6 +711,25 @@ func (s *Session) connectAndReadLoop() error {
 			default:
 			}
 
+		case protocol.TypeEventBatch:
+			var batch protocol.EventBatchMsg
+			if err := json.Unmarshal(msg, &batch); err != nil {
+				continue
+			}
+			if batch.ReqID == "" {
+				continue
+			}
+			s.mu.Lock()
+			ch := s.eventBatchWaiters[batch.ReqID]
+			delete(s.eventBatchWaiters, batch.ReqID)
+			s.mu.Unlock()
+			if ch != nil {
+				select {
+				case ch <- batch:
+				default:
+				}
+			}
+
 		case protocol.TypeObs:
 			var o protocol.ObsMsg
 			if err := json.Unmarshal(msg, &o); err != nil {
@@ -765,12 +786,16 @@ func (s *Session) catalogsList() []string {
 
 func (s *Session) GetEvents(ctx context.Context, sinceCursor uint64, limit int) (GetEventsResult, error) {
 	s.touch()
-	_ = ctx
 	if limit <= 0 {
 		limit = 100
 	}
 	if limit > 1000 {
 		limit = 1000
+	}
+	if s.latestProtocolVersion() == "1.1" {
+		if res, ok := s.getEventsRemote(ctx, sinceCursor, limit); ok {
+			return res, nil
+		}
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -789,4 +814,57 @@ func (s *Session) GetEvents(ctx context.Context, sinceCursor uint64, limit int) 
 		next = out[len(out)-1].Cursor
 	}
 	return GetEventsResult{Events: out, NextCursor: next}, nil
+}
+
+func (s *Session) getEventsRemote(ctx context.Context, sinceCursor uint64, limit int) (GetEventsResult, bool) {
+	reqID := fmt.Sprintf("ev_%d_%d", time.Now().UnixMilli(), sinceCursor)
+	req := protocol.EventBatchReqMsg{
+		Type:            protocol.TypeEventBatchReq,
+		ProtocolVersion: "1.1",
+		ReqID:           reqID,
+		SinceCursor:     sinceCursor,
+		Limit:           limit,
+	}
+	ch := make(chan protocol.EventBatchMsg, 1)
+	s.mu.Lock()
+	s.eventBatchWaiters[reqID] = ch
+	conn := s.conn
+	s.mu.Unlock()
+
+	cleanup := func() {
+		s.mu.Lock()
+		delete(s.eventBatchWaiters, reqID)
+		s.mu.Unlock()
+	}
+	if conn == nil {
+		cleanup()
+		return GetEventsResult{}, false
+	}
+
+	s.writeMu.Lock()
+	_ = conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
+	err := conn.WriteJSON(req)
+	s.writeMu.Unlock()
+	if err != nil {
+		cleanup()
+		return GetEventsResult{}, false
+	}
+
+	timeout := time.NewTimer(2 * time.Second)
+	defer timeout.Stop()
+	select {
+	case <-ctx.Done():
+		cleanup()
+		return GetEventsResult{}, false
+	case <-timeout.C:
+		cleanup()
+		return GetEventsResult{}, false
+	case batch := <-ch:
+		out := make([]EventResult, 0, len(batch.Events))
+		for _, e := range batch.Events {
+			b, _ := json.Marshal(e.Event)
+			out = append(out, EventResult{Cursor: e.Cursor, Event: b})
+		}
+		return GetEventsResult{Events: out, NextCursor: batch.NextCursor}, true
+	}
 }

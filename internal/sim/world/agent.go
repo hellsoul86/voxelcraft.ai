@@ -42,6 +42,8 @@ type Agent struct {
 	Events []protocol.Event
 	// Monotonic count of events delivered to this agent via OBS.
 	EventCursor uint64
+	// Retained event history for reliable cursor-based fetch.
+	EventLog []eventLogEntry
 
 	// Rate limiting windows (per action type).
 	rl map[string]*rateWindow
@@ -137,12 +139,39 @@ func (a *Agent) InventoryList() []protocol.ItemStack {
 
 func (a *Agent) AddEvent(e protocol.Event) {
 	a.Events = append(a.Events, e)
+	a.EventCursor++
+	a.EventLog = append(a.EventLog, eventLogEntry{Cursor: a.EventCursor, Event: e})
+	if len(a.EventLog) > 4096 {
+		a.EventLog = append([]eventLogEntry(nil), a.EventLog[len(a.EventLog)-4096:]...)
+	}
 }
 
 func (a *Agent) TakeEvents() []protocol.Event {
 	ev := a.Events
 	a.Events = nil
 	return ev
+}
+
+func (a *Agent) EventsAfter(cursor uint64, limit int) ([]eventLogEntry, uint64) {
+	if limit <= 0 {
+		limit = 100
+	}
+	if limit > 1000 {
+		limit = 1000
+	}
+	out := make([]eventLogEntry, 0, limit)
+	next := cursor
+	for _, e := range a.EventLog {
+		if e.Cursor <= cursor {
+			continue
+		}
+		out = append(out, e)
+		next = e.Cursor
+		if len(out) >= limit {
+			break
+		}
+	}
+	return out, next
 }
 
 func (a *Agent) RateLimitAllow(kind string, nowTick uint64, window uint64, max int) (ok bool, cooldownTicks uint64) {
@@ -210,6 +239,11 @@ func (a *Agent) MemoryLoad(prefix string, limit int, nowTick uint64) []protocol.
 type memoryEntry struct {
 	Value      string
 	ExpiryTick uint64
+}
+
+type eventLogEntry struct {
+	Cursor uint64
+	Event  protocol.Event
 }
 
 func min(a, b int) int {

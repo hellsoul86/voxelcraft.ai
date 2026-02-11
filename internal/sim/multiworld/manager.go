@@ -416,7 +416,7 @@ func (m *Manager) RouteAct(ctx context.Context, s *Session, act protocol.ActMsg)
 		return "", errors.New("nil session")
 	}
 	if act.ExpectedWorldID != "" && act.ExpectedWorldID != s.CurrentWorld {
-		return s.CurrentWorld, m.injectActionResult(ctx, s.CurrentWorld, s.AgentID, actionResult(0, "ACT", false, "E_WORLD_BUSY", "expected_world_id mismatch"))
+		return s.CurrentWorld, m.injectActionResult(ctx, s.CurrentWorld, s.AgentID, actionResult(0, "ACT", false, protocol.ErrWorldBusy, "expected_world_id mismatch"))
 	}
 
 	switchRef := ""
@@ -445,7 +445,7 @@ func (m *Manager) RouteAct(ctx context.Context, s *Session, act protocol.ActMsg)
 		return s.CurrentWorld, fmt.Errorf("world not found: %s", s.CurrentWorld)
 	}
 	if err := m.sendActionEnvelope(ctx, rt, world.ActionEnvelope{AgentID: s.AgentID, Act: act}); err != nil {
-		return s.CurrentWorld, m.injectActionResult(context.Background(), s.CurrentWorld, s.AgentID, actionResult(0, "ACT", false, "E_WORLD_BUSY", "world inbox busy"))
+		return s.CurrentWorld, m.injectActionResult(context.Background(), s.CurrentWorld, s.AgentID, actionResult(0, "ACT", false, protocol.ErrWorldBusy, "world inbox busy"))
 	}
 	if hasOrgMutation(filteredInstants) {
 		m.scheduleOrgRefresh()
@@ -456,7 +456,7 @@ func (m *Manager) RouteAct(ctx context.Context, s *Session, act protocol.ActMsg)
 func (m *Manager) switchWorld(ctx context.Context, s *Session, target, entryPointID, ref string) error {
 	if stringsTrim(target) == "" {
 		m.recordSwitch(s.CurrentWorld, target, "invalid_target")
-		return m.injectActionResult(ctx, s.CurrentWorld, s.AgentID, actionResult(0, ref, false, "E_WORLD_NOT_FOUND", "missing target world"))
+		return m.injectActionResult(ctx, s.CurrentWorld, s.AgentID, actionResult(0, ref, false, protocol.ErrWorldNotFound, "missing target world"))
 	}
 	srcID := s.CurrentWorld
 	if srcID == target {
@@ -467,7 +467,7 @@ func (m *Manager) switchWorld(ctx context.Context, s *Session, target, entryPoin
 	dst := m.runtime(target)
 	if src == nil || dst == nil {
 		m.recordSwitch(srcID, target, "world_not_found")
-		return m.injectActionResult(ctx, s.CurrentWorld, s.AgentID, actionResult(0, ref, false, "E_WORLD_NOT_FOUND", "target world not found"))
+		return m.injectActionResult(ctx, s.CurrentWorld, s.AgentID, actionResult(0, ref, false, protocol.ErrWorldNotFound, "target world not found"))
 	}
 
 	timeoutCtx, cancel := m.requestCtx(ctx)
@@ -476,26 +476,26 @@ func (m *Manager) switchWorld(ctx context.Context, s *Session, target, entryPoin
 	pos, err := src.World.RequestAgentPos(timeoutCtx, s.AgentID)
 	if err != nil {
 		m.recordSwitch(srcID, target, "source_busy")
-		return m.injectActionResult(ctx, s.CurrentWorld, s.AgentID, actionResult(0, ref, false, "E_WORLD_BUSY", err.Error()))
+		return m.injectActionResult(ctx, s.CurrentWorld, s.AgentID, actionResult(0, ref, false, protocol.ErrWorldBusy, err.Error()))
 	}
 	route, srcEntry, dstEntry, ok := m.selectRoute(srcID, target, entryPointID, pos)
 	if !ok {
 		m.recordSwitch(srcID, target, "denied")
-		return m.injectActionResult(ctx, s.CurrentWorld, s.AgentID, actionResult(0, ref, false, "E_WORLD_DENIED", "entry point required"))
+		return m.injectActionResult(ctx, s.CurrentWorld, s.AgentID, actionResult(0, ref, false, protocol.ErrWorldDenied, "entry point required"))
 	}
 	if route.RequiresPermit || dst.Spec.RequiresPermit {
 		m.recordSwitch(srcID, target, "denied")
-		return m.injectActionResult(ctx, s.CurrentWorld, s.AgentID, actionResult(0, ref, false, "E_WORLD_DENIED", "permit required"))
+		return m.injectActionResult(ctx, s.CurrentWorld, s.AgentID, actionResult(0, ref, false, protocol.ErrWorldDenied, "permit required"))
 	}
 	if !withinEntry(pos, srcEntry) {
 		m.recordSwitch(srcID, target, "denied")
-		return m.injectActionResult(ctx, s.CurrentWorld, s.AgentID, actionResult(0, ref, false, "E_WORLD_DENIED", "entry point required"))
+		return m.injectActionResult(ctx, s.CurrentWorld, s.AgentID, actionResult(0, ref, false, protocol.ErrWorldDenied, "entry point required"))
 	}
 
 	transfer, err := src.World.RequestTransferOut(timeoutCtx, s.AgentID)
 	if err != nil {
 		m.recordSwitch(srcID, target, "source_busy")
-		return m.injectActionResult(ctx, s.CurrentWorld, s.AgentID, actionResult(0, ref, false, "E_WORLD_BUSY", err.Error()))
+		return m.injectActionResult(ctx, s.CurrentWorld, s.AgentID, actionResult(0, ref, false, protocol.ErrWorldBusy, err.Error()))
 	}
 
 	nowDst := dst.World.CurrentTick()
@@ -503,7 +503,7 @@ func (m *Manager) switchWorld(ctx context.Context, s *Session, target, entryPoin
 		// Roll back to source world on cooldown rejection.
 		_ = src.World.RequestTransferIn(timeoutCtx, transfer, s.Out, s.DeltaVoxels)
 		m.recordSwitch(srcID, target, "cooldown")
-		return m.injectActionResult(ctx, s.CurrentWorld, s.AgentID, actionResult(0, ref, false, "E_WORLD_COOLDOWN", "switch cooldown active"))
+		return m.injectActionResult(ctx, s.CurrentWorld, s.AgentID, actionResult(0, ref, false, protocol.ErrWorldCooldown, "switch cooldown active"))
 	}
 
 	m.mergeOrgMetaFromTransfer(transfer.Org)
@@ -520,7 +520,7 @@ func (m *Manager) switchWorld(ctx context.Context, s *Session, target, entryPoin
 		// Attempt rollback to source to avoid orphaning the agent.
 		_ = src.World.RequestTransferIn(timeoutCtx, transfer, s.Out, s.DeltaVoxels)
 		m.recordSwitch(srcID, target, "target_busy")
-		return m.injectActionResult(ctx, srcID, s.AgentID, actionResult(0, ref, false, "E_WORLD_BUSY", "switch failed: "+err.Error()))
+		return m.injectActionResult(ctx, srcID, s.AgentID, actionResult(0, ref, false, protocol.ErrWorldBusy, "switch failed: "+err.Error()))
 	}
 
 	s.CurrentWorld = target
@@ -1158,6 +1158,12 @@ func (m *Manager) writeState(st persistedState) {
 }
 
 func actionResult(t uint64, ref string, ok bool, code, message string) protocol.Event {
+	if !protocol.IsKnownCode(code) {
+		code = protocol.ErrInternal
+		if message == "" {
+			message = "unknown error code"
+		}
+	}
 	ev := protocol.Event{
 		"t":    t,
 		"type": "ACTION_RESULT",

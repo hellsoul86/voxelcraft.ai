@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": ["type", "protocol_version", "req_id", "since_cursor", "limit"],
+  "properties": {
+    "type": {"const": "EVENT_BATCH_REQ"},
+    "protocol_version": {"const": "1.1"},
+    "req_id": {"type": "string", "minLength": 1},
+    "since_cursor": {"type": "integer", "minimum": 0},
+    "limit": {"type": "integer", "minimum": 1, "maximum": 1000}
+  },
+  "additionalProperties": false
+}
+

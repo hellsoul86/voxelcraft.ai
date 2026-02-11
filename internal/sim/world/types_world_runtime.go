@@ -43,6 +43,8 @@ type World struct {
 	admin         chan adminSnapshotReq
 	adminReset    chan adminResetReq
 	agentPosReq   chan agentPosReq
+	eventsReq     chan eventsReq
+	actDedupeReq  chan actDedupeReq
 	orgMetaReq    chan orgMetaReq
 	orgMetaUpsert chan orgMetaUpsertReq
 	leave         chan string
@@ -96,6 +98,8 @@ type World struct {
 
 	resourceDensity     map[string]float64
 	nextDensitySampleAt uint64
+
+	actDedupe map[actDedupeKey]actDedupeEntry
 }
 
 type clientState struct {

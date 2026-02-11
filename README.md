@@ -128,7 +128,11 @@ Rollback limitations (v0.9):
 
 ## Protocol
 - WebSocket endpoint: `/v1/ws`
-- Protocol version: `0.9`
+- Current protocol version: `1.1` (server remains compatible with `1.0` during transition)
+
+Compatibility notes:
+- `1.1` adds `ACK`, `act_id` idempotency semantics, and cursor-based event pull (`EVENT_BATCH_REQ` / `EVENT_BATCH`).
+- `1.0` clients can continue using HELLO/WELCOME/OBS/ACT without ACK enforcement.
 
 See:
 - `docs/spec/agent_protocol_v0.9.md`

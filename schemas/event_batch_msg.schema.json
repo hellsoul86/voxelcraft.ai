@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": ["type", "protocol_version", "req_id", "events", "next_cursor"],
+  "properties": {
+    "type": {"const": "EVENT_BATCH"},
+    "protocol_version": {"const": "1.1"},
+    "req_id": {"type": "string", "minLength": 1},
+    "events": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["cursor", "event"],
+        "properties": {
+          "cursor": {"type": "integer", "minimum": 0},
+          "event": {"type": "object"}
+        },
+        "additionalProperties": true
+      }
+    },
+    "next_cursor": {"type": "integer", "minimum": 0},
+    "world_id": {"type": "string"}
+  },
+  "additionalProperties": false
+}
+

@@ -78,7 +78,7 @@ Notes:
 
 ---
 
-## Tools (5)
+## Tools (7)
 
 ### 1) voxelcraft.get_status
 
@@ -110,9 +110,27 @@ Args:
 Result:
 - `tick`
 - `agent_id`
+- `obs_id`
+- `events_cursor`
 - `obs` (an `OBS` object; shape depends on `mode`)
 
-### 3) voxelcraft.get_catalog
+### 3) voxelcraft.get_events
+
+Args:
+
+```json
+{"since_cursor":0,"limit":100}
+```
+
+Result:
+- `events`: `[{cursor,event}, ...]`
+- `next_cursor`
+
+Notes:
+- On protocol `1.1`, sidecar uses server-side `EVENT_BATCH_REQ/EVENT_BATCH` for reliable pull.
+- On `1.0`, sidecar falls back to local in-memory ring buffer compatibility mode.
+
+### 4) voxelcraft.get_catalog
 
 Args:
 
@@ -134,7 +152,7 @@ Result:
 - `digest`
 - `data`
 
-### 4) voxelcraft.act
+### 5) voxelcraft.act
 
 Args:
 
@@ -148,15 +166,27 @@ Args:
 
 Notes:
 - You may omit `id` for instants/tasks; the sidecar will generate one.
-- The sidecar auto-fills: `protocol_version`, `agent_id`, and `tick` from the most recent `OBS`,
-  so it stays within the server staleness window.
+- The sidecar auto-fills: `protocol_version`, `agent_id`, `tick`, and for 1.1 also
+  `act_id`/`based_on_obs_id`/`idempotency_key`/`expected_world_id` when missing.
 
 Result:
 - `sent` (bool)
 - `tick_used`
 - `agent_id`
+- `ack` (when protocol 1.1)
 
-### 5) voxelcraft.disconnect
+### 6) voxelcraft.list_worlds
+
+Args:
+
+```json
+{}
+```
+
+Result:
+- `worlds`: list of world descriptors (`world_id`, `world_type`, entry/cooldown/reset fields)
+
+### 7) voxelcraft.disconnect
 
 Args:
 
@@ -181,7 +211,11 @@ Each run:
 2. Decide
 3. `call_tool voxelcraft.act`
 
+For reliable event consumption:
+1. persist a local `events_cursor`
+2. call `voxelcraft.get_events` with `since_cursor`
+3. advance to returned `next_cursor`
+
 If you only run every 60 seconds, your agent will be biased toward:
 - governance / trade / construction
 and will react slowly to hazards and task completions.
-

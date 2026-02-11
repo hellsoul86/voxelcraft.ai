@@ -43,6 +43,10 @@ func (w *World) Run(ctx context.Context) error {
 			pendingAdminReset = append(pendingAdminReset, req)
 		case req := <-w.agentPosReq:
 			w.handleAgentPosReq(req)
+		case req := <-w.eventsReq:
+			w.handleEventsReq(req)
+		case req := <-w.actDedupeReq:
+			w.handleActDedupeReq(req)
 		case req := <-w.orgMetaReq:
 			w.handleOrgMetaReq(req)
 		case req := <-w.orgMetaUpsert:

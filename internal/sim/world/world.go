@@ -89,6 +89,8 @@ func New(cfg WorldConfig, cats *catalogs.Catalogs) (*World, error) {
 		admin:         make(chan adminSnapshotReq, 16),
 		adminReset:    make(chan adminResetReq, 16),
 		agentPosReq:   make(chan agentPosReq, 64),
+		eventsReq:     make(chan eventsReq, 128),
+		actDedupeReq:  make(chan actDedupeReq, 256),
 		orgMetaReq:    make(chan orgMetaReq, 64),
 		orgMetaUpsert: make(chan orgMetaUpsertReq, 64),
 		leave:         make(chan string, 64),
@@ -103,6 +105,7 @@ func New(cfg WorldConfig, cats *catalogs.Catalogs) (*World, error) {
 		stats:         NewWorldStats(300, 72000),
 		structures:    map[string]*Structure{},
 		observers:     map[string]*observerClient{},
+		actDedupe:     map[actDedupeKey]actDedupeEntry{},
 		resourceDensity: map[string]float64{
 			"COAL_ORE":    0,
 			"IRON_ORE":    0,

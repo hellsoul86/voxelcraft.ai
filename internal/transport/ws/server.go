@@ -1,8 +1,8 @@
 package ws
 
 import (
-	"crypto/rand"
 	"context"
+	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -55,10 +55,10 @@ func NewManagedServer(m *multiworld.Manager, logger *log.Logger) *Server {
 }
 
 type connSession struct {
-	AgentID string
-	WorldID string
-	Out     chan []byte
-	Delta   bool
+	AgentID         string
+	WorldID         string
+	Out             chan []byte
+	Delta           bool
 	ProtocolVersion string
 	SessionID       string
 	mu              sync.Mutex
@@ -113,6 +113,17 @@ func (s *Server) Handler() http.HandlerFunc {
 			if err != nil {
 				continue
 			}
+			if base.Type == protocol.TypeEventBatchReq {
+				if sess.ProtocolVersion != "1.1" {
+					continue
+				}
+				var req protocol.EventBatchReqMsg
+				if err := json.Unmarshal(msg, &req); err != nil {
+					continue
+				}
+				s.handleEventBatchReq(ctx, &sess, req)
+				continue
+			}
 			if base.Type != protocol.TypeAct {
 				continue
 			}
@@ -124,7 +135,7 @@ func (s *Server) Handler() http.HandlerFunc {
 						ProtocolVersion: sess.ProtocolVersion,
 						AckFor:          act.ActID,
 						Accepted:        false,
-						Code:            "E_PROTO_BAD_REQUEST",
+						Code:            protocol.ErrProtoBadRequest,
 						Message:         "bad ACT payload",
 						ServerTick:      s.currentTick(sess.WorldID),
 						WorldID:         sess.WorldID,
@@ -139,7 +150,7 @@ func (s *Server) Handler() http.HandlerFunc {
 						ProtocolVersion: sess.ProtocolVersion,
 						AckFor:          act.ActID,
 						Accepted:        false,
-						Code:            "E_PROTO_BAD_REQUEST",
+						Code:            protocol.ErrProtoBadRequest,
 						Message:         "unsupported protocol_version",
 						ServerTick:      s.currentTick(sess.WorldID),
 						WorldID:         sess.WorldID,
@@ -154,7 +165,7 @@ func (s *Server) Handler() http.HandlerFunc {
 						ProtocolVersion: sess.ProtocolVersion,
 						AckFor:          "",
 						Accepted:        false,
-						Code:            "E_PROTO_BAD_REQUEST",
+						Code:            protocol.ErrProtoBadRequest,
 						Message:         "missing act_id",
 						ServerTick:      s.currentTick(sess.WorldID),
 						WorldID:         sess.WorldID,
@@ -167,7 +178,7 @@ func (s *Server) Handler() http.HandlerFunc {
 						ProtocolVersion: sess.ProtocolVersion,
 						AckFor:          act.ActID,
 						Accepted:        false,
-						Code:            "E_PROTO_BAD_REQUEST",
+						Code:            protocol.ErrProtoBadRequest,
 						Message:         "missing based_on_obs_id",
 						ServerTick:      s.currentTick(sess.WorldID),
 						WorldID:         sess.WorldID,
@@ -180,7 +191,7 @@ func (s *Server) Handler() http.HandlerFunc {
 						ProtocolVersion: sess.ProtocolVersion,
 						AckFor:          act.ActID,
 						Accepted:        false,
-						Code:            "E_PROTO_BAD_REQUEST",
+						Code:            protocol.ErrProtoBadRequest,
 						Message:         "expected_world_id required for mutating ACT",
 						ServerTick:      s.currentTick(sess.WorldID),
 						WorldID:         sess.WorldID,
@@ -191,6 +202,10 @@ func (s *Server) Handler() http.HandlerFunc {
 					sendAckToOut(sess.Out, cached)
 					continue
 				}
+				dedupeWorldID := strings.TrimSpace(act.ExpectedWorldID)
+				if dedupeWorldID == "" {
+					dedupeWorldID = sess.WorldID
+				}
 				ack := protocol.AckMsg{
 					Type:            protocol.TypeAck,
 					ProtocolVersion: sess.ProtocolVersion,
@@ -198,6 +213,14 @@ func (s *Server) Handler() http.HandlerFunc {
 					Accepted:        true,
 					ServerTick:      s.currentTick(sess.WorldID),
 					WorldID:         sess.WorldID,
+				}
+				if remembered, duplicate, err := s.checkOrRememberWorldActAck(ctx, dedupeWorldID, sess.AgentID, act.ActID, ack); err == nil {
+					if duplicate {
+						sess.rememberAck(act.ActID, remembered)
+						sendAckToOut(sess.Out, remembered)
+						continue
+					}
+					ack = remembered
 				}
 				sess.rememberAck(act.ActID, ack)
 				sendAckToOut(sess.Out, ack)
@@ -286,14 +309,14 @@ func (s *Server) handshake(conn *websocket.Conn) (connSession, bool) {
 		}
 		if resp.Welcome.AgentID == "" {
 			ss, rr, err := s.manager.Join(hello.AgentName, hello.Capabilities.DeltaVoxels, out, hello.WorldPreference)
-		if err != nil {
-			_ = conn.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseInternalServerErr, "join failed"), time.Now().Add(time.Second))
-			return connSession{}, false
+			if err != nil {
+				_ = conn.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseInternalServerErr, "join failed"), time.Now().Add(time.Second))
+				return connSession{}, false
+			}
+			sess = ss
+			resp = rr
 		}
-		sess = ss
-		resp = rr
-	}
-	applyWelcomeVersion(&resp.Welcome, selectedVersion)
+		applyWelcomeVersion(&resp.Welcome, selectedVersion)
 		if err := writeJSON(conn, resp.Welcome); err != nil {
 			return connSession{}, false
 		}
@@ -304,10 +327,10 @@ func (s *Server) handshake(conn *websocket.Conn) (connSession, bool) {
 			}
 		}
 		return connSession{
-			AgentID: sess.AgentID,
-			WorldID: sess.CurrentWorld,
-			Out:     out,
-			Delta:   hello.Capabilities.DeltaVoxels,
+			AgentID:         sess.AgentID,
+			WorldID:         sess.CurrentWorld,
+			Out:             out,
+			Delta:           hello.Capabilities.DeltaVoxels,
 			ProtocolVersion: selectedVersion,
 			SessionID:       resp.Welcome.SessionID,
 			acksByActID:     map[string]protocol.AckMsg{},
@@ -350,10 +373,10 @@ func (s *Server) handshake(conn *websocket.Conn) (connSession, bool) {
 	}
 
 	return connSession{
-		AgentID: resp.Welcome.AgentID,
-		WorldID: resp.Welcome.CurrentWorldID,
-		Out:     out,
-		Delta:   hello.Capabilities.DeltaVoxels,
+		AgentID:         resp.Welcome.AgentID,
+		WorldID:         resp.Welcome.CurrentWorldID,
+		Out:             out,
+		Delta:           hello.Capabilities.DeltaVoxels,
 		ProtocolVersion: selectedVersion,
 		SessionID:       resp.Welcome.SessionID,
 		acksByActID:     map[string]protocol.AckMsg{},
@@ -378,6 +401,12 @@ func isMutatingAct(act protocol.ActMsg) bool {
 }
 
 func sendAckToOut(out chan []byte, ack protocol.AckMsg) {
+	if !protocol.IsKnownCode(ack.Code) {
+		ack.Code = protocol.ErrInternal
+		if ack.Message == "" {
+			ack.Message = "unknown error code"
+		}
+	}
 	b, err := json.Marshal(ack)
 	if err != nil {
 		return
@@ -387,6 +416,85 @@ func sendAckToOut(out chan []byte, ack protocol.AckMsg) {
 	case out <- b:
 	case <-time.After(200 * time.Millisecond):
 	}
+}
+
+func (s *Server) checkOrRememberWorldActAck(ctx context.Context, worldID, agentID, actID string, proposed protocol.AckMsg) (protocol.AckMsg, bool, error) {
+	if strings.TrimSpace(worldID) == "" || strings.TrimSpace(agentID) == "" || strings.TrimSpace(actID) == "" {
+		return proposed, false, nil
+	}
+	reqCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	if s.manager != nil {
+		rt := s.manager.Runtime(worldID)
+		if rt == nil || rt.World == nil {
+			return proposed, false, fmt.Errorf("world runtime not found")
+		}
+		return rt.World.RequestCheckOrRememberActAck(reqCtx, agentID, worldID, actID, proposed)
+	}
+	if s.world == nil {
+		return proposed, false, fmt.Errorf("world not available")
+	}
+	return s.world.RequestCheckOrRememberActAck(reqCtx, agentID, worldID, actID, proposed)
+}
+
+func (s *Server) handleEventBatchReq(ctx context.Context, sess *connSession, req protocol.EventBatchReqMsg) {
+	if sess == nil {
+		return
+	}
+	if req.ReqID == "" {
+		return
+	}
+	limit := req.Limit
+	if limit <= 0 {
+		limit = 100
+	}
+	if limit > 1000 {
+		limit = 1000
+	}
+
+	res := protocol.EventBatchMsg{
+		Type:            protocol.TypeEventBatch,
+		ProtocolVersion: sess.ProtocolVersion,
+		ReqID:           req.ReqID,
+		Events:          []protocol.EventBatchItem{},
+		NextCursor:      req.SinceCursor,
+		WorldID:         sess.WorldID,
+	}
+
+	reqCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	var (
+		items []world.EventCursorItem
+		next  uint64
+		err   error
+	)
+	if s.manager != nil {
+		rt := s.manager.Runtime(sess.WorldID)
+		if rt == nil || rt.World == nil {
+			err = fmt.Errorf("world runtime not found")
+		} else {
+			items, next, err = rt.World.RequestEventsAfter(reqCtx, sess.AgentID, req.SinceCursor, limit)
+		}
+	} else if s.world != nil {
+		items, next, err = s.world.RequestEventsAfter(reqCtx, sess.AgentID, req.SinceCursor, limit)
+	} else {
+		err = fmt.Errorf("world not available")
+	}
+	if err == nil {
+		res.Events = make([]protocol.EventBatchItem, 0, len(items))
+		for _, it := range items {
+			res.Events = append(res.Events, protocol.EventBatchItem{
+				Cursor: it.Cursor,
+				Event:  it.Event,
+			})
+		}
+		res.NextCursor = next
+	}
+	b, mErr := json.Marshal(res)
+	if mErr != nil {
+		return
+	}
+	sendLatestBytes(sess.Out, b)
 }
 
 func applyWelcomeVersion(w *protocol.WelcomeMsg, selectedVersion string) {

@@ -208,9 +208,6 @@ func (w *World) buildObsEntities(a *Agent, sensorsNear []Vec3i) []protocol.Entit
 
 func (w *World) attachObsEventsAndMeta(a *Agent, obs *protocol.ObsMsg, nowTick uint64) {
 	ev := a.TakeEvents()
-	if len(ev) > 0 {
-		a.EventCursor += uint64(len(ev))
-	}
 	obs.Events = ev
 	obs.EventsCursor = a.EventCursor
 	obs.ObsID = fmt.Sprintf("%s:%d:%d", a.ID, nowTick, a.EventCursor)

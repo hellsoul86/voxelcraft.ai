@@ -17,12 +17,14 @@ func IsSupportedVersion(v string) bool {
 
 // Message types.
 const (
-	TypeHello   = "HELLO"
-	TypeWelcome = "WELCOME"
-	TypeCatalog = "CATALOG"
-	TypeObs     = "OBS"
-	TypeAct     = "ACT"
-	TypeAck     = "ACK"
+	TypeHello         = "HELLO"
+	TypeWelcome       = "WELCOME"
+	TypeCatalog       = "CATALOG"
+	TypeObs           = "OBS"
+	TypeAct           = "ACT"
+	TypeAck           = "ACK"
+	TypeEventBatchReq = "EVENT_BATCH_REQ"
+	TypeEventBatch    = "EVENT_BATCH"
 )
 
 var preferredVersions = []string{"1.1", "1.0", "0.9"}

@@ -139,6 +139,11 @@ func TestMCP_Sidecar_EndToEnd_WS(t *testing.T) {
 	if agentID == "" {
 		t.Fatalf("expected agent_id")
 	}
+	obsID, _ := obsRes["obs_id"].(string)
+	worldID, _ := obsRes["world_id"].(string)
+	if worldID == "" {
+		worldID = "test_world"
+	}
 
 	// Send an ACT (SAY).
 	actResp := callTool(t, 2, "voxelcraft.act", map[string]any{
@@ -183,6 +188,128 @@ func TestMCP_Sidecar_EndToEnd_WS(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("expected ACTION_RESULT for ref=I1 in events; agent_id=%s", agentID)
+	}
+
+	// 1.1 idempotency: same act_id must not execute twice.
+	actID := "ACT_DEDUP"
+	idemInstRef := "I_DEDUP"
+	actA := callTool(t, 4, "voxelcraft.act", map[string]any{
+		"act_id":            actID,
+		"based_on_obs_id":   obsID,
+		"idempotency_key":   actID,
+		"expected_world_id": worldID,
+		"instants": []map[string]any{
+			{"id": idemInstRef, "type": "SAY", "channel": "LOCAL", "text": "once"},
+		},
+	})
+	if actA.Error != nil {
+		t.Fatalf("actA error: %+v", actA.Error)
+	}
+	actB := callTool(t, 5, "voxelcraft.act", map[string]any{
+		"act_id":            actID,
+		"based_on_obs_id":   obsID,
+		"idempotency_key":   actID,
+		"expected_world_id": worldID,
+		"instants": []map[string]any{
+			{"id": idemInstRef, "type": "SAY", "channel": "LOCAL", "text": "once"},
+		},
+	})
+	if actB.Error != nil {
+		t.Fatalf("actB error: %+v", actB.Error)
+	}
+
+	// Give world a couple ticks to flush action events.
+	_ = callTool(t, 6, "voxelcraft.get_obs", map[string]any{
+		"mode":          "summary",
+		"wait_new_tick": true,
+		"timeout_ms":    2000,
+	})
+	_ = callTool(t, 7, "voxelcraft.get_obs", map[string]any{
+		"mode":          "summary",
+		"wait_new_tick": true,
+		"timeout_ms":    2000,
+	})
+
+	// Cursor-based event batch should contain only one ACTION_RESULT for I_DEDUP.
+	evResp := callTool(t, 8, "voxelcraft.get_events", map[string]any{
+		"since_cursor": 0,
+		"limit":        500,
+	})
+	if evResp.Error != nil {
+		t.Fatalf("get_events error: %+v", evResp.Error)
+	}
+	evObj, ok := evResp.Result.(map[string]any)
+	if !ok {
+		t.Fatalf("unexpected get_events result: %T", evResp.Result)
+	}
+	eventsRaw, _ := evObj["events"].([]any)
+	countDedup := 0
+	for _, row := range eventsRaw {
+		m, _ := row.(map[string]any)
+		ev, _ := m["event"].(map[string]any)
+		if ev == nil {
+			continue
+		}
+		if ev["type"] == "ACTION_RESULT" && ev["ref"] == idemInstRef {
+			countDedup++
+		}
+	}
+	if countDedup != 1 {
+		t.Fatalf("expected exactly one ACTION_RESULT for %s, got %d", idemInstRef, countDedup)
+	}
+
+	// Cross-reconnect idempotency: disconnect sidecar WS, reconnect, replay same act_id.
+	discResp := callTool(t, 9, "voxelcraft.disconnect", map[string]any{})
+	if discResp.Error != nil {
+		t.Fatalf("disconnect error: %+v", discResp.Error)
+	}
+	_ = callTool(t, 10, "voxelcraft.get_obs", map[string]any{
+		"mode":          "summary",
+		"wait_new_tick": true,
+		"timeout_ms":    2000,
+	})
+	actC := callTool(t, 11, "voxelcraft.act", map[string]any{
+		"act_id":            actID,
+		"based_on_obs_id":   obsID,
+		"idempotency_key":   actID,
+		"expected_world_id": worldID,
+		"instants": []map[string]any{
+			{"id": idemInstRef, "type": "SAY", "channel": "LOCAL", "text": "once"},
+		},
+	})
+	if actC.Error != nil {
+		t.Fatalf("actC error: %+v", actC.Error)
+	}
+	_ = callTool(t, 12, "voxelcraft.get_obs", map[string]any{
+		"mode":          "summary",
+		"wait_new_tick": true,
+		"timeout_ms":    2000,
+	})
+	evResp2 := callTool(t, 13, "voxelcraft.get_events", map[string]any{
+		"since_cursor": 0,
+		"limit":        500,
+	})
+	if evResp2.Error != nil {
+		t.Fatalf("get_events2 error: %+v", evResp2.Error)
+	}
+	evObj2, ok := evResp2.Result.(map[string]any)
+	if !ok {
+		t.Fatalf("unexpected get_events2 result: %T", evResp2.Result)
+	}
+	eventsRaw2, _ := evObj2["events"].([]any)
+	countDedup2 := 0
+	for _, row := range eventsRaw2 {
+		m, _ := row.(map[string]any)
+		ev, _ := m["event"].(map[string]any)
+		if ev == nil {
+			continue
+		}
+		if ev["type"] == "ACTION_RESULT" && ev["ref"] == idemInstRef {
+			countDedup2++
+		}
+	}
+	if countDedup2 != 1 {
+		t.Fatalf("expected one ACTION_RESULT for %s after reconnect replay, got %d", idemInstRef, countDedup2)
 	}
 
 	// Cleanup.

@@ -36,6 +36,8 @@ func TestSchemas_ValidateSamples(t *testing.T) {
 	act11Schema := compile("act_v1_1.schema.json")
 	ackSchema := compile("ack.schema.json")
 	eventBatchSchema := compile("event_batch.schema.json")
+	eventBatchReqSchema := compile("event_batch_req.schema.json")
+	eventBatchMsgSchema := compile("event_batch_msg.schema.json")
 
 	var hello any
 	_ = json.Unmarshal([]byte(`{
@@ -176,4 +178,25 @@ func TestSchemas_ValidateSamples(t *testing.T) {
 	var eventBatch any
 	_ = json.Unmarshal([]byte(`{"events":[{"cursor":1,"event":{"type":"ACTION_RESULT","ok":true}}],"next_cursor":1}`), &eventBatch)
 	validate(eventBatchSchema, eventBatch)
+
+	var eventBatchReq any
+	_ = json.Unmarshal([]byte(`{
+	  "type":"EVENT_BATCH_REQ",
+	  "protocol_version":"1.1",
+	  "req_id":"req_1",
+	  "since_cursor":0,
+	  "limit":100
+	}`), &eventBatchReq)
+	validate(eventBatchReqSchema, eventBatchReq)
+
+	var eventBatchMsg any
+	_ = json.Unmarshal([]byte(`{
+	  "type":"EVENT_BATCH",
+	  "protocol_version":"1.1",
+	  "req_id":"req_1",
+	  "events":[{"cursor":1,"event":{"type":"ACTION_RESULT","ok":true}}],
+	  "next_cursor":1,
+	  "world_id":"OVERWORLD"
+	}`), &eventBatchMsg)
+	validate(eventBatchMsgSchema, eventBatchMsg)
 }

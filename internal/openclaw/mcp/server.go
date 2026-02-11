@@ -189,7 +189,7 @@ func (s *Server) toolsList() []map[string]any {
 		},
 		{
 			"name":        "voxelcraft.act",
-			"description": "Send an ACT to the VoxelCraft server. Tick/protocol_version/agent_id are auto-filled from latest OBS.",
+			"description": "Send an ACT to the VoxelCraft server. For 1.1, sidecar auto-fills protocol/tick/agent_id and missing act_id/based_on_obs_id/idempotency_key/expected_world_id.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
