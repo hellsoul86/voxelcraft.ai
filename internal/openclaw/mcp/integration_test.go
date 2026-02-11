@@ -46,8 +46,10 @@ func TestMCP_Sidecar_EndToEnd_WS(t *testing.T) {
 	}
 
 	w, err := world.New(world.WorldConfig{
-		ID:         "test_world",
-		TickRateHz: 50,
+		ID: "test_world",
+		// Keep tick rate low enough that the server staleness window ([now-2, now])
+		// is wide in wall-clock time; otherwise HTTP test calls can easily exceed it.
+		TickRateHz: 10,
 		ObsRadius:  7,
 		Height:     1,
 		Seed:       123,

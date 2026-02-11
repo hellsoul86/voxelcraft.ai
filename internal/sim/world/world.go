@@ -21,14 +21,25 @@ import (
 )
 
 type WorldConfig struct {
-	ID                string
-	TickRateHz        int
-	DayTicks          int
-	SeasonLengthTicks int
-	ObsRadius         int
-	Height            int
-	Seed              int64
-	BoundaryR         int
+	ID                  string
+	WorldType           string
+	TickRateHz          int
+	DayTicks            int
+	SeasonLengthTicks   int
+	ResetEveryTicks     int
+	ResetNoticeTicks    int
+	ObsRadius           int
+	Height              int
+	Seed                int64
+	BoundaryR           int
+	SwitchCooldownTicks int
+
+	AllowClaims bool
+	AllowMine   bool
+	AllowPlace  bool
+	AllowLaws   bool
+	AllowTrade  bool
+	AllowBuild  bool
 
 	// Worldgen tuning (pure 2D tilemap).
 	BiomeRegionSize                 int
@@ -38,6 +49,10 @@ type WorldConfig struct {
 	SprinkleStonePermille           int
 	SprinkleDirtPermille            int
 	SprinkleLogPermille             int
+
+	// Starter items granted to newly joined agents.
+	// If nil, defaults are applied; if non-nil but empty, new agents get no starter items.
+	StarterItems map[string]int
 
 	// Operational parameters. These are included in snapshots for deterministic replay/resume.
 	SnapshotEveryTicks int
@@ -85,6 +100,12 @@ func (c *WorldConfig) applyDefaults() {
 	if c.SeasonLengthTicks <= 0 {
 		c.SeasonLengthTicks = c.DayTicks * 7
 	}
+	if c.ResetEveryTicks <= 0 {
+		c.ResetEveryTicks = c.SeasonLengthTicks
+	}
+	if c.SwitchCooldownTicks <= 0 {
+		c.SwitchCooldownTicks = 150
+	}
 	if c.ObsRadius <= 0 {
 		c.ObsRadius = 7
 	}
@@ -114,6 +135,14 @@ func (c *WorldConfig) applyDefaults() {
 	}
 	if c.SprinkleLogPermille <= 0 {
 		c.SprinkleLogPermille = 2
+	}
+	if c.StarterItems == nil {
+		c.StarterItems = map[string]int{
+			"PLANK":   20,
+			"COAL":    10,
+			"STONE":   20,
+			"BERRIES": 10,
+		}
 	}
 	if c.SnapshotEveryTicks <= 0 {
 		c.SnapshotEveryTicks = 3000
@@ -152,6 +181,15 @@ func (c *WorldConfig) applyDefaults() {
 	}
 	if c.StructureSurvivalTicks <= 0 {
 		c.StructureSurvivalTicks = 3000
+	}
+	// World capability defaults keep legacy single-world behavior.
+	if !c.AllowClaims && !c.AllowMine && !c.AllowPlace && !c.AllowLaws && !c.AllowTrade && !c.AllowBuild {
+		c.AllowClaims = true
+		c.AllowMine = true
+		c.AllowPlace = true
+		c.AllowLaws = true
+		c.AllowTrade = true
+		c.AllowBuild = true
 	}
 }
 
@@ -247,12 +285,19 @@ type World struct {
 	laws       map[string]*Law
 	orgs       map[string]*Organization
 
-	inbox  chan ActionEnvelope
-	join   chan JoinRequest
-	attach chan AttachRequest
-	admin  chan adminSnapshotReq
-	leave  chan string
-	stop   chan struct{}
+	inbox         chan ActionEnvelope
+	join          chan JoinRequest
+	attach        chan AttachRequest
+	admin         chan adminSnapshotReq
+	adminReset    chan adminResetReq
+	agentPosReq   chan agentPosReq
+	orgMetaReq    chan orgMetaReq
+	orgMetaUpsert chan orgMetaUpsertReq
+	leave         chan string
+	stop          chan struct{}
+	transferOut   chan transferOutReq
+	transferIn    chan transferInReq
+	injectEvent   chan injectEventReq
 
 	// Observer (admin-only, read-only)
 	observerJoin  chan ObserverJoinRequest
@@ -294,6 +339,11 @@ type World struct {
 	observers map[string]*observerClient
 	// Per-tick audit events for observers (captured via auditSetBlock).
 	obsAuditsThisTick []AuditEntry
+
+	resetTotal uint64
+
+	resourceDensity     map[string]float64
+	nextDensitySampleAt uint64
 }
 
 type TickLogger interface {
@@ -366,8 +416,8 @@ func New(cfg WorldConfig, cats *catalogs.Catalogs) (*World, error) {
 	crystal, _ := b("CRYSTAL_ORE")
 
 	gen := WorldGen{
-		Seed:       cfg.Seed,
-		BoundaryR:  cfg.BoundaryR,
+		Seed:      cfg.Seed,
+		BoundaryR: cfg.BoundaryR,
 		// Worldgen tuning.
 		BiomeRegionSize:                 cfg.BiomeRegionSize,
 		SpawnClearRadius:                cfg.SpawnClearRadius,
@@ -376,17 +426,17 @@ func New(cfg WorldConfig, cats *catalogs.Catalogs) (*World, error) {
 		SprinkleStonePermille:           cfg.SprinkleStonePermille,
 		SprinkleDirtPermille:            cfg.SprinkleDirtPermille,
 		SprinkleLogPermille:             cfg.SprinkleLogPermille,
-		Air:        air,
-		Dirt:       dirt,
-		Grass:      grass,
-		Sand:       sand,
-		Stone:      stone,
-		Gravel:     gravel,
-		Log:        logBlock,
-		CoalOre:    coal,
-		IronOre:    iron,
-		CopperOre:  copper,
-		CrystalOre: crystal,
+		Air:                             air,
+		Dirt:                            dirt,
+		Grass:                           grass,
+		Sand:                            sand,
+		Stone:                           stone,
+		Gravel:                          gravel,
+		Log:                             logBlock,
+		CoalOre:                         coal,
+		IronOre:                         iron,
+		CopperOre:                       copper,
+		CrystalOre:                      crystal,
 	}
 
 	w := &World{
@@ -412,8 +462,15 @@ func New(cfg WorldConfig, cats *catalogs.Catalogs) (*World, error) {
 		join:          make(chan JoinRequest, 64),
 		attach:        make(chan AttachRequest, 64),
 		admin:         make(chan adminSnapshotReq, 16),
+		adminReset:    make(chan adminResetReq, 16),
+		agentPosReq:   make(chan agentPosReq, 64),
+		orgMetaReq:    make(chan orgMetaReq, 64),
+		orgMetaUpsert: make(chan orgMetaUpsertReq, 64),
 		leave:         make(chan string, 64),
 		stop:          make(chan struct{}),
+		transferOut:   make(chan transferOutReq, 64),
+		transferIn:    make(chan transferInReq, 64),
+		injectEvent:   make(chan injectEventReq, 256),
 		observerJoin:  make(chan ObserverJoinRequest, 16),
 		observerSub:   make(chan ObserverSubscribeRequest, 64),
 		observerLeave: make(chan string, 16),
@@ -421,6 +478,14 @@ func New(cfg WorldConfig, cats *catalogs.Catalogs) (*World, error) {
 		stats:         NewWorldStats(300, 72000),
 		structures:    map[string]*Structure{},
 		observers:     map[string]*observerClient{},
+		resourceDensity: map[string]float64{
+			"COAL_ORE":    0,
+			"IRON_ORE":    0,
+			"COPPER_ORE":  0,
+			"CRYSTAL_ORE": 0,
+			"STONE":       0,
+			"LOG":         0,
+		},
 	}
 	return w, nil
 }
@@ -449,6 +514,10 @@ func (w *World) Run(ctx context.Context) error {
 	var pendingJoins []JoinRequest
 	var pendingLeaves []string
 	var pendingAdmin []adminSnapshotReq
+	var pendingAdminReset []adminResetReq
+	var pendingTransferOut []transferOutReq
+	var pendingTransferIn []transferInReq
+	var pendingInjectEvents []injectEventReq
 
 	for {
 		select {
@@ -470,15 +539,34 @@ func (w *World) Run(ctx context.Context) error {
 			w.handleObserverLeave(id)
 		case req := <-w.admin:
 			pendingAdmin = append(pendingAdmin, req)
+		case req := <-w.adminReset:
+			pendingAdminReset = append(pendingAdminReset, req)
+		case req := <-w.agentPosReq:
+			w.handleAgentPosReq(req)
+		case req := <-w.orgMetaReq:
+			w.handleOrgMetaReq(req)
+		case req := <-w.orgMetaUpsert:
+			w.handleOrgMetaUpsertReq(req)
+		case req := <-w.transferOut:
+			pendingTransferOut = append(pendingTransferOut, req)
+		case req := <-w.transferIn:
+			pendingTransferIn = append(pendingTransferIn, req)
+		case req := <-w.injectEvent:
+			pendingInjectEvents = append(pendingInjectEvents, req)
 		case env := <-w.inbox:
 			pendingActions = append(pendingActions, env)
 		case <-ticker.C:
-			w.step(pendingJoins, pendingLeaves, pendingActions)
+			w.stepInternal(pendingJoins, pendingLeaves, pendingActions, pendingTransferOut, pendingTransferIn, pendingInjectEvents)
 			w.handleAdminSnapshotRequests(pendingAdmin)
+			w.handleAdminResetRequests(pendingAdminReset)
 			pendingJoins = pendingJoins[:0]
 			pendingLeaves = pendingLeaves[:0]
 			pendingActions = pendingActions[:0]
 			pendingAdmin = pendingAdmin[:0]
+			pendingAdminReset = pendingAdminReset[:0]
+			pendingTransferOut = pendingTransferOut[:0]
+			pendingTransferIn = pendingTransferIn[:0]
+			pendingInjectEvents = pendingInjectEvents[:0]
 		}
 	}
 }
@@ -507,11 +595,22 @@ func (w *World) joinAgent(name string, delta bool, out chan []byte) JoinResponse
 		Yaw:  0,
 	}
 	a.initDefaults()
-	// Starter items to make early testing easier.
-	a.Inventory["PLANK"] = 20
-	a.Inventory["COAL"] = 10
-	a.Inventory["STONE"] = 20
-	a.Inventory["BERRIES"] = 10
+	a.CurrentWorldID = w.cfg.ID
+	// Starter items (operational config).
+	if w.cfg.StarterItems != nil {
+		keys := make([]string, 0, len(w.cfg.StarterItems))
+		for item := range w.cfg.StarterItems {
+			keys = append(keys, item)
+		}
+		sort.Strings(keys)
+		for _, item := range keys {
+			n := w.cfg.StarterItems[item]
+			if item == "" || n <= 0 {
+				continue
+			}
+			a.Inventory[item] += n
+		}
+	}
 
 	// Fun/novelty: first biome arrival.
 	w.funOnBiome(a, nowTick)
@@ -532,6 +631,17 @@ func (w *World) joinAgent(name string, delta bool, out chan []byte) JoinResponse
 		ProtocolVersion: protocol.Version,
 		AgentID:         agentID,
 		ResumeToken:     token,
+		CurrentWorldID:  w.cfg.ID,
+		WorldManifest: []protocol.WorldRef{
+			{
+				WorldID:          w.cfg.ID,
+				WorldType:        w.cfg.WorldType,
+				EntryPointID:     "spawn",
+				SwitchCooldown:   w.cfg.SwitchCooldownTicks,
+				ResetEveryTicks:  w.cfg.ResetEveryTicks,
+				ResetNoticeTicks: w.cfg.ResetNoticeTicks,
+			},
+		},
 		WorldParams: protocol.WorldParams{
 			TickRateHz: w.cfg.TickRateHz,
 			ChunkSize:  [3]int{16, 16, 1},
@@ -623,6 +733,7 @@ func (w *World) handleAttach(req AttachRequest) {
 		}
 		return
 	}
+	a.CurrentWorldID = w.cfg.ID
 
 	// Attach client (does not affect simulation determinism).
 	w.clients[a.ID] = &clientState{Out: req.Out, DeltaVoxels: req.DeltaVoxels}
@@ -639,6 +750,17 @@ func (w *World) handleAttach(req AttachRequest) {
 		ProtocolVersion: protocol.Version,
 		AgentID:         a.ID,
 		ResumeToken:     newToken,
+		CurrentWorldID:  w.cfg.ID,
+		WorldManifest: []protocol.WorldRef{
+			{
+				WorldID:          w.cfg.ID,
+				WorldType:        w.cfg.WorldType,
+				EntryPointID:     "spawn",
+				SwitchCooldown:   w.cfg.SwitchCooldownTicks,
+				ResetEveryTicks:  w.cfg.ResetEveryTicks,
+				ResetNoticeTicks: w.cfg.ResetNoticeTicks,
+			},
+		},
 		WorldParams: protocol.WorldParams{
 			TickRateHz: w.cfg.TickRateHz,
 			ChunkSize:  [3]int{16, 16, 1},
@@ -701,6 +823,10 @@ func (w *World) handleLeave(agentID string) {
 }
 
 func (w *World) step(joins []JoinRequest, leaves []string, actions []ActionEnvelope) {
+	w.stepInternal(joins, leaves, actions, nil, nil, nil)
+}
+
+func (w *World) stepInternal(joins []JoinRequest, leaves []string, actions []ActionEnvelope, transferOutReqs []transferOutReq, transferInReqs []transferInReq, injectEvents []injectEventReq) {
 	stepStart := time.Now()
 	nowTick := w.tick.Load()
 
@@ -708,6 +834,7 @@ func (w *World) step(joins []JoinRequest, leaves []string, actions []ActionEnvel
 	w.obsAuditsThisTick = w.obsAuditsThisTick[:0]
 
 	// Season rollover happens at tick boundaries before processing joins/leaves/actions for this tick.
+	w.maybeWorldResetNotice(nowTick)
 	w.maybeSeasonRollover(nowTick)
 
 	// Apply leaves and joins deterministically at tick boundary.
@@ -725,6 +852,22 @@ func (w *World) step(joins []JoinRequest, leaves []string, actions []ActionEnvel
 			req.Resp <- resp
 		}
 		recordedJoins = append(recordedJoins, RecordedJoin{AgentID: resp.Welcome.AgentID, Name: req.Name})
+	}
+
+	// Cross-world migration (atomic at tick boundary).
+	for _, req := range transferOutReqs {
+		w.handleTransferOut(req)
+	}
+	for _, req := range transferInReqs {
+		w.handleTransferIn(req)
+	}
+	for _, req := range injectEvents {
+		if req.AgentID == "" || req.Event == nil {
+			continue
+		}
+		if a := w.agents[req.AgentID]; a != nil {
+			a.AddEvent(req.Event)
+		}
 	}
 
 	// Maintenance runs at tick boundary before any actions so permissions reflect the current stage.
@@ -800,12 +943,22 @@ func (w *World) step(joins []JoinRequest, leaves []string, actions []ActionEnvel
 		windowTicks = w.stats.WindowTicks()
 	}
 
+	if nowTick >= w.nextDensitySampleAt {
+		w.resourceDensity = w.computeResourceDensity()
+		w.nextDensitySampleAt = nowTick + 300
+	}
+	resourceDensity := map[string]float64{}
+	for k, v := range w.resourceDensity {
+		resourceDensity[k] = v
+	}
+
 	dm := w.computeDirectorMetrics(nowTick)
 	w.metrics.Store(WorldMetrics{
 		Tick:         nextTick,
 		Agents:       len(w.agents),
 		Clients:      len(w.clients),
 		LoadedChunks: len(w.chunks.chunks),
+		ResetTotal:   w.resetTotal,
 		QueueDepths: QueueDepths{
 			Inbox:  len(w.inbox),
 			Join:   len(w.join),
@@ -822,6 +975,7 @@ func (w *World) step(joins []JoinRequest, leaves []string, actions []ActionEnvel
 			Inequality:  dm.Inequality,
 			PublicInfra: dm.PublicInfra,
 		},
+		ResourceDensity:  resourceDensity,
 		Weather:          w.weather,
 		WeatherUntilTick: w.weatherUntilTick,
 		ActiveEventID:    w.activeEventID,
@@ -834,6 +988,47 @@ func (w *World) step(joins []JoinRequest, leaves []string, actions []ActionEnvel
 		},
 		ActiveEventRadius: w.activeEventRadius,
 	})
+}
+
+func (w *World) computeResourceDensity() map[string]float64 {
+	targets := []string{"COAL_ORE", "IRON_ORE", "COPPER_ORE", "CRYSTAL_ORE", "STONE", "LOG"}
+	out := map[string]float64{}
+	for _, name := range targets {
+		out[name] = 0
+	}
+	if w == nil || w.chunks == nil || len(w.chunks.chunks) == 0 {
+		return out
+	}
+	idToName := map[uint16]string{}
+	for _, name := range targets {
+		if id, ok := w.catalogs.Blocks.Index[name]; ok {
+			idToName[id] = name
+		}
+	}
+	if len(idToName) == 0 {
+		return out
+	}
+	counts := map[string]int{}
+	total := 0
+	for _, ch := range w.chunks.chunks {
+		if ch == nil {
+			continue
+		}
+		for _, b := range ch.Blocks {
+			total++
+			if name, ok := idToName[b]; ok {
+				counts[name]++
+			}
+		}
+	}
+	if total == 0 {
+		return out
+	}
+	denom := float64(total)
+	for _, name := range targets {
+		out[name] = float64(counts[name]) / denom
+	}
+	return out
 }
 
 // StepOnce advances the world by a single tick using the same ordering semantics as the server.
@@ -901,6 +1096,10 @@ func (w *World) applyInstant(a *Agent, inst protocol.InstantReq, nowTick uint64)
 			}
 		}
 		if ch == "MARKET" {
+			if !w.cfg.AllowTrade {
+				a.AddEvent(actionResult(nowTick, inst.ID, false, "E_NO_PERMISSION", "market disabled in this world"))
+				return
+			}
 			if _, perms := w.permissionsFor(a.ID, a.Pos); !perms["can_trade"] {
 				a.AddEvent(actionResult(nowTick, inst.ID, false, "E_NO_PERMISSION", "market chat not allowed here"))
 				return
@@ -1019,6 +1218,10 @@ func (w *World) applyInstant(a *Agent, inst protocol.InstantReq, nowTick uint64)
 		a.AddEvent(actionResult(nowTick, inst.ID, true, "", fmt.Sprintf("loaded %d keys", len(kvs))))
 
 	case "OFFER_TRADE":
+		if !w.cfg.AllowTrade {
+			a.AddEvent(actionResult(nowTick, inst.ID, false, "E_NO_PERMISSION", "trade disabled in this world"))
+			return
+		}
 		if ok, cd := a.RateLimitAllow("OFFER_TRADE", nowTick, uint64(w.cfg.RateLimits.OfferTradeWindowTicks), w.cfg.RateLimits.OfferTradeMax); !ok {
 			ev := actionResult(nowTick, inst.ID, false, "E_RATE_LIMIT", "too many OFFER_TRADE")
 			ev["cooldown_ticks"] = cd
@@ -1070,6 +1273,10 @@ func (w *World) applyInstant(a *Agent, inst protocol.InstantReq, nowTick uint64)
 		a.AddEvent(protocol.Event{"t": nowTick, "type": "ACTION_RESULT", "ref": inst.ID, "ok": true, "trade_id": tradeID})
 
 	case "ACCEPT_TRADE":
+		if !w.cfg.AllowTrade {
+			a.AddEvent(actionResult(nowTick, inst.ID, false, "E_NO_PERMISSION", "trade disabled in this world"))
+			return
+		}
 		if inst.TradeID == "" {
 			a.AddEvent(actionResult(nowTick, inst.ID, false, "E_BAD_REQUEST", "missing trade_id"))
 			return
@@ -1107,10 +1314,7 @@ func (w *World) applyInstant(a *Agent, inst protocol.InstantReq, nowTick uint64)
 				if owner := w.agents[landFrom.Owner]; owner != nil {
 					taxSink = owner.Inventory
 				} else if org := w.orgByID(landFrom.Owner); org != nil {
-					if org.Treasury == nil {
-						org.Treasury = map[string]int{}
-					}
-					taxSink = org.Treasury
+					taxSink = w.orgTreasury(org)
 				}
 			}
 		}
@@ -1177,6 +1381,10 @@ func (w *World) applyInstant(a *Agent, inst protocol.InstantReq, nowTick uint64)
 		a.AddEvent(actionResult(nowTick, inst.ID, true, "", "ok"))
 
 	case "DECLINE_TRADE":
+		if !w.cfg.AllowTrade {
+			a.AddEvent(actionResult(nowTick, inst.ID, false, "E_NO_PERMISSION", "trade disabled in this world"))
+			return
+		}
 		if inst.TradeID == "" {
 			a.AddEvent(actionResult(nowTick, inst.ID, false, "E_BAD_REQUEST", "missing trade_id"))
 			return
@@ -1877,6 +2085,7 @@ func (w *World) applyInstant(a *Agent, inst protocol.InstantReq, nowTick uint64)
 			Kind:        k,
 			Name:        name,
 			CreatedTick: nowTick,
+			MetaVersion: 1,
 			Members:     map[string]OrgRole{a.ID: OrgLeader},
 			Treasury:    map[string]int{},
 		}
@@ -1907,6 +2116,7 @@ func (w *World) applyInstant(a *Agent, inst protocol.InstantReq, nowTick uint64)
 			org.Members = map[string]OrgRole{}
 		}
 		org.Members[a.ID] = OrgMember
+		org.MetaVersion++
 		a.OrgID = org.OrgID
 		w.auditEvent(nowTick, a.ID, "ORG_JOIN", a.Pos, "JOIN_ORG", map[string]any{
 			"org_id":   org.OrgID,
@@ -1937,10 +2147,8 @@ func (w *World) applyInstant(a *Agent, inst protocol.InstantReq, nowTick uint64)
 		if a.Inventory[inst.ItemID] <= 0 {
 			delete(a.Inventory, inst.ItemID)
 		}
-		if org.Treasury == nil {
-			org.Treasury = map[string]int{}
-		}
-		org.Treasury[inst.ItemID] += inst.Count
+		tr := w.orgTreasury(org)
+		tr[inst.ItemID] += inst.Count
 		w.auditEvent(nowTick, a.ID, "ORG_DEPOSIT", a.Pos, "ORG_DEPOSIT", map[string]any{
 			"org_id": org.OrgID,
 			"item":   inst.ItemID,
@@ -1962,13 +2170,14 @@ func (w *World) applyInstant(a *Agent, inst protocol.InstantReq, nowTick uint64)
 			a.AddEvent(actionResult(nowTick, inst.ID, false, "E_NO_PERMISSION", "not org admin"))
 			return
 		}
-		if org.Treasury[inst.ItemID] < inst.Count {
+		tr := w.orgTreasury(org)
+		if tr[inst.ItemID] < inst.Count {
 			a.AddEvent(actionResult(nowTick, inst.ID, false, "E_NO_RESOURCE", "treasury lacks items"))
 			return
 		}
-		org.Treasury[inst.ItemID] -= inst.Count
-		if org.Treasury[inst.ItemID] <= 0 {
-			delete(org.Treasury, inst.ItemID)
+		tr[inst.ItemID] -= inst.Count
+		if tr[inst.ItemID] <= 0 {
+			delete(tr, inst.ItemID)
 		}
 		a.Inventory[inst.ItemID] += inst.Count
 		w.auditEvent(nowTick, a.ID, "ORG_WITHDRAW", a.Pos, "ORG_WITHDRAW", map[string]any{
@@ -1992,6 +2201,7 @@ func (w *World) applyInstant(a *Agent, inst protocol.InstantReq, nowTick uint64)
 		}
 		role := org.Members[a.ID]
 		delete(org.Members, a.ID)
+		org.MetaVersion++
 		if len(org.Members) == 0 {
 			delete(w.orgs, orgID)
 			a.AddEvent(actionResult(nowTick, inst.ID, true, "", "ok"))
@@ -2007,6 +2217,7 @@ func (w *World) applyInstant(a *Agent, inst protocol.InstantReq, nowTick uint64)
 			}
 			if best != "" {
 				org.Members[best] = OrgLeader
+				org.MetaVersion++
 			}
 		}
 		a.AddEvent(actionResult(nowTick, inst.ID, true, "", "ok"))
@@ -2038,6 +2249,10 @@ func (w *World) applyInstant(a *Agent, inst protocol.InstantReq, nowTick uint64)
 		a.AddEvent(actionResult(nowTick, inst.ID, true, "", "ok"))
 
 	case "PROPOSE_LAW":
+		if !w.cfg.AllowLaws {
+			a.AddEvent(actionResult(nowTick, inst.ID, false, "E_NO_PERMISSION", "laws disabled in this world"))
+			return
+		}
 		if inst.LandID == "" || inst.TemplateID == "" {
 			a.AddEvent(actionResult(nowTick, inst.ID, false, "E_BAD_REQUEST", "missing land_id/template_id"))
 			return
@@ -2194,6 +2409,10 @@ func (w *World) applyInstant(a *Agent, inst protocol.InstantReq, nowTick uint64)
 		}
 
 	case "VOTE":
+		if !w.cfg.AllowLaws {
+			a.AddEvent(actionResult(nowTick, inst.ID, false, "E_NO_PERMISSION", "laws disabled in this world"))
+			return
+		}
 		if inst.LawID == "" || inst.Choice == "" {
 			a.AddEvent(actionResult(nowTick, inst.ID, false, "E_BAD_REQUEST", "missing law_id/choice"))
 			return
@@ -2325,6 +2544,10 @@ func (w *World) applyTaskReq(a *Agent, tr protocol.TaskReq, nowTick uint64) {
 		})
 
 	case "MINE":
+		if !w.cfg.AllowMine {
+			a.AddEvent(actionResult(nowTick, tr.ID, false, "E_NO_PERMISSION", "mining disabled in this world"))
+			return
+		}
 		if a.WorkTask != nil {
 			a.AddEvent(actionResult(nowTick, tr.ID, false, "E_CONFLICT", "work task slot occupied"))
 			return
@@ -2366,6 +2589,10 @@ func (w *World) applyTaskReq(a *Agent, tr protocol.TaskReq, nowTick uint64) {
 		a.AddEvent(protocol.Event{"t": nowTick, "type": "ACTION_RESULT", "ref": tr.ID, "ok": true, "task_id": taskID})
 
 	case "PLACE":
+		if !w.cfg.AllowPlace {
+			a.AddEvent(actionResult(nowTick, tr.ID, false, "E_NO_PERMISSION", "placing disabled in this world"))
+			return
+		}
 		if a.WorkTask != nil {
 			a.AddEvent(actionResult(nowTick, tr.ID, false, "E_CONFLICT", "work task slot occupied"))
 			return
@@ -2475,6 +2702,10 @@ func (w *World) applyTaskReq(a *Agent, tr protocol.TaskReq, nowTick uint64) {
 		a.AddEvent(protocol.Event{"t": nowTick, "type": "ACTION_RESULT", "ref": tr.ID, "ok": true, "task_id": taskID})
 
 	case "CLAIM_LAND":
+		if !w.cfg.AllowClaims {
+			a.AddEvent(actionResult(nowTick, tr.ID, false, "E_NO_PERMISSION", "claims disabled in this world"))
+			return
+		}
 		r := tr.Radius
 		if r <= 0 {
 			r = 32
@@ -2528,6 +2759,7 @@ func (w *World) applyTaskReq(a *Agent, tr protocol.TaskReq, nowTick uint64) {
 		w.auditSetBlock(nowTick, a.ID, anchor, w.chunks.gen.Air, totemID, "CLAIM_LAND")
 
 		landID := w.newLandID(a.ID)
+		claimType := defaultClaimTypeForWorld(w.cfg.WorldType)
 		due := uint64(0)
 		if w.cfg.DayTicks > 0 {
 			due = nowTick + uint64(w.cfg.DayTicks)
@@ -2535,15 +2767,20 @@ func (w *World) applyTaskReq(a *Agent, tr protocol.TaskReq, nowTick uint64) {
 		w.claims[landID] = &LandClaim{
 			LandID:             landID,
 			Owner:              a.ID,
+			ClaimType:          claimType,
 			Anchor:             anchor,
 			Radius:             r,
-			Flags:              ClaimFlags{AllowBuild: false, AllowBreak: false, AllowDamage: false, AllowTrade: false},
+			Flags:              defaultClaimFlags(claimType),
 			MaintenanceDueTick: due,
 			MaintenanceStage:   0,
 		}
 		a.AddEvent(protocol.Event{"t": nowTick, "type": "ACTION_RESULT", "ref": tr.ID, "ok": true, "land_id": landID})
 
 	case "BUILD_BLUEPRINT":
+		if !w.cfg.AllowBuild {
+			a.AddEvent(actionResult(nowTick, tr.ID, false, "E_NO_PERMISSION", "blueprint build disabled in this world"))
+			return
+		}
 		if a.WorkTask != nil {
 			a.AddEvent(actionResult(nowTick, tr.ID, false, "E_CONFLICT", "work task slot occupied"))
 			return
@@ -2746,10 +2983,7 @@ func (w *World) systemMovement(nowTick uint64) {
 					if owner := w.agents[toLand.Owner]; owner != nil {
 						owner.Inventory[item] += cost
 					} else if org := w.orgByID(toLand.Owner); org != nil {
-						if org.Treasury == nil {
-							org.Treasury = map[string]int{}
-						}
-						org.Treasury[item] += cost
+						w.orgTreasury(org)[item] += cost
 					}
 				}
 				a.AddEvent(protocol.Event{"t": nowTick, "type": "ACCESS_PASS", "land_id": toLand.LandID, "item": item, "count": cost})
@@ -2820,10 +3054,7 @@ func (w *World) tickMine(a *Agent, wt *tasks.WorkTask, nowTick uint64) {
 					if owner := w.agents[land.Owner]; owner != nil {
 						owner.Inventory[item] += pay
 					} else if org := w.orgByID(land.Owner); org != nil {
-						if org.Treasury == nil {
-							org.Treasury = map[string]int{}
-						}
-						org.Treasury[item] += pay
+						w.orgTreasury(org)[item] += pay
 					}
 				}
 				a.AddEvent(protocol.Event{"t": nowTick, "type": "FINE", "land_id": land.LandID, "item": item, "count": pay, "reason": "BREAK_DENIED"})
@@ -4048,6 +4279,8 @@ func (w *World) buildObs(a *Agent, cl *clientState, nowTick uint64) protocol.Obs
 		ProtocolVersion: protocol.Version,
 		Tick:            nowTick,
 		AgentID:         a.ID,
+		WorldID:         w.cfg.ID,
+		WorldClock:      nowTick,
 		World: protocol.WorldObs{
 			TimeOfDay:           float64(int(nowTick)%w.cfg.DayTicks) / float64(w.cfg.DayTicks),
 			Weather:             w.weather,
@@ -4483,7 +4716,7 @@ func (w *World) stateDigest(nowTick uint64) string {
 					h.Write([]byte(string(o.Members[aid])))
 				}
 			}
-			writeItemMap(h, tmp, o.Treasury)
+			writeItemMap(h, tmp, w.orgTreasury(o))
 		}
 	}
 

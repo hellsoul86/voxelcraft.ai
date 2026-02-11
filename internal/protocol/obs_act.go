@@ -5,6 +5,8 @@ type ObsMsg struct {
 	ProtocolVersion string `json:"protocol_version"`
 	Tick            uint64 `json:"tick"`
 	AgentID         string `json:"agent_id"`
+	WorldID         string `json:"world_id,omitempty"`
+	WorldClock      uint64 `json:"world_clock,omitempty"`
 
 	World      WorldObs      `json:"world"`
 	Self       SelfObs       `json:"self"`
@@ -138,6 +140,7 @@ type ActMsg struct {
 	ProtocolVersion string       `json:"protocol_version"`
 	Tick            uint64       `json:"tick"`
 	AgentID         string       `json:"agent_id"`
+	ExpectedWorldID string       `json:"expected_world_id,omitempty"`
 	Instants        []InstantReq `json:"instants,omitempty"`
 	Tasks           []TaskReq    `json:"tasks,omitempty"`
 	Cancel          []string     `json:"cancel,omitempty"`
@@ -195,6 +198,9 @@ type InstantReq struct {
 	Params     map[string]interface{} `json:"params,omitempty"`
 	LawID      string                 `json:"law_id,omitempty"`
 	Choice     string                 `json:"choice,omitempty"`
+
+	TargetWorldID string `json:"target_world_id,omitempty"`
+	EntryPointID  string `json:"entry_point_id,omitempty"`
 }
 
 type TaskReq struct {

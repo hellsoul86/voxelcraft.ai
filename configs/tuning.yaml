@@ -1,4 +1,4 @@
-protocol_version: "0.9"
+protocol_version: "1.0"
 
 tick_rate_hz: 5
 tick_duration_ms: 200
@@ -17,6 +17,12 @@ worldgen:
   sprinkle_stone_permille: 12
   sprinkle_dirt_permille: 4
   sprinkle_log_permille: 2
+
+starter_items:
+  PLANK: 20
+  COAL: 10
+  STONE: 20
+  BERRIES: 10
 
 rate_limits:
   say_window_ticks: 50

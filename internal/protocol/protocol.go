@@ -2,7 +2,17 @@ package protocol
 
 import "encoding/json"
 
-const Version = "0.9"
+const Version = "1.0"
+
+var SupportedVersions = map[string]struct{}{
+	"0.9": {},
+	"1.0": {},
+}
+
+func IsSupportedVersion(v string) bool {
+	_, ok := SupportedVersions[v]
+	return ok
+}
 
 // Message types.
 const (

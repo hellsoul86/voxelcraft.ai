@@ -22,6 +22,7 @@ import (
 	persistlog "voxelcraft.ai/internal/persistence/log"
 	"voxelcraft.ai/internal/persistence/snapshot"
 	"voxelcraft.ai/internal/sim/catalogs"
+	"voxelcraft.ai/internal/sim/multiworld"
 	"voxelcraft.ai/internal/sim/tuning"
 	"voxelcraft.ai/internal/sim/world"
 	"voxelcraft.ai/internal/transport/observer"
@@ -34,6 +35,7 @@ func main() {
 		worldID    = flag.String("world", "world_1", "world id")
 		seed       = flag.Int64("seed", 1337, "world seed (used only when starting a fresh world)")
 		configDir  = flag.String("configs", "./configs", "config directory")
+		worldsPath = flag.String("worlds", "./configs/worlds.yaml", "multi-world config path (if exists, server runs in multi-world mode)")
 		dataDir    = flag.String("data", "./data", "runtime data directory")
 		tuningPath = flag.String("tuning", "", "path to tuning.yaml (default: <configs>/tuning.yaml)")
 		disableDB  = flag.Bool("disable_db", false, "disable sqlite indexing (tick/audit + catalogs + snapshot metadata)")
@@ -92,6 +94,24 @@ func main() {
 		}
 	}
 
+	// Multi-world 1.0 mode (if worlds config exists). Keep single-world flow as fallback.
+	if strings.TrimSpace(*worldsPath) != "" {
+		if _, err := os.Stat(*worldsPath); err == nil {
+			mcfg, err := multiworld.Load(*worldsPath)
+			if err != nil {
+				logger.Fatalf("load worlds config: %v", err)
+			}
+			runMultiWorld(serverRuntimeConfig{
+				Addr:      *addr,
+				DataDir:   *dataDir,
+				DisableDB: *disableDB,
+				Seed:      *seed,
+				ConfigDir: *configDir,
+			}, mcfg, tune, cats, logger)
+			return
+		}
+	}
+
 	if idx != nil {
 		if err := idx.UpsertCatalogs(*configDir, cats, tune); err != nil {
 			logger.Printf("index db: upsert catalogs: %v", err)
@@ -107,14 +127,14 @@ func main() {
 			logger.Fatalf("snapshot world id mismatch: flag=%s snap=%s", *worldID, snap.Header.WorldID)
 		}
 		w, err = world.New(world.WorldConfig{
-			ID:                 *worldID,
-			TickRateHz:         snap.TickRate,
-			DayTicks:           snap.DayTicks,
-			SeasonLengthTicks:  tune.SeasonLengthTicks,
-			ObsRadius:          snap.ObsRadius,
-			Height:             snap.Height,
-			Seed:               snap.Seed,
-			BoundaryR:          snap.BoundaryR,
+			ID:                              *worldID,
+			TickRateHz:                      snap.TickRate,
+			DayTicks:                        snap.DayTicks,
+			SeasonLengthTicks:               tune.SeasonLengthTicks,
+			ObsRadius:                       snap.ObsRadius,
+			Height:                          snap.Height,
+			Seed:                            snap.Seed,
+			BoundaryR:                       snap.BoundaryR,
 			BiomeRegionSize:                 tune.WorldGen.BiomeRegionSize,
 			SpawnClearRadius:                tune.WorldGen.SpawnClearRadius,
 			OreClusterProbScalePermille:     tune.WorldGen.OreClusterProbScalePermille,
@@ -122,8 +142,9 @@ func main() {
 			SprinkleStonePermille:           tune.WorldGen.SprinkleStonePermille,
 			SprinkleDirtPermille:            tune.WorldGen.SprinkleDirtPermille,
 			SprinkleLogPermille:             tune.WorldGen.SprinkleLogPermille,
-			SnapshotEveryTicks: tune.SnapshotEveryTicks,
-			DirectorEveryTicks: tune.DirectorEveryTicks,
+			StarterItems:                    tune.StarterItems,
+			SnapshotEveryTicks:              tune.SnapshotEveryTicks,
+			DirectorEveryTicks:              tune.DirectorEveryTicks,
 			RateLimits: world.RateLimitConfig{
 				SayWindowTicks:        tune.RateLimits.SayWindowTicks,
 				SayMax:                tune.RateLimits.SayMax,
@@ -155,14 +176,14 @@ func main() {
 		logger.Printf("resumed from snapshot=%s tick=%d", filepath.Base(snapshotToLoad), w.CurrentTick())
 	} else {
 		w, err = world.New(world.WorldConfig{
-			ID:                 *worldID,
-			TickRateHz:         tune.TickRateHz,
-			DayTicks:           tune.DayTicks,
-			SeasonLengthTicks:  tune.SeasonLengthTicks,
-			ObsRadius:          tune.ObsRadius,
-			Height:             tune.ChunkSize[2],
-			Seed:               *seed,
-			BoundaryR:          tune.WorldBoundaryR,
+			ID:                              *worldID,
+			TickRateHz:                      tune.TickRateHz,
+			DayTicks:                        tune.DayTicks,
+			SeasonLengthTicks:               tune.SeasonLengthTicks,
+			ObsRadius:                       tune.ObsRadius,
+			Height:                          tune.ChunkSize[2],
+			Seed:                            *seed,
+			BoundaryR:                       tune.WorldBoundaryR,
 			BiomeRegionSize:                 tune.WorldGen.BiomeRegionSize,
 			SpawnClearRadius:                tune.WorldGen.SpawnClearRadius,
 			OreClusterProbScalePermille:     tune.WorldGen.OreClusterProbScalePermille,
@@ -170,8 +191,9 @@ func main() {
 			SprinkleStonePermille:           tune.WorldGen.SprinkleStonePermille,
 			SprinkleDirtPermille:            tune.WorldGen.SprinkleDirtPermille,
 			SprinkleLogPermille:             tune.WorldGen.SprinkleLogPermille,
-			SnapshotEveryTicks: tune.SnapshotEveryTicks,
-			DirectorEveryTicks: tune.DirectorEveryTicks,
+			StarterItems:                    tune.StarterItems,
+			SnapshotEveryTicks:              tune.SnapshotEveryTicks,
+			DirectorEveryTicks:              tune.DirectorEveryTicks,
 			RateLimits: world.RateLimitConfig{
 				SayWindowTicks:        tune.RateLimits.SayWindowTicks,
 				SayMax:                tune.RateLimits.SayMax,

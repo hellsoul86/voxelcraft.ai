@@ -7,7 +7,10 @@ import (
 )
 
 func (w *World) maybeSeasonRollover(nowTick uint64) {
-	seasonLen := uint64(w.cfg.SeasonLengthTicks)
+	seasonLen := uint64(w.cfg.ResetEveryTicks)
+	if seasonLen == 0 {
+		seasonLen = uint64(w.cfg.SeasonLengthTicks)
+	}
 	if seasonLen == 0 || nowTick == 0 || nowTick%seasonLen != 0 {
 		return
 	}
@@ -27,7 +30,10 @@ func (w *World) maybeSeasonRollover(nowTick uint64) {
 }
 
 func (w *World) seasonIndex(nowTick uint64) int {
-	seasonLen := uint64(w.cfg.SeasonLengthTicks)
+	seasonLen := uint64(w.cfg.ResetEveryTicks)
+	if seasonLen == 0 {
+		seasonLen = uint64(w.cfg.SeasonLengthTicks)
+	}
 	if seasonLen == 0 {
 		return 1
 	}
@@ -39,7 +45,10 @@ func (w *World) seasonDay(nowTick uint64) int {
 	if dayTicks == 0 {
 		return 1
 	}
-	seasonLen := uint64(w.cfg.SeasonLengthTicks)
+	seasonLen := uint64(w.cfg.ResetEveryTicks)
+	if seasonLen == 0 {
+		seasonLen = uint64(w.cfg.SeasonLengthTicks)
+	}
 	seasonDays := seasonLen / dayTicks
 	if seasonDays == 0 {
 		seasonDays = 1
@@ -47,7 +56,30 @@ func (w *World) seasonDay(nowTick uint64) int {
 	return int((nowTick/dayTicks)%seasonDays) + 1
 }
 
+func (w *World) maybeWorldResetNotice(nowTick uint64) {
+	cycle := uint64(w.cfg.ResetEveryTicks)
+	notice := uint64(w.cfg.ResetNoticeTicks)
+	if cycle == 0 || notice == 0 || notice >= cycle || nowTick == 0 {
+		return
+	}
+	if nowTick%cycle != cycle-notice {
+		return
+	}
+	resetTick := nowTick + notice
+	for _, a := range w.agents {
+		a.AddEvent(protocol.Event{
+			"t":          nowTick,
+			"type":       "WORLD_RESET_NOTICE",
+			"world_id":   w.cfg.ID,
+			"reset_tick": resetTick,
+			"in_ticks":   notice,
+		})
+	}
+}
+
 func (w *World) resetWorldForNewSeason(nowTick uint64, newSeason int, archiveTick uint64) {
+	w.resetTotal++
+
 	// Advance world seed to reshuffle resources deterministically.
 	w.cfg.Seed++
 
@@ -92,7 +124,11 @@ func (w *World) resetWorldForNewSeason(nowTick uint64, newSeason int, archiveTic
 			if o == nil {
 				continue
 			}
-			o.Treasury = map[string]int{}
+			if o.TreasuryByWorld == nil {
+				o.TreasuryByWorld = map[string]map[string]int{}
+			}
+			o.TreasuryByWorld[w.cfg.ID] = map[string]int{}
+			o.Treasury = o.TreasuryByWorld[w.cfg.ID]
 		}
 	}
 
@@ -110,7 +146,19 @@ func (w *World) resetWorldForNewSeason(nowTick uint64, newSeason int, archiveTic
 			"archive_tick": archiveTick,
 			"seed":         w.cfg.Seed,
 		})
+		a.AddEvent(protocol.Event{
+			"t":          nowTick,
+			"type":       "WORLD_RESET_DONE",
+			"world_id":   w.cfg.ID,
+			"reset_tick": nowTick,
+		})
 	}
+	w.auditEvent(nowTick, "SYSTEM", "WORLD_RESET", Vec3i{}, "SEASON_ROLLOVER", map[string]any{
+		"world_id":     w.cfg.ID,
+		"archive_tick": archiveTick,
+		"season":       newSeason,
+		"new_seed":     w.cfg.Seed,
+	})
 }
 
 func (w *World) resetAgentForNewSeason(nowTick uint64, a *Agent) {

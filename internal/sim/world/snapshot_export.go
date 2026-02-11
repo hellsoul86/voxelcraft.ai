@@ -141,33 +141,35 @@ func (w *World) ExportSnapshot(nowTick uint64) snapshot.SnapshotV1 {
 			}
 		}
 		agentSnaps = append(agentSnaps, snapshot.AgentV1{
-			ID:            a.ID,
-			Name:          a.Name,
-			OrgID:         a.OrgID,
-			Pos:           a.Pos.ToArray(),
-			Yaw:           a.Yaw,
-			HP:            a.HP,
-			Hunger:        a.Hunger,
-			StaminaMilli:  a.StaminaMilli,
-			RepTrade:      a.RepTrade,
-			RepBuild:      a.RepBuild,
-			RepSocial:     a.RepSocial,
-			RepLaw:        a.RepLaw,
-			FunNovelty:    a.Fun.Novelty,
-			FunCreation:   a.Fun.Creation,
-			FunSocial:     a.Fun.Social,
-			FunInfluence:  a.Fun.Influence,
-			FunNarrative:  a.Fun.Narrative,
-			FunRiskRescue: a.Fun.RiskRescue,
-			Inventory:     inv,
-			Memory:        mem,
-			RateWindows:   rateWindows,
-			SeenBiomes:    seenBiomes,
-			SeenRecipes:   seenRecipes,
-			SeenEvents:    seenEvents,
-			FunDecay:      funDecay,
-			MoveTask:      mt,
-			WorkTask:      wt,
+			ID:                           a.ID,
+			Name:                         a.Name,
+			OrgID:                        a.OrgID,
+			CurrentWorldID:               a.CurrentWorldID,
+			WorldSwitchCooldownUntilTick: a.WorldSwitchCooldownUntilTick,
+			Pos:                          a.Pos.ToArray(),
+			Yaw:                          a.Yaw,
+			HP:                           a.HP,
+			Hunger:                       a.Hunger,
+			StaminaMilli:                 a.StaminaMilli,
+			RepTrade:                     a.RepTrade,
+			RepBuild:                     a.RepBuild,
+			RepSocial:                    a.RepSocial,
+			RepLaw:                       a.RepLaw,
+			FunNovelty:                   a.Fun.Novelty,
+			FunCreation:                  a.Fun.Creation,
+			FunSocial:                    a.Fun.Social,
+			FunInfluence:                 a.Fun.Influence,
+			FunNarrative:                 a.Fun.Narrative,
+			FunRiskRescue:                a.Fun.RiskRescue,
+			Inventory:                    inv,
+			Memory:                       mem,
+			RateWindows:                  rateWindows,
+			SeenBiomes:                   seenBiomes,
+			SeenRecipes:                  seenRecipes,
+			SeenEvents:                   seenEvents,
+			FunDecay:                     funDecay,
+			MoveTask:                     mt,
+			WorkTask:                     wt,
 		})
 	}
 
@@ -188,10 +190,11 @@ func (w *World) ExportSnapshot(nowTick uint64) snapshot.SnapshotV1 {
 		}
 		sort.Strings(members)
 		claimSnaps = append(claimSnaps, snapshot.ClaimV1{
-			LandID: c.LandID,
-			Owner:  c.Owner,
-			Anchor: c.Anchor.ToArray(),
-			Radius: c.Radius,
+			LandID:    c.LandID,
+			Owner:     c.Owner,
+			ClaimType: c.ClaimType,
+			Anchor:    c.Anchor.ToArray(),
+			Radius:    c.Radius,
 			Flags: snapshot.ClaimFlagsV1{
 				AllowBuild:  c.Flags.AllowBuild,
 				AllowBreak:  c.Flags.AllowBreak,
@@ -540,18 +543,48 @@ func (w *World) ExportSnapshot(nowTick uint64) snapshot.SnapshotV1 {
 			}
 		}
 		treasury := map[string]int{}
-		for item, n := range o.Treasury {
+		for item, n := range w.orgTreasury(o) {
 			if n != 0 {
 				treasury[item] = n
 			}
 		}
+		var treasuryByWorld map[string]map[string]int
+		if len(o.TreasuryByWorld) > 0 {
+			treasuryByWorld = map[string]map[string]int{}
+			worldIDs := make([]string, 0, len(o.TreasuryByWorld))
+			for wid := range o.TreasuryByWorld {
+				worldIDs = append(worldIDs, wid)
+			}
+			sort.Strings(worldIDs)
+			for _, wid := range worldIDs {
+				src := o.TreasuryByWorld[wid]
+				if len(src) == 0 {
+					continue
+				}
+				dst := map[string]int{}
+				for item, n := range src {
+					if item == "" || n == 0 {
+						continue
+					}
+					dst[item] = n
+				}
+				if len(dst) > 0 {
+					treasuryByWorld[wid] = dst
+				}
+			}
+			if len(treasuryByWorld) == 0 {
+				treasuryByWorld = nil
+			}
+		}
 		orgSnaps = append(orgSnaps, snapshot.OrgV1{
-			OrgID:       o.OrgID,
-			Kind:        string(o.Kind),
-			Name:        o.Name,
-			CreatedTick: o.CreatedTick,
-			Members:     members,
-			Treasury:    treasury,
+			OrgID:           o.OrgID,
+			Kind:            string(o.Kind),
+			Name:            o.Name,
+			CreatedTick:     o.CreatedTick,
+			MetaVersion:     o.MetaVersion,
+			Members:         members,
+			Treasury:        treasury,
+			TreasuryByWorld: treasuryByWorld,
 		})
 	}
 
@@ -640,28 +673,39 @@ func (w *World) ExportSnapshot(nowTick uint64) snapshot.SnapshotV1 {
 		}
 	}
 
+	var starterItems map[string]int
+	if w.cfg.StarterItems != nil {
+		starterItems = map[string]int{}
+		for k, v := range w.cfg.StarterItems {
+			if k != "" && v != 0 {
+				starterItems[k] = v
+			}
+		}
+	}
+
 	return snapshot.SnapshotV1{
 		Header: snapshot.Header{
 			Version: 1,
 			WorldID: w.cfg.ID,
 			Tick:    nowTick,
 		},
-		Seed:               w.cfg.Seed,
-		TickRate:           w.cfg.TickRateHz,
-		DayTicks:           w.cfg.DayTicks,
-		SeasonLengthTicks:  w.cfg.SeasonLengthTicks,
-		ObsRadius:          w.cfg.ObsRadius,
-		Height:             w.cfg.Height,
-		BoundaryR:          w.cfg.BoundaryR,
-		BiomeRegionSize:    w.cfg.BiomeRegionSize,
-		SpawnClearRadius:   w.cfg.SpawnClearRadius,
+		Seed:                            w.cfg.Seed,
+		TickRate:                        w.cfg.TickRateHz,
+		DayTicks:                        w.cfg.DayTicks,
+		SeasonLengthTicks:               w.cfg.SeasonLengthTicks,
+		ObsRadius:                       w.cfg.ObsRadius,
+		Height:                          w.cfg.Height,
+		BoundaryR:                       w.cfg.BoundaryR,
+		BiomeRegionSize:                 w.cfg.BiomeRegionSize,
+		SpawnClearRadius:                w.cfg.SpawnClearRadius,
 		OreClusterProbScalePermille:     w.cfg.OreClusterProbScalePermille,
 		TerrainClusterProbScalePermille: w.cfg.TerrainClusterProbScalePermille,
 		SprinkleStonePermille:           w.cfg.SprinkleStonePermille,
 		SprinkleDirtPermille:            w.cfg.SprinkleDirtPermille,
 		SprinkleLogPermille:             w.cfg.SprinkleLogPermille,
-		SnapshotEveryTicks: w.cfg.SnapshotEveryTicks,
-		DirectorEveryTicks: w.cfg.DirectorEveryTicks,
+		StarterItems:                    starterItems,
+		SnapshotEveryTicks:              w.cfg.SnapshotEveryTicks,
+		DirectorEveryTicks:              w.cfg.DirectorEveryTicks,
 		RateLimits: snapshot.RateLimitsV1{
 			SayWindowTicks:        w.cfg.RateLimits.SayWindowTicks,
 			SayMax:                w.cfg.RateLimits.SayMax,

@@ -108,6 +108,15 @@ func (m *Manager) Disconnect(ctx context.Context, sessionKey string) error {
 	return nil
 }
 
+func (m *Manager) ListWorlds(ctx context.Context, sessionKey string) ([]WorldInfo, error) {
+	s, err := m.getOrCreateSession(sessionKey)
+	if err != nil {
+		return nil, err
+	}
+	_ = ctx
+	return s.ListWorlds(), nil
+}
+
 func (m *Manager) getOrCreateSession(key string) (*Session, error) {
 	if key == "" {
 		key = "default"
@@ -142,8 +151,8 @@ func (m *Manager) getOrCreateSession(key string) (*Session, error) {
 
 	ps := m.state[key]
 	s := NewSession(SessionConfig{
-		Key:        key,
-		WorldWSURL: m.cfg.WorldWSURL,
+		Key:         key,
+		WorldWSURL:  m.cfg.WorldWSURL,
 		ResumeToken: ps.ResumeToken,
 		AgentIDHint: ps.AgentID,
 	}, m.onSessionUpdate)
@@ -186,4 +195,3 @@ func (m *Manager) onSessionUpdate(key string, upd sessionUpdate) {
 	b, _ := json.MarshalIndent(out, "", "  ")
 	_ = writeFileAtomic(m.cfg.StateFile, append(b, '\n'))
 }
-

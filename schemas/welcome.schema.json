@@ -5,7 +5,7 @@
   "required": ["type", "protocol_version", "agent_id", "resume_token", "world_params", "catalogs"],
   "properties": {
     "type": {"const": "WELCOME"},
-    "protocol_version": {"const": "0.9"},
+    "protocol_version": {"const": "1.0"},
     "agent_id": {"type": "string"},
     "resume_token": {"type": "string"},
     "world_params": {
@@ -55,6 +55,24 @@
         "tuning_digest": {"type": "string"}
       },
       "additionalProperties": false
+    },
+    "current_world_id": {"type": "string"},
+    "world_manifest": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["world_id"],
+        "properties": {
+          "world_id": {"type": "string"},
+          "world_type": {"type": "string"},
+          "entry_point_id": {"type": "string"},
+          "requires_permit": {"type": "boolean"},
+          "switch_cooldown_ticks": {"type": "integer", "minimum": 0},
+          "reset_every_ticks": {"type": "integer", "minimum": 0},
+          "reset_notice_ticks": {"type": "integer", "minimum": 0}
+        },
+        "additionalProperties": false
+      }
     }
   },
   "additionalProperties": false

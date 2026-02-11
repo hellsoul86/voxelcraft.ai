@@ -14,6 +14,7 @@ import (
 
 type Bridge interface {
 	GetStatus(ctx context.Context, sessionKey string) (bridge.Status, error)
+	ListWorlds(ctx context.Context, sessionKey string) ([]bridge.WorldInfo, error)
 	GetObs(ctx context.Context, sessionKey string, opts bridge.GetObsOpts) (bridge.ObsResult, error)
 	GetCatalog(ctx context.Context, sessionKey, name string) (bridge.CatalogResult, error)
 	Act(ctx context.Context, sessionKey string, args bridge.ActArgs) (bridge.ActResult, error)
@@ -147,14 +148,19 @@ func (s *Server) toolsList() []map[string]any {
 			"inputSchema": map[string]any{"type": "object", "properties": map[string]any{}, "additionalProperties": false},
 		},
 		{
+			"name":        "voxelcraft.list_worlds",
+			"description": "List accessible worlds for this session.",
+			"inputSchema": map[string]any{"type": "object", "properties": map[string]any{}, "additionalProperties": false},
+		},
+		{
 			"name":        "voxelcraft.get_obs",
 			"description": "Get the latest OBS (optionally wait for a new tick).",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"mode": map[string]any{"type": "string", "enum": []string{"full", "no_voxels", "summary"}},
+					"mode":          map[string]any{"type": "string", "enum": []string{"full", "no_voxels", "summary"}},
 					"wait_new_tick": map[string]any{"type": "boolean"},
-					"timeout_ms": map[string]any{"type": "integer"},
+					"timeout_ms":    map[string]any{"type": "integer"},
 				},
 			},
 		},
@@ -176,8 +182,8 @@ func (s *Server) toolsList() []map[string]any {
 				"type": "object",
 				"properties": map[string]any{
 					"instants": map[string]any{"type": "array", "items": map[string]any{"type": "object"}},
-					"tasks": map[string]any{"type": "array", "items": map[string]any{"type": "object"}},
-					"cancel": map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+					"tasks":    map[string]any{"type": "array", "items": map[string]any{"type": "object"}},
+					"cancel":   map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
 				},
 			},
 		},
@@ -197,6 +203,13 @@ func (s *Server) callTool(ctx context.Context, sessionKey string, name string, a
 			return nil, err
 		}
 		return st, nil
+
+	case "voxelcraft.list_worlds":
+		ws, err := s.bridge.ListWorlds(ctx, sessionKey)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{"worlds": ws}, nil
 
 	case "voxelcraft.get_obs":
 		var o bridge.GetObsOpts
@@ -254,6 +267,7 @@ func (s *Server) callTool(ctx context.Context, sessionKey string, name string, a
 func isKnownTool(name string) bool {
 	switch name {
 	case "voxelcraft.get_status",
+		"voxelcraft.list_worlds",
 		"voxelcraft.get_obs",
 		"voxelcraft.get_catalog",
 		"voxelcraft.act",

@@ -15,6 +15,11 @@
   - `sprinkle_stone_permille`: 12
   - `sprinkle_dirt_permille`: 4
   - `sprinkle_log_permille`: 2 (FOREST only)
+- Starter items for newly joined agents (`starter_items`):
+  - `PLANK`: 20
+  - `COAL`: 10
+  - `STONE`: 20
+  - `BERRIES`: 10
 - Snapshot frequency: every 3000 ticks
 - Director evaluation frequency: every 3000 ticks
 - Rate limits (defaults; see `rate_limits` in `configs/tuning.yaml`):

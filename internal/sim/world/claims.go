@@ -9,13 +9,20 @@ type ClaimFlags struct {
 	AllowTrade  bool
 }
 
+const (
+	ClaimTypeDefault   = "DEFAULT"
+	ClaimTypeHomestead = "HOMESTEAD"
+	ClaimTypeCityCore  = "CITY_CORE"
+)
+
 type LandClaim struct {
-	LandID  string
-	Owner   string // agent id (MVP)
-	Anchor  Vec3i
-	Radius  int // square radius in blocks
-	Flags   ClaimFlags
-	Members map[string]bool // agent ids
+	LandID    string
+	Owner     string // agent id (MVP)
+	ClaimType string
+	Anchor    Vec3i
+	Radius    int // square radius in blocks
+	Flags     ClaimFlags
+	Members   map[string]bool // agent ids
 
 	// MVP configurable parameters (via laws or direct settings).
 	MarketTax     float64 // 0..1
@@ -36,6 +43,28 @@ type LandClaim struct {
 	// Maintenance: stage 0=ok, 1=late (no expansion), 2=unprotected.
 	MaintenanceDueTick uint64
 	MaintenanceStage   int
+}
+
+func defaultClaimTypeForWorld(worldType string) string {
+	switch worldType {
+	case "OVERWORLD":
+		return ClaimTypeHomestead
+	case "CITY_HUB":
+		return ClaimTypeCityCore
+	default:
+		return ClaimTypeDefault
+	}
+}
+
+func defaultClaimFlags(claimType string) ClaimFlags {
+	switch claimType {
+	case ClaimTypeCityCore:
+		return ClaimFlags{AllowBuild: false, AllowBreak: false, AllowDamage: false, AllowTrade: true}
+	case ClaimTypeHomestead:
+		return ClaimFlags{AllowBuild: false, AllowBreak: false, AllowDamage: false, AllowTrade: false}
+	default:
+		return ClaimFlags{AllowBuild: false, AllowBreak: false, AllowDamage: false, AllowTrade: false}
+	}
 }
 
 func (c *LandClaim) Contains(pos Vec3i) bool {

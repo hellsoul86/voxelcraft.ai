@@ -32,7 +32,7 @@ type sessionUpdate struct {
 type onUpdateFn func(key string, upd sessionUpdate)
 
 type Session struct {
-	cfg SessionConfig
+	cfg      SessionConfig
 	onUpdate onUpdateFn
 
 	mu sync.RWMutex
@@ -88,15 +88,15 @@ func NewSession(cfg SessionConfig, onUpdate onUpdateFn) *Session {
 		cfg.Key = "default"
 	}
 	s := &Session{
-		cfg:        cfg,
-		onUpdate:   onUpdate,
-		stop:       make(chan struct{}),
-		done:       make(chan struct{}),
-		agentID:    cfg.AgentIDHint,
+		cfg:         cfg,
+		onUpdate:    onUpdate,
+		stop:        make(chan struct{}),
+		done:        make(chan struct{}),
+		agentID:     cfg.AgentIDHint,
 		resumeToken: cfg.ResumeToken,
-		catalogs:   map[string]catalogEntry{},
-		obsNotify:  make(chan struct{}, 1),
-		lastUsedAt: time.Now(),
+		catalogs:    map[string]catalogEntry{},
+		obsNotify:   make(chan struct{}, 1),
+		lastUsedAt:  time.Now(),
 	}
 	return s
 }
@@ -173,9 +173,29 @@ func (s *Session) Status() Status {
 		ResumeToken:    s.resumeToken,
 		WorldWSURL:     s.cfg.WorldWSURL,
 		LastObsTick:    s.lastObsTick,
+		CurrentWorldID: s.welcome.CurrentWorldID,
 		CatalogDigests: dig,
 		LastError:      s.lastErr,
 	}
+}
+
+func (s *Session) ListWorlds() []WorldInfo {
+	s.touch()
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]WorldInfo, 0, len(s.welcome.WorldManifest))
+	for _, w := range s.welcome.WorldManifest {
+		out = append(out, WorldInfo{
+			WorldID:          w.WorldID,
+			WorldType:        w.WorldType,
+			EntryPointID:     w.EntryPointID,
+			RequiresPermit:   w.RequiresPermit,
+			SwitchCooldown:   w.SwitchCooldown,
+			ResetEveryTicks:  w.ResetEveryTicks,
+			ResetNoticeTicks: w.ResetNoticeTicks,
+		})
+	}
+	return out
 }
 
 func (s *Session) GetObs(ctx context.Context, opts GetObsOpts) (ObsResult, error) {
@@ -233,6 +253,8 @@ func (s *Session) GetObs(ctx context.Context, opts GetObsOpts) (ObsResult, error
 			ProtocolVersion: o.ProtocolVersion,
 			Tick:            o.Tick,
 			AgentID:         o.AgentID,
+			WorldID:         o.WorldID,
+			WorldClock:      o.WorldClock,
 			World:           o.World,
 			Self:            o.Self,
 			Inventory:       o.Inventory,
@@ -255,6 +277,8 @@ type obsSummary struct {
 	ProtocolVersion string `json:"protocol_version"`
 	Tick            uint64 `json:"tick"`
 	AgentID         string `json:"agent_id"`
+	WorldID         string `json:"world_id,omitempty"`
+	WorldClock      uint64 `json:"world_clock,omitempty"`
 
 	World      protocol.WorldObs      `json:"world"`
 	Self       protocol.SelfObs       `json:"self"`
@@ -521,7 +545,7 @@ func (s *Session) connectAndReadLoop() error {
 			if err := json.Unmarshal(msg, &w); err != nil {
 				continue
 			}
-			if w.ProtocolVersion != protocol.Version {
+			if !protocol.IsSupportedVersion(w.ProtocolVersion) {
 				continue
 			}
 			now := time.Now()
@@ -545,7 +569,7 @@ func (s *Session) connectAndReadLoop() error {
 			if err := json.Unmarshal(msg, &c); err != nil {
 				continue
 			}
-			if c.ProtocolVersion != protocol.Version {
+			if !protocol.IsSupportedVersion(c.ProtocolVersion) {
 				continue
 			}
 			name := strings.ToLower(strings.TrimSpace(c.Name))

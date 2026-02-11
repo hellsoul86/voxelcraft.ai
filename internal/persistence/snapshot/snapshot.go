@@ -38,9 +38,10 @@ type SnapshotV1 struct {
 	SprinkleLogPermille             int `json:"sprinkle_log_permille,omitempty"`
 
 	// Operational parameters (captured for deterministic replay/resume).
-	SnapshotEveryTicks int          `json:"snapshot_every_ticks,omitempty"`
-	DirectorEveryTicks int          `json:"director_every_ticks,omitempty"`
-	RateLimits         RateLimitsV1 `json:"rate_limits,omitempty"`
+	StarterItems       map[string]int `json:"starter_items,omitempty"`
+	SnapshotEveryTicks int            `json:"snapshot_every_ticks,omitempty"`
+	DirectorEveryTicks int            `json:"director_every_ticks,omitempty"`
+	RateLimits         RateLimitsV1   `json:"rate_limits,omitempty"`
 
 	LawNoticeTicks int `json:"law_notice_ticks,omitempty"`
 	LawVoteTicks   int `json:"law_vote_ticks,omitempty"`
@@ -117,11 +118,13 @@ type ChunkV1 struct {
 }
 
 type AgentV1 struct {
-	ID    string `json:"id"`
-	Name  string `json:"name"`
-	OrgID string `json:"org_id,omitempty"`
-	Pos   [3]int `json:"pos"`
-	Yaw   int    `json:"yaw"`
+	ID                           string `json:"id"`
+	Name                         string `json:"name"`
+	OrgID                        string `json:"org_id,omitempty"`
+	CurrentWorldID               string `json:"current_world_id,omitempty"`
+	WorldSwitchCooldownUntilTick uint64 `json:"world_switch_cooldown_until_tick,omitempty"`
+	Pos                          [3]int `json:"pos"`
+	Yaw                          int    `json:"yaw"`
 
 	HP            int            `json:"hp"`
 	Hunger        int            `json:"hunger"`
@@ -200,11 +203,12 @@ type WorkTaskV1 struct {
 }
 
 type ClaimV1 struct {
-	LandID string       `json:"land_id"`
-	Owner  string       `json:"owner"`
-	Anchor [3]int       `json:"anchor"`
-	Radius int          `json:"radius"`
-	Flags  ClaimFlagsV1 `json:"flags"`
+	LandID    string       `json:"land_id"`
+	Owner     string       `json:"owner"`
+	ClaimType string       `json:"claim_type,omitempty"`
+	Anchor    [3]int       `json:"anchor"`
+	Radius    int          `json:"radius"`
+	Flags     ClaimFlagsV1 `json:"flags"`
 
 	Members []string `json:"members,omitempty"`
 
@@ -322,12 +326,14 @@ type LawV1 struct {
 }
 
 type OrgV1 struct {
-	OrgID       string            `json:"org_id"`
-	Kind        string            `json:"kind"`
-	Name        string            `json:"name"`
-	CreatedTick uint64            `json:"created_tick"`
-	Members     map[string]string `json:"members"`
-	Treasury    map[string]int    `json:"treasury"`
+	OrgID           string                    `json:"org_id"`
+	Kind            string                    `json:"kind"`
+	Name            string                    `json:"name"`
+	CreatedTick     uint64                    `json:"created_tick"`
+	MetaVersion     uint64                    `json:"meta_version,omitempty"`
+	Members         map[string]string         `json:"members"`
+	Treasury        map[string]int            `json:"treasury"`
+	TreasuryByWorld map[string]map[string]int `json:"treasury_by_world,omitempty"`
 }
 
 type StructureV1 struct {

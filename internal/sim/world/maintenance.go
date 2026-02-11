@@ -74,10 +74,11 @@ func (w *World) payMaintenance(c *LandClaim) bool {
 
 	// Prefer org treasury if claim is owned by an org id.
 	if org := w.orgByID(owner); org != nil {
-		if org.Treasury == nil || !hasItems(org.Treasury, cost) {
+		tr := w.orgTreasury(org)
+		if tr == nil || !hasItems(tr, cost) {
 			return false
 		}
-		deductItems(org.Treasury, cost)
+		deductItems(tr, cost)
 		return true
 	}
 

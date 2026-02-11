@@ -5,9 +5,11 @@
   "required": ["type", "protocol_version", "tick", "agent_id", "world", "self", "inventory", "equipment", "local_rules", "voxels", "entities", "events", "tasks"],
   "properties": {
     "type": {"const": "OBS"},
-    "protocol_version": {"const": "0.9"},
+    "protocol_version": {"const": "1.0"},
     "tick": {"type": "integer", "minimum": 0},
     "agent_id": {"type": "string"},
+    "world_id": {"type": "string"},
+    "world_clock": {"type": "integer", "minimum": 0},
     "world": {
       "type": "object",
       "required": ["time_of_day", "weather", "season_day", "biome"],

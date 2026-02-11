@@ -62,6 +62,17 @@ func (w *World) ImportSnapshot(s snapshot.SnapshotV1) error {
 		w.cfg.SprinkleLogPermille = s.SprinkleLogPermille
 	}
 
+	// Starter items: snapshot is authoritative when present (including explicitly empty).
+	if s.StarterItems != nil {
+		w.cfg.StarterItems = map[string]int{}
+		for item, n := range s.StarterItems {
+			if strings.TrimSpace(item) == "" || n <= 0 {
+				continue
+			}
+			w.cfg.StarterItems[item] = n
+		}
+	}
+
 	// Operational parameters: snapshot is authoritative when present.
 	if s.SnapshotEveryTicks > 0 {
 		w.cfg.SnapshotEveryTicks = s.SnapshotEveryTicks
@@ -182,18 +193,20 @@ func (w *World) ImportSnapshot(s snapshot.SnapshotV1) error {
 	var maxTask uint64
 	for _, a := range s.Agents {
 		aa := &Agent{
-			ID:           a.ID,
-			Name:         a.Name,
-			OrgID:        a.OrgID,
-			Pos:          Vec3i{X: a.Pos[0], Y: a.Pos[1], Z: a.Pos[2]},
-			Yaw:          a.Yaw,
-			HP:           a.HP,
-			Hunger:       a.Hunger,
-			StaminaMilli: a.StaminaMilli,
-			RepTrade:     a.RepTrade,
-			RepBuild:     a.RepBuild,
-			RepSocial:    a.RepSocial,
-			RepLaw:       a.RepLaw,
+			ID:                           a.ID,
+			Name:                         a.Name,
+			OrgID:                        a.OrgID,
+			CurrentWorldID:               a.CurrentWorldID,
+			WorldSwitchCooldownUntilTick: a.WorldSwitchCooldownUntilTick,
+			Pos:                          Vec3i{X: a.Pos[0], Y: a.Pos[1], Z: a.Pos[2]},
+			Yaw:                          a.Yaw,
+			HP:                           a.HP,
+			Hunger:                       a.Hunger,
+			StaminaMilli:                 a.StaminaMilli,
+			RepTrade:                     a.RepTrade,
+			RepBuild:                     a.RepBuild,
+			RepSocial:                    a.RepSocial,
+			RepLaw:                       a.RepLaw,
 			Fun: FunScore{
 				Novelty:    a.FunNovelty,
 				Creation:   a.FunCreation,
@@ -277,6 +290,9 @@ func (w *World) ImportSnapshot(s snapshot.SnapshotV1) error {
 			}
 		}
 		aa.initDefaults()
+		if aa.CurrentWorldID == "" {
+			aa.CurrentWorldID = w.cfg.ID
+		}
 		// Restore fun-score anti-exploit and novelty memory state.
 		if len(a.SeenBiomes) > 0 {
 			for _, b := range a.SeenBiomes {
@@ -320,6 +336,10 @@ func (w *World) ImportSnapshot(s snapshot.SnapshotV1) error {
 	w.claims = map[string]*LandClaim{}
 	var maxLand uint64
 	for _, c := range s.Claims {
+		claimType := c.ClaimType
+		if claimType == "" {
+			claimType = ClaimTypeDefault
+		}
 		members := map[string]bool{}
 		for _, mid := range c.Members {
 			if mid != "" {
@@ -327,10 +347,11 @@ func (w *World) ImportSnapshot(s snapshot.SnapshotV1) error {
 			}
 		}
 		w.claims[c.LandID] = &LandClaim{
-			LandID: c.LandID,
-			Owner:  c.Owner,
-			Anchor: Vec3i{X: c.Anchor[0], Y: c.Anchor[1], Z: c.Anchor[2]},
-			Radius: c.Radius,
+			LandID:    c.LandID,
+			Owner:     c.Owner,
+			ClaimType: claimType,
+			Anchor:    Vec3i{X: c.Anchor[0], Y: c.Anchor[1], Z: c.Anchor[2]},
+			Radius:    c.Radius,
 			Flags: ClaimFlags{
 				AllowBuild:  c.Flags.AllowBuild,
 				AllowBreak:  c.Flags.AllowBreak,
@@ -611,13 +632,49 @@ func (w *World) ImportSnapshot(s snapshot.SnapshotV1) error {
 				treasury[item] = n
 			}
 		}
+		treasuryByWorld := map[string]map[string]int{}
+		for wid, src := range o.TreasuryByWorld {
+			if wid == "" || len(src) == 0 {
+				continue
+			}
+			dst := map[string]int{}
+			for item, n := range src {
+				if item == "" || n == 0 {
+					continue
+				}
+				dst[item] = n
+			}
+			if len(dst) > 0 {
+				treasuryByWorld[wid] = dst
+			}
+		}
+		currentWorldID := w.cfg.ID
+		if currentWorldID == "" {
+			currentWorldID = "GLOBAL"
+		}
+		currentTreasury := treasuryByWorld[currentWorldID]
+		if currentTreasury == nil {
+			currentTreasury = map[string]int{}
+			for item, n := range treasury {
+				if item == "" || n == 0 {
+					continue
+				}
+				currentTreasury[item] = n
+			}
+			treasuryByWorld[currentWorldID] = currentTreasury
+		}
 		oo := &Organization{
-			OrgID:       o.OrgID,
-			Kind:        OrgKind(o.Kind),
-			Name:        o.Name,
-			CreatedTick: o.CreatedTick,
-			Members:     members,
-			Treasury:    treasury,
+			OrgID:           o.OrgID,
+			Kind:            OrgKind(o.Kind),
+			Name:            o.Name,
+			CreatedTick:     o.CreatedTick,
+			MetaVersion:     o.MetaVersion,
+			Members:         members,
+			Treasury:        currentTreasury,
+			TreasuryByWorld: treasuryByWorld,
+		}
+		if oo.MetaVersion == 0 && len(oo.Members) > 0 {
+			oo.MetaVersion = 1
 		}
 		w.orgs[oo.OrgID] = oo
 		if n, ok := parseUintAfterPrefix("ORG", oo.OrgID); ok && n > maxOrg {

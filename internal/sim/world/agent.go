@@ -12,6 +12,9 @@ type Agent struct {
 	Name  string
 	OrgID string // at most one org membership (MVP)
 
+	CurrentWorldID               string
+	WorldSwitchCooldownUntilTick uint64
+
 	// ResumeToken is a transport-level token used for reconnects.
 	// It is intentionally NOT included in snapshots/digests.
 	ResumeToken string

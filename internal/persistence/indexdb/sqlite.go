@@ -71,7 +71,8 @@ type snapshotRow struct {
 }
 
 type snapshotState struct {
-	Tick uint64
+	Tick    uint64
+	WorldID string
 
 	Weather           string
 	WeatherUntilTick  uint64
@@ -452,6 +453,7 @@ func (s *SQLiteIndex) RecordSnapshotState(snap snapshot.SnapshotV1) {
 	}
 	st := snapshotState{
 		Tick:              snap.Header.Tick,
+		WorldID:           snap.Header.WorldID,
 		Weather:           snap.Weather,
 		WeatherUntilTick:  snap.WeatherUntilTick,
 		ActiveEventID:     snap.ActiveEventID,
@@ -964,7 +966,13 @@ nextReq:
 					break
 				}
 				membersJSON, _ := json.Marshal(o.Members)
-				treasuryJSON, _ := json.Marshal(o.Treasury)
+				treasury := o.Treasury
+				if len(treasury) == 0 && len(o.TreasuryByWorld) > 0 {
+					if tw := o.TreasuryByWorld[st.WorldID]; len(tw) > 0 {
+						treasury = tw
+					}
+				}
+				treasuryJSON, _ := json.Marshal(treasury)
 				if _, err := tx.Stmt(insertSnapOrg).Exec(
 					tick,
 					o.OrgID,

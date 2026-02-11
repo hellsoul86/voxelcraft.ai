@@ -7,6 +7,7 @@ type HelloMsg struct {
 	AgentName       string            `json:"agent_name"`
 	Capabilities    HelloCapabilities `json:"capabilities"`
 	Auth            *HelloAuth        `json:"auth,omitempty"`
+	WorldPreference string            `json:"world_preference,omitempty"`
 }
 
 type HelloCapabilities struct {
@@ -26,6 +27,18 @@ type WelcomeMsg struct {
 	ResumeToken     string         `json:"resume_token"`
 	WorldParams     WorldParams    `json:"world_params"`
 	Catalogs        CatalogDigests `json:"catalogs"`
+	CurrentWorldID  string         `json:"current_world_id,omitempty"`
+	WorldManifest   []WorldRef     `json:"world_manifest,omitempty"`
+}
+
+type WorldRef struct {
+	WorldID          string `json:"world_id"`
+	WorldType        string `json:"world_type,omitempty"`
+	EntryPointID     string `json:"entry_point_id,omitempty"`
+	RequiresPermit   bool   `json:"requires_permit,omitempty"`
+	SwitchCooldown   int    `json:"switch_cooldown_ticks,omitempty"`
+	ResetEveryTicks  int    `json:"reset_every_ticks,omitempty"`
+	ResetNoticeTicks int    `json:"reset_notice_ticks,omitempty"`
 }
 
 type WorldParams struct {

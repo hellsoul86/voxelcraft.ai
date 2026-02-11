@@ -1,0 +1,154 @@
+default_world_id: OVERWORLD
+
+worlds:
+  - id: OVERWORLD
+    type: OVERWORLD
+    seed_offset: 0
+    boundary_r: 4000
+    reset_every_ticks: 42000
+    reset_notice_ticks: 0
+    switch_cooldown_ticks: 150
+    entry_point_id: overworld_spawn
+    allow_admin_reset: false
+    entry_points:
+      - id: overworld_spawn
+        x: 0
+        z: 0
+        radius: 8
+        enabled: true
+    allow_claims: true
+    allow_mine: true
+    allow_place: true
+    allow_laws: true
+    allow_trade: true
+    allow_build: true
+
+  - id: MINE_L1
+    type: MINE_L1
+    seed_offset: 1001
+    boundary_r: 1200
+    reset_every_ticks: 3000
+    reset_notice_ticks: 300
+    switch_cooldown_ticks: 150
+    entry_point_id: mine_l1_gate
+    allow_admin_reset: true
+    entry_points:
+      - id: mine_l1_gate
+        x: 0
+        z: 0
+        radius: 8
+        enabled: true
+    allow_claims: false
+    allow_mine: true
+    allow_place: true
+    allow_laws: false
+    allow_trade: false
+    allow_build: false
+
+  - id: MINE_L2
+    type: MINE_L2
+    seed_offset: 2001
+    boundary_r: 1000
+    reset_every_ticks: 6000
+    reset_notice_ticks: 300
+    switch_cooldown_ticks: 150
+    entry_point_id: mine_l2_gate
+    allow_admin_reset: true
+    entry_points:
+      - id: mine_l2_gate
+        x: 0
+        z: 0
+        radius: 8
+        enabled: true
+    allow_claims: false
+    allow_mine: true
+    allow_place: true
+    allow_laws: false
+    allow_trade: false
+    allow_build: false
+
+  - id: MINE_L3
+    type: MINE_L3
+    seed_offset: 3001
+    boundary_r: 800
+    reset_every_ticks: 12000
+    reset_notice_ticks: 300
+    switch_cooldown_ticks: 150
+    entry_point_id: mine_l3_gate
+    allow_admin_reset: true
+    entry_points:
+      - id: mine_l3_gate
+        x: 0
+        z: 0
+        radius: 8
+        enabled: true
+    allow_claims: false
+    allow_mine: true
+    allow_place: true
+    allow_laws: false
+    allow_trade: false
+    allow_build: false
+
+  - id: CITY_HUB
+    type: CITY_HUB
+    seed_offset: 4001
+    boundary_r: 600
+    reset_every_ticks: 42000
+    reset_notice_ticks: 0
+    switch_cooldown_ticks: 150
+    entry_point_id: city_gate
+    allow_admin_reset: false
+    entry_points:
+      - id: city_gate
+        x: 0
+        z: 0
+        radius: 8
+        enabled: true
+    allow_claims: true
+    allow_mine: false
+    allow_place: true
+    allow_laws: true
+    allow_trade: true
+    allow_build: true
+
+switch_routes:
+  - from_world: OVERWORLD
+    to_world: MINE_L1
+    from_entry_id: overworld_spawn
+    to_entry_id: mine_l1_gate
+    requires_permit: false
+  - from_world: MINE_L1
+    to_world: OVERWORLD
+    from_entry_id: mine_l1_gate
+    to_entry_id: overworld_spawn
+    requires_permit: false
+  - from_world: MINE_L1
+    to_world: MINE_L2
+    from_entry_id: mine_l1_gate
+    to_entry_id: mine_l2_gate
+    requires_permit: false
+  - from_world: MINE_L2
+    to_world: MINE_L1
+    from_entry_id: mine_l2_gate
+    to_entry_id: mine_l1_gate
+    requires_permit: false
+  - from_world: MINE_L2
+    to_world: MINE_L3
+    from_entry_id: mine_l2_gate
+    to_entry_id: mine_l3_gate
+    requires_permit: false
+  - from_world: MINE_L3
+    to_world: MINE_L2
+    from_entry_id: mine_l3_gate
+    to_entry_id: mine_l2_gate
+    requires_permit: false
+  - from_world: OVERWORLD
+    to_world: CITY_HUB
+    from_entry_id: overworld_spawn
+    to_entry_id: city_gate
+    requires_permit: false
+  - from_world: CITY_HUB
+    to_world: OVERWORLD
+    from_entry_id: city_gate
+    to_entry_id: overworld_spawn
+    requires_permit: false

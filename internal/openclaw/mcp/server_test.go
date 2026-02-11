@@ -18,6 +18,11 @@ func (stubBridge) GetStatus(ctx context.Context, sessionKey string) (bridge.Stat
 	_ = sessionKey
 	return bridge.Status{Connected: false, WorldWSURL: "ws://example.invalid/v1/ws"}, nil
 }
+func (stubBridge) ListWorlds(ctx context.Context, sessionKey string) ([]bridge.WorldInfo, error) {
+	_ = ctx
+	_ = sessionKey
+	return []bridge.WorldInfo{{WorldID: "OVERWORLD", WorldType: "OVERWORLD"}}, nil
+}
 func (stubBridge) GetObs(ctx context.Context, sessionKey string, opts bridge.GetObsOpts) (bridge.ObsResult, error) {
 	_ = ctx
 	_ = sessionKey
@@ -99,8 +104,8 @@ func TestMCP_Initialize_And_ListTools(t *testing.T) {
 	if !ok {
 		t.Fatalf("missing tools array")
 	}
-	if len(tools) != 5 {
-		t.Fatalf("expected 5 tools, got %d", len(tools))
+	if len(tools) != 6 {
+		t.Fatalf("expected 6 tools, got %d", len(tools))
 	}
 }
 
@@ -125,4 +130,3 @@ func TestMCP_CallTool_Unknown(t *testing.T) {
 		t.Fatalf("expected tool not found (-32601), got %+v", resp.Error)
 	}
 }
-

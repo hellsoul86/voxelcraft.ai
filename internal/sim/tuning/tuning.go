@@ -3,6 +3,7 @@ package tuning
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 
@@ -21,6 +22,9 @@ type Tuning struct {
 	WorldBoundaryR    int   `yaml:"world_boundary_r"`
 
 	WorldGen WorldGen `yaml:"worldgen"`
+
+	// Starter items granted to newly joined agents.
+	StarterItems map[string]int `yaml:"starter_items"`
 
 	SnapshotEveryTicks int `yaml:"snapshot_every_ticks"`
 	DirectorEveryTicks int `yaml:"director_every_ticks"`
@@ -99,6 +103,13 @@ func Defaults() Tuning {
 			SprinkleStonePermille:           12,
 			SprinkleDirtPermille:            4,
 			SprinkleLogPermille:             2,
+		},
+
+		StarterItems: map[string]int{
+			"PLANK":   20,
+			"COAL":    10,
+			"STONE":   20,
+			"BERRIES": 10,
 		},
 
 		SnapshotEveryTicks: 3000,
@@ -182,6 +193,20 @@ func (t Tuning) Validate() error {
 	if t.WorldBoundaryR <= 0 {
 		return fmt.Errorf("world_boundary_r must be > 0 (got %d)", t.WorldBoundaryR)
 	}
+
+	// Starter items.
+	for item, n := range t.StarterItems {
+		if strings.TrimSpace(item) == "" {
+			return fmt.Errorf("starter_items contains empty item id")
+		}
+		if n <= 0 {
+			return fmt.Errorf("starter_items[%s] must be > 0 (got %d)", item, n)
+		}
+		if n > 100000 {
+			return fmt.Errorf("starter_items[%s] too large (got %d)", item, n)
+		}
+	}
+
 	if t.SnapshotEveryTicks <= 0 {
 		return fmt.Errorf("snapshot_every_ticks must be > 0 (got %d)", t.SnapshotEveryTicks)
 	}

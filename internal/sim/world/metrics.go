@@ -5,9 +5,10 @@ package world
 type WorldMetrics struct {
 	Tick uint64 `json:"tick"`
 
-	Agents       int `json:"agents"`
-	Clients      int `json:"clients"`
-	LoadedChunks int `json:"loaded_chunks"`
+	Agents       int    `json:"agents"`
+	Clients      int    `json:"clients"`
+	LoadedChunks int    `json:"loaded_chunks"`
+	ResetTotal   uint64 `json:"reset_total"`
 
 	QueueDepths QueueDepths `json:"queue_depths"`
 
@@ -17,6 +18,8 @@ type WorldMetrics struct {
 	StatsWindow      StatsBucket `json:"stats_window"`
 
 	Director DirectorMetrics `json:"director_metrics"`
+
+	ResourceDensity map[string]float64 `json:"resource_density,omitempty"`
 
 	Weather          string `json:"weather"`
 	WeatherUntilTick uint64 `json:"weather_until_tick"`
