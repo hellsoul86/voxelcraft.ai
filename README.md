@@ -111,6 +111,16 @@ Two workflows are wired:
   - manual dispatch can enable optional `voxelcraft.agent` e2e + swarm
   - agent repo defaults to `<owner>/voxelcraft.agent` and can be overridden by input
 
+Manual dispatch (with `voxelcraft.agent` gate):
+```bash
+gh workflow run "CI Full" -R hellsoul86/voxelcraft.ai \
+  -f with_agent=true \
+  -f agent_repo=hellsoul86/voxelcraft.agent \
+  -f agent_scenario=multiworld_mine_trade_govern \
+  -f agent_count=50 \
+  -f agent_duration=60
+```
+
 Persistence (defaults under `./data`):
 - tick log: `data/worlds/<world>/events/*.jsonl.zst`
 - audit log: `data/worlds/<world>/audit/*.jsonl.zst`

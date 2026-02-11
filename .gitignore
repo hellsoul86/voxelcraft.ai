@@ -22,3 +22,8 @@ bin/
 .vscode/*
 !.vscode/tasks.json
 !.vscode/launch.json
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
