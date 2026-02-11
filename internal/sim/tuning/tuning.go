@@ -20,6 +20,8 @@ type Tuning struct {
 	ObsRadius         int   `yaml:"obs_radius"`
 	WorldBoundaryR    int   `yaml:"world_boundary_r"`
 
+	WorldGen WorldGen `yaml:"worldgen"`
+
 	SnapshotEveryTicks int `yaml:"snapshot_every_ticks"`
 	DirectorEveryTicks int `yaml:"director_every_ticks"`
 
@@ -37,6 +39,16 @@ type Tuning struct {
 	FunDecayWindowTicks    int            `yaml:"fun_decay_window_ticks"`
 	FunDecayBase           float64        `yaml:"fun_decay_base"`
 	ClaimMaintenanceCost   map[string]int `yaml:"claim_maintenance_cost"`
+}
+
+type WorldGen struct {
+	BiomeRegionSize                 int `yaml:"biome_region_size"`
+	SpawnClearRadius                int `yaml:"spawn_clear_radius"`
+	OreClusterProbScalePermille     int `yaml:"ore_cluster_prob_scale_permille"`
+	TerrainClusterProbScalePermille int `yaml:"terrain_cluster_prob_scale_permille"`
+	SprinkleStonePermille           int `yaml:"sprinkle_stone_permille"`
+	SprinkleDirtPermille            int `yaml:"sprinkle_dirt_permille"`
+	SprinkleLogPermille             int `yaml:"sprinkle_log_permille"`
 }
 
 type RateLimits struct {
@@ -78,6 +90,16 @@ func Defaults() Tuning {
 		ChunkSize:         []int{16, 16, 1},
 		ObsRadius:         7,
 		WorldBoundaryR:    4000,
+
+		WorldGen: WorldGen{
+			BiomeRegionSize:                 64,
+			SpawnClearRadius:                6,
+			OreClusterProbScalePermille:     1000,
+			TerrainClusterProbScalePermille: 1000,
+			SprinkleStonePermille:           12,
+			SprinkleDirtPermille:            4,
+			SprinkleLogPermille:             2,
+		},
 
 		SnapshotEveryTicks: 3000,
 		DirectorEveryTicks: 3000,
@@ -150,8 +172,8 @@ func (t Tuning) Validate() error {
 	if t.ChunkSize[0] != 16 || t.ChunkSize[1] != 16 {
 		return fmt.Errorf("chunk_size x/z must be 16 (got %v)", t.ChunkSize)
 	}
-	if t.ChunkSize[2] <= 0 {
-		return fmt.Errorf("chunk_size height must be > 0 (got %d)", t.ChunkSize[2])
+	if t.ChunkSize[2] != 1 {
+		return fmt.Errorf("chunk_size height must be 1 for 2D world (got %d)", t.ChunkSize[2])
 	}
 
 	if t.ObsRadius <= 0 || t.ObsRadius > 32 {
@@ -165,6 +187,29 @@ func (t Tuning) Validate() error {
 	}
 	if t.DirectorEveryTicks <= 0 {
 		return fmt.Errorf("director_every_ticks must be > 0 (got %d)", t.DirectorEveryTicks)
+	}
+
+	// Worldgen tuning.
+	if t.WorldGen.BiomeRegionSize <= 0 || t.WorldGen.BiomeRegionSize > 512 {
+		return fmt.Errorf("worldgen.biome_region_size must be in 1..512 (got %d)", t.WorldGen.BiomeRegionSize)
+	}
+	if t.WorldGen.SpawnClearRadius < 0 || t.WorldGen.SpawnClearRadius > 64 {
+		return fmt.Errorf("worldgen.spawn_clear_radius must be in 0..64 (got %d)", t.WorldGen.SpawnClearRadius)
+	}
+	if t.WorldGen.OreClusterProbScalePermille <= 0 || t.WorldGen.OreClusterProbScalePermille > 5000 {
+		return fmt.Errorf("worldgen.ore_cluster_prob_scale_permille must be in 1..5000 (got %d)", t.WorldGen.OreClusterProbScalePermille)
+	}
+	if t.WorldGen.TerrainClusterProbScalePermille <= 0 || t.WorldGen.TerrainClusterProbScalePermille > 5000 {
+		return fmt.Errorf("worldgen.terrain_cluster_prob_scale_permille must be in 1..5000 (got %d)", t.WorldGen.TerrainClusterProbScalePermille)
+	}
+	if t.WorldGen.SprinkleStonePermille < 0 || t.WorldGen.SprinkleStonePermille > 1000 {
+		return fmt.Errorf("worldgen.sprinkle_stone_permille must be in 0..1000 (got %d)", t.WorldGen.SprinkleStonePermille)
+	}
+	if t.WorldGen.SprinkleDirtPermille < 0 || t.WorldGen.SprinkleDirtPermille > 1000 {
+		return fmt.Errorf("worldgen.sprinkle_dirt_permille must be in 0..1000 (got %d)", t.WorldGen.SprinkleDirtPermille)
+	}
+	if t.WorldGen.SprinkleLogPermille < 0 || t.WorldGen.SprinkleLogPermille > 1000 {
+		return fmt.Errorf("worldgen.sprinkle_log_permille must be in 0..1000 (got %d)", t.WorldGen.SprinkleLogPermille)
 	}
 
 	if err := validateWindowMax("rate_limits.say", t.RateLimits.SayWindowTicks, t.RateLimits.SayMax); err != nil {

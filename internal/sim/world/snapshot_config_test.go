@@ -18,9 +18,17 @@ func TestSnapshotImport_RestoresOperationalConfig(t *testing.T) {
 		DayTicks:          6000,
 		SeasonLengthTicks: 18000,
 		ObsRadius:         7,
-		Height:     1,
+		Height:            1,
 		Seed:              42,
 		BoundaryR:         4000,
+
+		BiomeRegionSize:                 80,
+		SpawnClearRadius:                7,
+		OreClusterProbScalePermille:     1200,
+		TerrainClusterProbScalePermille: 900,
+		SprinkleStonePermille:           9,
+		SprinkleDirtPermille:            3,
+		SprinkleLogPermille:             1,
 
 		SnapshotEveryTicks: 123,
 		DirectorEveryTicks: 456,
@@ -63,6 +71,13 @@ func TestSnapshotImport_RestoresOperationalConfig(t *testing.T) {
 	cfg2.SnapshotEveryTicks = 999
 	cfg2.DirectorEveryTicks = 999
 	cfg2.SeasonLengthTicks = 999
+	cfg2.BiomeRegionSize = 999
+	cfg2.SpawnClearRadius = 99
+	cfg2.OreClusterProbScalePermille = 999
+	cfg2.TerrainClusterProbScalePermille = 999
+	cfg2.SprinkleStonePermille = 99
+	cfg2.SprinkleDirtPermille = 99
+	cfg2.SprinkleLogPermille = 99
 	cfg2.RateLimits.SayWindowTicks = 99
 	cfg2.RateLimits.SayMax = 99
 	cfg2.RateLimits.MarketSayWindowTicks = 99
@@ -99,6 +114,27 @@ func TestSnapshotImport_RestoresOperationalConfig(t *testing.T) {
 	}
 	if got, want := w2.cfg.SeasonLengthTicks, cfg.SeasonLengthTicks; got != want {
 		t.Fatalf("SeasonLengthTicks: got %d want %d", got, want)
+	}
+	if got, want := w2.cfg.BiomeRegionSize, cfg.BiomeRegionSize; got != want {
+		t.Fatalf("BiomeRegionSize: got %d want %d", got, want)
+	}
+	if got, want := w2.cfg.SpawnClearRadius, cfg.SpawnClearRadius; got != want {
+		t.Fatalf("SpawnClearRadius: got %d want %d", got, want)
+	}
+	if got, want := w2.cfg.OreClusterProbScalePermille, cfg.OreClusterProbScalePermille; got != want {
+		t.Fatalf("OreClusterProbScalePermille: got %d want %d", got, want)
+	}
+	if got, want := w2.cfg.TerrainClusterProbScalePermille, cfg.TerrainClusterProbScalePermille; got != want {
+		t.Fatalf("TerrainClusterProbScalePermille: got %d want %d", got, want)
+	}
+	if got, want := w2.cfg.SprinkleStonePermille, cfg.SprinkleStonePermille; got != want {
+		t.Fatalf("SprinkleStonePermille: got %d want %d", got, want)
+	}
+	if got, want := w2.cfg.SprinkleDirtPermille, cfg.SprinkleDirtPermille; got != want {
+		t.Fatalf("SprinkleDirtPermille: got %d want %d", got, want)
+	}
+	if got, want := w2.cfg.SprinkleLogPermille, cfg.SprinkleLogPermille; got != want {
+		t.Fatalf("SprinkleLogPermille: got %d want %d", got, want)
 	}
 	if got, want := w2.cfg.RateLimits.SayWindowTicks, cfg.RateLimits.SayWindowTicks; got != want {
 		t.Fatalf("RateLimits.SayWindowTicks: got %d want %d", got, want)

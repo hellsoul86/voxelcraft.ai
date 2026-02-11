@@ -136,6 +136,11 @@ func TestLaw_AccessPassCore_ChargesOnCoreEntry(t *testing.T) {
 		t.Fatalf("activate: %v", err)
 	}
 
+	// Ensure the path from outside->core is unobstructed (tests should not depend on worldgen).
+	for dx := 0; dx <= 17; dx++ {
+		setAir(w, Vec3i{X: owner.Pos.X + dx, Y: 0, Z: owner.Pos.Z})
+	}
+
 	// Place visitor just outside core (dx=17), within claim.
 	visitor.Pos = Vec3i{X: owner.Pos.X + 17, Y: w.surfaceY(owner.Pos.X+17, owner.Pos.Z), Z: owner.Pos.Z}
 	visitor.Inventory["IRON_INGOT"] = 5
@@ -206,6 +211,11 @@ func TestLaw_AccessPassCore_BlocksIfInsufficientTicket(t *testing.T) {
 	}
 	if err := w.activateLaw(0, law); err != nil {
 		t.Fatalf("activate: %v", err)
+	}
+
+	// Ensure the path from outside->core is unobstructed (tests should not depend on worldgen).
+	for dx := 0; dx <= 17; dx++ {
+		setAir(w, Vec3i{X: owner.Pos.X + dx, Y: 0, Z: owner.Pos.Z})
 	}
 
 	start := Vec3i{X: owner.Pos.X + 17, Y: w.surfaceY(owner.Pos.X+17, owner.Pos.Z), Z: owner.Pos.Z}

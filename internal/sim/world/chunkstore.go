@@ -56,6 +56,15 @@ type WorldGen struct {
 	Seed      int64
 	BoundaryR int // blocks
 
+	// Worldgen tuning.
+	BiomeRegionSize                 int
+	SpawnClearRadius                int
+	OreClusterProbScalePermille     int
+	TerrainClusterProbScalePermille int
+	SprinkleStonePermille           int
+	SprinkleDirtPermille            int
+	SprinkleLogPermille             int
+
 	// Palette ids for core blocks.
 	Air        uint16
 	Dirt       uint16
@@ -163,34 +172,81 @@ func (s *ChunkStore) generateChunk(ch *Chunk) {
 			wx := ch.CX*16 + x
 			wz := ch.CZ*16 + z
 
-			// Pure 2D generation: each (x,z) cell picks a single block.
-			roll := hash2(s.gen.Seed, wx, wz) % 1000
 			b := s.gen.Air
-			switch {
-			case roll < 10:
-				b = s.gen.CrystalOre
-			case roll < 30:
-				b = s.gen.IronOre
-			case roll < 60:
-				b = s.gen.CopperOre
-			case roll < 100:
-				b = s.gen.CoalOre
-			case roll < 180:
-				b = s.gen.Stone
-			case roll < 240:
-				b = s.gen.Log
-			case roll < 300:
-				if biomeFrom(hash2(s.gen.Seed, wx, wz)) == "DESERT" {
-					b = s.gen.Sand
-				} else {
-					b = s.gen.Dirt
+
+			// Guarantee an open "spawn clearing" around the origin so agents can
+			// build and navigate reliably without needing to mine the spawn area.
+			if !withinSpawnClear(wx, wz, s.gen.SpawnClearRadius) {
+				biome := biomeAt(s.gen.Seed, wx, wz, s.gen.BiomeRegionSize)
+
+				// Precedence order: rare ores > common ores > biome terrain.
+				switch {
+				case inCluster(s.gen.Seed+101, wx, wz, 192, 2, scalePermille(200, s.gen.OreClusterProbScalePermille)): // ~0.008%
+					b = s.gen.CrystalOre
+				case inCluster(s.gen.Seed+102, wx, wz, 128, 3, scalePermille(450, s.gen.OreClusterProbScalePermille)): // ~0.15%
+					b = s.gen.IronOre
+				case inCluster(s.gen.Seed+103, wx, wz, 128, 3, scalePermille(450, s.gen.OreClusterProbScalePermille)): // ~0.15%
+					b = s.gen.CopperOre
+				case inCluster(s.gen.Seed+104, wx, wz, 64, 4, scalePermille(650, s.gen.OreClusterProbScalePermille)): // ~0.7%
+					b = s.gen.CoalOre
+				default:
+					// Biome-flavored terrain clutter (kept low so the world stays navigable).
+					switch biome {
+					case "FOREST":
+						switch {
+						case inCluster(s.gen.Seed+201, wx, wz, 48, 4, scalePermille(450, s.gen.TerrainClusterProbScalePermille)):
+							b = s.gen.Log
+						case inCluster(s.gen.Seed+202, wx, wz, 32, 4, scalePermille(500, s.gen.TerrainClusterProbScalePermille)):
+							b = s.gen.Stone
+						case inCluster(s.gen.Seed+203, wx, wz, 48, 3, scalePermille(350, s.gen.TerrainClusterProbScalePermille)):
+							b = s.gen.Dirt
+						case inCluster(s.gen.Seed+204, wx, wz, 96, 2, scalePermille(180, s.gen.TerrainClusterProbScalePermille)):
+							b = s.gen.Gravel
+						default:
+							b = s.gen.Air
+						}
+					case "DESERT":
+						switch {
+						case inCluster(s.gen.Seed+301, wx, wz, 48, 3, scalePermille(550, s.gen.TerrainClusterProbScalePermille)):
+							b = s.gen.Sand
+						case inCluster(s.gen.Seed+302, wx, wz, 32, 4, scalePermille(450, s.gen.TerrainClusterProbScalePermille)):
+							b = s.gen.Stone
+						case inCluster(s.gen.Seed+303, wx, wz, 96, 2, scalePermille(200, s.gen.TerrainClusterProbScalePermille)):
+							b = s.gen.Gravel
+						default:
+							b = s.gen.Air
+						}
+					default: // PLAINS
+						switch {
+						case inCluster(s.gen.Seed+401, wx, wz, 48, 3, scalePermille(400, s.gen.TerrainClusterProbScalePermille)):
+							b = s.gen.Dirt
+						case inCluster(s.gen.Seed+402, wx, wz, 32, 4, scalePermille(500, s.gen.TerrainClusterProbScalePermille)):
+							b = s.gen.Stone
+						case inCluster(s.gen.Seed+403, wx, wz, 96, 2, scalePermille(180, s.gen.TerrainClusterProbScalePermille)):
+							b = s.gen.Gravel
+						default:
+							b = s.gen.Air
+						}
+					}
+
+					// Always sprinkle a small amount of terrain blocks so the world isn't
+					// an endless void of AIR when clusters don't land nearby.
+					if b == s.gen.Air {
+						roll := hash2(s.gen.Seed+999, wx, wz) % 1000
+						switch {
+						case roll < uint64(clampPermille(s.gen.SprinkleStonePermille)):
+							b = s.gen.Stone
+						case roll < uint64(clampPermille(s.gen.SprinkleStonePermille))+uint64(clampPermille(s.gen.SprinkleDirtPermille)):
+							if biome == "DESERT" {
+								b = s.gen.Sand
+							} else {
+								b = s.gen.Dirt
+							}
+						case roll < uint64(clampPermille(s.gen.SprinkleStonePermille))+uint64(clampPermille(s.gen.SprinkleDirtPermille))+uint64(clampPermille(s.gen.SprinkleLogPermille)) && biome == "FOREST":
+							b = s.gen.Log
+						}
+					}
 				}
-			case roll < 330:
-				b = s.gen.Sand
-			case roll < 350:
-				b = s.gen.Gravel
-			default:
-				b = s.gen.Air
 			}
 
 			ch.Blocks[ch.index(x, z)] = b
@@ -249,4 +305,78 @@ func biomeFrom(noise uint64) string {
 	default:
 		return "DESERT"
 	}
+}
+
+func biomeAt(seed int64, x, z, regionSize int) string {
+	if regionSize <= 0 {
+		regionSize = 1
+	}
+	rx := floorDiv(x, regionSize)
+	rz := floorDiv(z, regionSize)
+	return biomeFrom(hash2(seed, rx, rz))
+}
+
+func withinSpawnClear(x, z, radius int) bool {
+	if radius <= 0 {
+		return false
+	}
+	r := int64(radius)
+	dx := int64(x)
+	dz := int64(z)
+	return dx*dx+dz*dz <= r*r
+}
+
+func clampPermille(v int) int {
+	if v < 0 {
+		return 0
+	}
+	if v > 1000 {
+		return 1000
+	}
+	return v
+}
+
+func scalePermille(base uint64, scalePermille int) uint64 {
+	if scalePermille <= 0 {
+		scalePermille = 1000
+	}
+	// Nearest integer rounding: (base*scale + 500)/1000
+	scaled := (base*uint64(scalePermille) + 500) / 1000
+	if scaled > 1000 {
+		return 1000
+	}
+	return scaled
+}
+
+func inCluster(seed int64, x, z, grid, radius int, probPermille uint64) bool {
+	if grid <= 0 || radius <= 0 || probPermille == 0 {
+		return false
+	}
+	gx := floorDiv(x, grid)
+	gz := floorDiv(z, grid)
+	r2 := radius * radius
+
+	for dz := -1; dz <= 1; dz++ {
+		for dx := -1; dx <= 1; dx++ {
+			cgx := gx + dx
+			cgz := gz + dz
+			h := hash2(seed, cgx, cgz)
+			if h%1000 >= probPermille {
+				continue
+			}
+
+			// Deterministically place a center inside this grid cell.
+			ox := int((h >> 10) % uint64(grid))
+			oz := int((h >> 20) % uint64(grid))
+			cx := cgx*grid + ox
+			cz := cgz*grid + oz
+
+			ddx := x - cx
+			ddz := z - cz
+			if ddx*ddx+ddz*ddz <= r2 {
+				return true
+			}
+		}
+	}
+	return false
 }

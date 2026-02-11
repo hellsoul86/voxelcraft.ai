@@ -2,6 +2,11 @@
 
 This repo is the headless server implementation of **VoxelCraft: AI Civilizations**.
 
+World model (v0.9.x MVP):
+- The server currently runs a **2D tilemap** world (`height=1`, `chunk_size=[16,16,1]`).
+- All world-write positions must use `y==0` (e.g. `MINE/PLACE/BUILD_BLUEPRINT/CLAIM_LAND`), otherwise actions fail with `E_INVALID_TARGET`.
+- Old 3D snapshots (`height=64`) are not supported; start a fresh world/data dir.
+
 ## Quickstart
 
 Requirements:
@@ -20,6 +25,7 @@ Resume from snapshots:
 - By default the server will load the latest snapshot under `data/worlds/<world>/snapshots/` if present.
 - To start fresh: `-load_latest_snapshot=false`
 - To load a specific snapshot: `-snapshot /path/to/<tick>.snap.zst`
+  - Note: snapshot import requires `height=1` in v0.9.x; delete old data if you previously ran a 3D build.
 
 Run a simple bot client:
 ```bash

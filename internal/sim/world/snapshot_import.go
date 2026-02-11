@@ -39,6 +39,29 @@ func (w *World) ImportSnapshot(s snapshot.SnapshotV1) error {
 		return fmt.Errorf("snapshot boundary_r mismatch: cfg=%d snap=%d", w.cfg.BoundaryR, s.BoundaryR)
 	}
 
+	// Worldgen tuning: snapshot is authoritative when present.
+	if s.BiomeRegionSize > 0 {
+		w.cfg.BiomeRegionSize = s.BiomeRegionSize
+	}
+	if s.SpawnClearRadius > 0 {
+		w.cfg.SpawnClearRadius = s.SpawnClearRadius
+	}
+	if s.OreClusterProbScalePermille > 0 {
+		w.cfg.OreClusterProbScalePermille = s.OreClusterProbScalePermille
+	}
+	if s.TerrainClusterProbScalePermille > 0 {
+		w.cfg.TerrainClusterProbScalePermille = s.TerrainClusterProbScalePermille
+	}
+	if s.SprinkleStonePermille > 0 {
+		w.cfg.SprinkleStonePermille = s.SprinkleStonePermille
+	}
+	if s.SprinkleDirtPermille > 0 {
+		w.cfg.SprinkleDirtPermille = s.SprinkleDirtPermille
+	}
+	if s.SprinkleLogPermille > 0 {
+		w.cfg.SprinkleLogPermille = s.SprinkleLogPermille
+	}
+
 	// Operational parameters: snapshot is authoritative when present.
 	if s.SnapshotEveryTicks > 0 {
 		w.cfg.SnapshotEveryTicks = s.SnapshotEveryTicks
@@ -119,7 +142,18 @@ func (w *World) ImportSnapshot(s snapshot.SnapshotV1) error {
 	w.activeEventRadius = s.ActiveEventRadius
 
 	// Rebuild chunks.
-	store := NewChunkStore(w.chunks.gen)
+	gen := w.chunks.gen
+	gen.Seed = w.cfg.Seed
+	gen.BoundaryR = w.cfg.BoundaryR
+	gen.BiomeRegionSize = w.cfg.BiomeRegionSize
+	gen.SpawnClearRadius = w.cfg.SpawnClearRadius
+	gen.OreClusterProbScalePermille = w.cfg.OreClusterProbScalePermille
+	gen.TerrainClusterProbScalePermille = w.cfg.TerrainClusterProbScalePermille
+	gen.SprinkleStonePermille = w.cfg.SprinkleStonePermille
+	gen.SprinkleDirtPermille = w.cfg.SprinkleDirtPermille
+	gen.SprinkleLogPermille = w.cfg.SprinkleLogPermille
+
+	store := NewChunkStore(gen)
 	for _, ch := range s.Chunks {
 		if ch.Height != 1 {
 			return fmt.Errorf("snapshot chunk height mismatch: got %d want 1", ch.Height)

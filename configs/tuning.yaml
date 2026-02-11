@@ -9,6 +9,15 @@ chunk_size: [16, 16, 1]
 obs_radius: 7
 world_boundary_r: 4000
 
+worldgen:
+  biome_region_size: 64
+  spawn_clear_radius: 6
+  ore_cluster_prob_scale_permille: 1000
+  terrain_cluster_prob_scale_permille: 1000
+  sprinkle_stone_permille: 12
+  sprinkle_dirt_permille: 4
+  sprinkle_log_permille: 2
+
 rate_limits:
   say_window_ticks: 50
   say_max: 5

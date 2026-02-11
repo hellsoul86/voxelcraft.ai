@@ -347,7 +347,7 @@ func (w *World) funOnBiome(a *Agent, nowTick uint64) {
 	if a == nil {
 		return
 	}
-	b := biomeFrom(hash2(w.cfg.Seed, a.Pos.X, a.Pos.Z))
+	b := biomeAt(w.cfg.Seed, a.Pos.X, a.Pos.Z, w.cfg.BiomeRegionSize)
 	if b == "" {
 		return
 	}

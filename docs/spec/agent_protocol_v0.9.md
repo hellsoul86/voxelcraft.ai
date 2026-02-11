@@ -46,8 +46,8 @@
   "resume_token":"resume_world_1_...",
   "world_params":{
     "tick_rate_hz":5,
-    "chunk_size":[16,16,64],
-    "height":64,
+    "chunk_size":[16,16,1],
+    "height":1,
     "obs_radius":7,
     "day_ticks":6000,
     "seed":1337
@@ -106,6 +106,8 @@ CATALOG `data` 形状（MVP）：
 关键点：
 - `OBS.tick` 是权威 tick
 - agent 以它为基准回 `ACT.tick`（通常等于最后收到的 OBS.tick）
+- **MVP（当前实现）为 2D tilemap**：所有会写世界的动作（如 `MINE/PLACE/BUILD_BLUEPRINT/CLAIM_LAND`）必须 `y==0`，否则返回 `E_INVALID_TARGET`。
+- 兼容读语义：`GetBlock(y!=0)` 视为 `AIR`；因此 `OBS.voxels` 仍是 3D cube，但除 `y==0` 层外通常全是 `AIR`（RLE 压缩后很小）。
 
 见 `schemas/obs.schema.json`。
 

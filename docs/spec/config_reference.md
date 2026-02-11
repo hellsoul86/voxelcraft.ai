@@ -4,9 +4,17 @@
 - Tick rate: 5Hz (`1 tick = 200ms`)
 - Day ticks: 6000
 - Season length: 42000 ticks (7 in-game days) (`season_length_ticks`)
-- Chunk size: 16×16×64
-- Observation radius: 7 (15×15×15 cube)
+- Chunk size: 16×16×1 (MVP 2D tilemap; only `y==0` is writable)
+- Observation radius: 7 (15×15×15 cube; in 2D only the `y==0` layer is typically non-AIR)
 - World boundary radius: 4000 blocks
+- Worldgen (defaults; see `worldgen` in `configs/tuning.yaml`):
+  - `biome_region_size`: 64 (biomes are contiguous 64×64 regions)
+  - `spawn_clear_radius`: 6 (spawn clearing around origin)
+  - `ore_cluster_prob_scale_permille`: 1000 (scale factor for ore cluster probabilities)
+  - `terrain_cluster_prob_scale_permille`: 1000 (scale factor for terrain cluster probabilities)
+  - `sprinkle_stone_permille`: 12
+  - `sprinkle_dirt_permille`: 4
+  - `sprinkle_log_permille`: 2 (FOREST only)
 - Snapshot frequency: every 3000 ticks
 - Director evaluation frequency: every 3000 ticks
 - Rate limits (defaults; see `rate_limits` in `configs/tuning.yaml`):

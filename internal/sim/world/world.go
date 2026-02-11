@@ -30,6 +30,15 @@ type WorldConfig struct {
 	Seed              int64
 	BoundaryR         int
 
+	// Worldgen tuning (pure 2D tilemap).
+	BiomeRegionSize                 int
+	SpawnClearRadius                int
+	OreClusterProbScalePermille     int
+	TerrainClusterProbScalePermille int
+	SprinkleStonePermille           int
+	SprinkleDirtPermille            int
+	SprinkleLogPermille             int
+
 	// Operational parameters. These are included in snapshots for deterministic replay/resume.
 	SnapshotEveryTicks int
 	DirectorEveryTicks int
@@ -84,6 +93,27 @@ func (c *WorldConfig) applyDefaults() {
 	}
 	if c.BoundaryR <= 0 {
 		c.BoundaryR = 4000
+	}
+	if c.BiomeRegionSize <= 0 {
+		c.BiomeRegionSize = 64
+	}
+	if c.SpawnClearRadius <= 0 {
+		c.SpawnClearRadius = 6
+	}
+	if c.OreClusterProbScalePermille <= 0 {
+		c.OreClusterProbScalePermille = 1000
+	}
+	if c.TerrainClusterProbScalePermille <= 0 {
+		c.TerrainClusterProbScalePermille = 1000
+	}
+	if c.SprinkleStonePermille <= 0 {
+		c.SprinkleStonePermille = 12
+	}
+	if c.SprinkleDirtPermille <= 0 {
+		c.SprinkleDirtPermille = 4
+	}
+	if c.SprinkleLogPermille <= 0 {
+		c.SprinkleLogPermille = 2
 	}
 	if c.SnapshotEveryTicks <= 0 {
 		c.SnapshotEveryTicks = 3000
@@ -338,6 +368,14 @@ func New(cfg WorldConfig, cats *catalogs.Catalogs) (*World, error) {
 	gen := WorldGen{
 		Seed:       cfg.Seed,
 		BoundaryR:  cfg.BoundaryR,
+		// Worldgen tuning.
+		BiomeRegionSize:                 cfg.BiomeRegionSize,
+		SpawnClearRadius:                cfg.SpawnClearRadius,
+		OreClusterProbScalePermille:     cfg.OreClusterProbScalePermille,
+		TerrainClusterProbScalePermille: cfg.TerrainClusterProbScalePermille,
+		SprinkleStonePermille:           cfg.SprinkleStonePermille,
+		SprinkleDirtPermille:            cfg.SprinkleDirtPermille,
+		SprinkleLogPermille:             cfg.SprinkleLogPermille,
 		Air:        air,
 		Dirt:       dirt,
 		Grass:      grass,
@@ -2604,7 +2642,7 @@ func (w *World) systemMovement(nowTick uint64) {
 		}
 		a.StaminaMilli -= moveCost
 
-		// Deterministic 2.5D stepping with minimal obstacle avoidance:
+		// Deterministic 2D stepping with minimal obstacle avoidance:
 		// - Pick primary axis by abs(dx)>=abs(dz)
 		// - If the next cell on the primary axis is blocked by a solid block, try the secondary axis.
 		dx := target.X - a.Pos.X
@@ -2650,6 +2688,14 @@ func (w *World) systemMovement(nowTick uint64) {
 				if !w.blockSolid(w.chunks.GetBlock(next2)) {
 					next = next2
 				}
+			}
+		}
+
+		// If both primary+secondary are blocked, attempt a small deterministic detour so agents
+		// don't have to constantly re-issue MOVE_TO on cluttered terrain.
+		if w.blockSolid(w.chunks.GetBlock(next)) {
+			if alt, ok := w.detourStep2D(a.Pos, target, 16); ok {
+				next = alt
 			}
 		}
 
@@ -3663,13 +3709,29 @@ func (w *World) buildObs(a *Agent, cl *clientState, nowTick uint64) protocol.Obs
 	r := w.cfg.ObsRadius
 	sensorBlock, hasSensor := w.catalogs.Blocks.Index["SENSOR"]
 	sensorsNear := make([]Vec3i, 0, 4)
-	curr := make([]uint16, 0, (2*r+1)*(2*r+1)*(2*r+1))
-	for dy := -r; dy <= r; dy++ {
+	dim := 2*r + 1
+	plane := dim * dim
+	total := plane * dim
+	curr := make([]uint16, total)
+
+	// 2D world optimization: only the y==0 slice can be non-AIR; all other y are read-as-AIR.
+	// Keep the same scan order (dy outer, dz middle, dx inner) so DELTA ops remain stable.
+	air := w.chunks.gen.Air
+	if air != 0 {
+		for i := range curr {
+			curr[i] = air
+		}
+	}
+	// Fill only the slice where world Y equals 0.
+	dy0 := -center.Y
+	if dy0 >= -r && dy0 <= r {
+		layerOff := (dy0 + r) * plane
 		for dz := -r; dz <= r; dz++ {
+			rowOff := layerOff + (dz+r)*dim
 			for dx := -r; dx <= r; dx++ {
-				p := Vec3i{X: center.X + dx, Y: center.Y + dy, Z: center.Z + dz}
+				p := Vec3i{X: center.X + dx, Y: 0, Z: center.Z + dz}
 				b := w.chunks.GetBlock(p)
-				curr = append(curr, b)
+				curr[rowOff+(dx+r)] = b
 				if hasSensor && b == sensorBlock {
 					sensorsNear = append(sensorsNear, p)
 				}
@@ -3990,7 +4052,7 @@ func (w *World) buildObs(a *Agent, cl *clientState, nowTick uint64) protocol.Obs
 			TimeOfDay:           float64(int(nowTick)%w.cfg.DayTicks) / float64(w.cfg.DayTicks),
 			Weather:             w.weather,
 			SeasonDay:           w.seasonDay(nowTick),
-			Biome:               biomeFrom(hash2(w.cfg.Seed, a.Pos.X, a.Pos.Z)),
+			Biome:               biomeAt(w.cfg.Seed, a.Pos.X, a.Pos.Z, w.cfg.BiomeRegionSize),
 			ActiveEvent:         w.activeEventID,
 			ActiveEventEndsTick: w.activeEventEnds,
 		},

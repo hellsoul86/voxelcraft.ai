@@ -28,6 +28,15 @@ type SnapshotV1 struct {
 	Height            int   `json:"height"`
 	BoundaryR         int   `json:"boundary_r"`
 
+	// Worldgen tuning (pure 2D tilemap).
+	BiomeRegionSize                 int `json:"biome_region_size,omitempty"`
+	SpawnClearRadius                int `json:"spawn_clear_radius,omitempty"`
+	OreClusterProbScalePermille     int `json:"ore_cluster_prob_scale_permille,omitempty"`
+	TerrainClusterProbScalePermille int `json:"terrain_cluster_prob_scale_permille,omitempty"`
+	SprinkleStonePermille           int `json:"sprinkle_stone_permille,omitempty"`
+	SprinkleDirtPermille            int `json:"sprinkle_dirt_permille,omitempty"`
+	SprinkleLogPermille             int `json:"sprinkle_log_permille,omitempty"`
+
 	// Operational parameters (captured for deterministic replay/resume).
 	SnapshotEveryTicks int          `json:"snapshot_every_ticks,omitempty"`
 	DirectorEveryTicks int          `json:"director_every_ticks,omitempty"`

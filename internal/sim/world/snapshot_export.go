@@ -653,6 +653,13 @@ func (w *World) ExportSnapshot(nowTick uint64) snapshot.SnapshotV1 {
 		ObsRadius:          w.cfg.ObsRadius,
 		Height:             w.cfg.Height,
 		BoundaryR:          w.cfg.BoundaryR,
+		BiomeRegionSize:    w.cfg.BiomeRegionSize,
+		SpawnClearRadius:   w.cfg.SpawnClearRadius,
+		OreClusterProbScalePermille:     w.cfg.OreClusterProbScalePermille,
+		TerrainClusterProbScalePermille: w.cfg.TerrainClusterProbScalePermille,
+		SprinkleStonePermille:           w.cfg.SprinkleStonePermille,
+		SprinkleDirtPermille:            w.cfg.SprinkleDirtPermille,
+		SprinkleLogPermille:             w.cfg.SprinkleLogPermille,
 		SnapshotEveryTicks: w.cfg.SnapshotEveryTicks,
 		DirectorEveryTicks: w.cfg.DirectorEveryTicks,
 		RateLimits: snapshot.RateLimitsV1{
