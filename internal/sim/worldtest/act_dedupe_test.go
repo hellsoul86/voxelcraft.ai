@@ -1,41 +1,21 @@
-package world
+package worldtest
 
 import (
 	"context"
-	"os"
-	"path/filepath"
 	"testing"
 	"time"
 
 	"voxelcraft.ai/internal/protocol"
 	"voxelcraft.ai/internal/sim/catalogs"
+	world "voxelcraft.ai/internal/sim/world"
 )
 
-func findRepoRoot(t *testing.T) string {
-	t.Helper()
-	dir, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("getwd: %v", err)
-	}
-	for {
-		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
-			return dir
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			t.Fatalf("could not find repo root from %s", dir)
-		}
-		dir = parent
-	}
-}
-
 func TestWorldActDedupe_CheckOrRemember(t *testing.T) {
-	root := findRepoRoot(t)
-	cats, err := catalogs.Load(filepath.Join(root, "configs"))
+	cats, err := catalogs.Load("../../../configs")
 	if err != nil {
 		t.Fatalf("load catalogs: %v", err)
 	}
-	w, err := New(WorldConfig{
+	w, err := world.New(world.WorldConfig{
 		ID:         "W1",
 		TickRateHz: 20,
 		Height:     1,
@@ -45,12 +25,15 @@ func TestWorldActDedupe_CheckOrRemember(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new world: %v", err)
 	}
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go func() { _ = w.Run(ctx) }()
+	done := make(chan error, 1)
+	go func() { done <- w.Run(ctx) }()
 
 	callCtx, callCancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer callCancel()
+
 	first := protocol.AckMsg{
 		Type:            protocol.TypeAck,
 		ProtocolVersion: "1.1",
@@ -82,4 +65,12 @@ func TestWorldActDedupe_CheckOrRemember(t *testing.T) {
 	if got2.Message != first.Message {
 		t.Fatalf("duplicate should return original ack, got message=%q want %q", got2.Message, first.Message)
 	}
+
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatalf("world.Run did not exit")
+	}
 }
+
