@@ -133,7 +133,7 @@ Recent decomposition in this iteration:
   - `feature/observer/stream`: wanted-chunk selection and stream clamp helpers
 - Persistence decomposition extended:
   - `feature/persistence/snapshot`: snapshot-level positive-map adapters
-  - `feature/persistence/digest`: digest helper adapter surface
+  - `feature/persistence/digest`: digest helper adapter surface + full state digest builder
 - Governance/contracts instant decomposition extended:
   - `feature/governance/instants`: admin and overlap helper DTOs
   - `feature/contracts/instants`: terminal context helper DTOs
@@ -171,7 +171,7 @@ Observation:
 - observer stream selection and exports live under `feature/observer/stream`
 
 Determinism and persistence:
-- `state_digest*.go` (uses `io/digestcodec`)
+- `digest_facade.go` (calls `feature/persistence/digest/state_digest.go`, uses `io/digestcodec`)
 - `snapshot_facade.go` (uses `io/snapshotcodec` + `feature/persistence/snapshot`)
 - `audit_helpers.go`
 
