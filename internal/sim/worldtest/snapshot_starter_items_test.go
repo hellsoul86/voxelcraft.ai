@@ -1,10 +1,11 @@
-package world
+package worldtest
 
 import (
 	"reflect"
 	"testing"
 
 	"voxelcraft.ai/internal/sim/catalogs"
+	world "voxelcraft.ai/internal/sim/world"
 )
 
 func TestSnapshotImport_RestoresStarterItems(t *testing.T) {
@@ -13,7 +14,7 @@ func TestSnapshotImport_RestoresStarterItems(t *testing.T) {
 		t.Fatalf("load catalogs: %v", err)
 	}
 
-	cfg := WorldConfig{
+	cfg := world.WorldConfig{
 		ID:        "test",
 		Seed:      7,
 		Height:    1,
@@ -26,17 +27,15 @@ func TestSnapshotImport_RestoresStarterItems(t *testing.T) {
 			"BERRIES": 3,
 		},
 	}
-	w1, err := New(cfg, cats)
+	w1, err := world.New(cfg, cats)
 	if err != nil {
 		t.Fatalf("world1: %v", err)
 	}
 	snap := w1.ExportSnapshot(0)
 
 	cfg2 := cfg
-	cfg2.StarterItems = map[string]int{
-		"PLANK": 99,
-	}
-	w2, err := New(cfg2, cats)
+	cfg2.StarterItems = map[string]int{"PLANK": 99}
+	w2, err := world.New(cfg2, cats)
 	if err != nil {
 		t.Fatalf("world2: %v", err)
 	}
@@ -44,7 +43,7 @@ func TestSnapshotImport_RestoresStarterItems(t *testing.T) {
 		t.Fatalf("import: %v", err)
 	}
 
-	if !reflect.DeepEqual(w2.cfg.StarterItems, cfg.StarterItems) {
-		t.Fatalf("StarterItems mismatch: got=%v want=%v", w2.cfg.StarterItems, cfg.StarterItems)
+	if got := w2.Config().StarterItems; !reflect.DeepEqual(got, cfg.StarterItems) {
+		t.Fatalf("StarterItems mismatch: got=%v want=%v", got, cfg.StarterItems)
 	}
 }

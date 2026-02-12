@@ -1,9 +1,10 @@
-package world
+package worldtest
 
 import (
 	"testing"
 
 	"voxelcraft.ai/internal/sim/catalogs"
+	world "voxelcraft.ai/internal/sim/world"
 )
 
 func TestSnapshotExportImport_RoundTripDigest(t *testing.T) {
@@ -12,7 +13,7 @@ func TestSnapshotExportImport_RoundTripDigest(t *testing.T) {
 		t.Fatalf("load catalogs: %v", err)
 	}
 
-	cfg := WorldConfig{
+	cfg := world.WorldConfig{
 		ID:         "test",
 		TickRateHz: 5,
 		DayTicks:   6000,
@@ -22,35 +23,23 @@ func TestSnapshotExportImport_RoundTripDigest(t *testing.T) {
 		BoundaryR:  4000,
 	}
 
-	w1, err := New(cfg, cats)
-	if err != nil {
-		t.Fatalf("world1: %v", err)
-	}
-
-	// Join one agent and make a few deterministic changes.
-	out := make(chan []byte, 1)
-	resp := make(chan JoinResponse, 1)
-	w1.handleJoin(JoinRequest{Name: "bot", DeltaVoxels: false, Out: out, Resp: resp})
-	jr := <-resp
-	a := w1.agents[jr.Welcome.AgentID]
-	if a == nil {
-		t.Fatalf("missing agent")
-	}
+	h := NewHarness(t, cfg, cats, "bot")
+	obs := h.LastObs()
+	pos := world.Vec3i{X: obs.Self.Pos[0], Y: 0, Z: obs.Self.Pos[2]}
 
 	// Place one block in the world directly.
-	stoneID := w1.catalogs.Blocks.Index["STONE"]
-	w1.chunks.SetBlock(a.Pos, stoneID)
+	h.SetBlock(pos, "STONE")
 
 	// Advance a few ticks (no actions).
 	for i := 0; i < 10; i++ {
-		w1.step(nil, nil, nil)
+		h.StepNoop()
 	}
 
-	snapTick := w1.CurrentTick() - 1
-	d1 := w1.stateDigest(snapTick)
-	snap := w1.ExportSnapshot(snapTick)
+	snapTick := h.W.CurrentTick() - 1
+	d1 := h.W.DebugStateDigest(snapTick)
+	snap := h.W.ExportSnapshot(snapTick)
 
-	w2, err := New(cfg, cats)
+	w2, err := world.New(cfg, cats)
 	if err != nil {
 		t.Fatalf("world2: %v", err)
 	}
@@ -60,7 +49,7 @@ func TestSnapshotExportImport_RoundTripDigest(t *testing.T) {
 	if got, want := w2.CurrentTick(), snapTick+1; got != want {
 		t.Fatalf("tick after import: got %d want %d", got, want)
 	}
-	d2 := w2.stateDigest(snapTick)
+	d2 := w2.DebugStateDigest(snapTick)
 	if d1 != d2 {
 		t.Fatalf("digest mismatch after import: %s vs %s", d1, d2)
 	}
