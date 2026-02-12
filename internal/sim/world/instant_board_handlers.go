@@ -4,7 +4,9 @@ import (
 	"strings"
 
 	"voxelcraft.ai/internal/protocol"
-	featureobserver "voxelcraft.ai/internal/sim/world/feature/observer"
+	postingpkg "voxelcraft.ai/internal/sim/world/feature/observer/posting"
+	searchpkg "voxelcraft.ai/internal/sim/world/feature/observer/search"
+	targetspkg "voxelcraft.ai/internal/sim/world/feature/observer/targets"
 )
 
 func handleInstantPostBoard(w *World, a *Agent, inst protocol.InstantReq, nowTick uint64) {
@@ -15,8 +17,8 @@ func handleInstantPostBoard(w *World, a *Agent, inst protocol.InstantReq, nowTic
 		a.AddEvent(ev)
 		return
 	}
-	boardID := featureobserver.ResolveBoardID(inst.BoardID, inst.TargetID)
-	if ok, code, message := featureobserver.ValidatePostInput(boardID, inst.Title, inst.Body); !ok {
+	boardID := postingpkg.ResolveBoardID(inst.BoardID, inst.TargetID)
+	if ok, code, message := postingpkg.ValidatePostInput(boardID, inst.Title, inst.Body); !ok {
 		a.AddEvent(actionResult(nowTick, inst.ID, false, code, message))
 		return
 	}
@@ -25,21 +27,18 @@ func handleInstantPostBoard(w *World, a *Agent, inst protocol.InstantReq, nowTic
 	physical := false
 	var postPos Vec3i
 	if typ, pos, ok := parseContainerID(boardID); ok {
-		if typ != "BULLETIN_BOARD" {
-			a.AddEvent(actionResult(nowTick, inst.ID, false, "E_BAD_REQUEST", "invalid board target"))
-			return
-		}
-		if w.blockName(w.chunks.GetBlock(pos)) != "BULLETIN_BOARD" {
-			a.AddEvent(actionResult(nowTick, inst.ID, false, "E_INVALID_TARGET", "bulletin board not found"))
-			return
-		}
-		if Manhattan(a.Pos, pos) > 3 {
-			a.AddEvent(actionResult(nowTick, inst.ID, false, "E_BLOCKED", "too far"))
-			return
-		}
 		// Posting in claimed land may be restricted by allow_trade for visitors.
+		postingAllowed := true
 		if land := w.landAt(pos); land != nil && !w.isLandMember(a.ID, land) && !land.Flags.AllowTrade {
-			a.AddEvent(actionResult(nowTick, inst.ID, false, "E_NO_PERMISSION", "posting not allowed here"))
+			postingAllowed = false
+		}
+		if ok, code, message := targetspkg.ValidatePhysicalBoardTarget(
+			typ,
+			w.blockName(w.chunks.GetBlock(pos)),
+			Manhattan(a.Pos, pos),
+			postingAllowed,
+		); !ok {
+			a.AddEvent(actionResult(nowTick, inst.ID, false, code, message))
 			return
 		}
 		physical = true
@@ -73,23 +72,24 @@ func handleInstantPostBoard(w *World, a *Agent, inst protocol.InstantReq, nowTic
 }
 
 func handleInstantSearchBoard(w *World, a *Agent, inst protocol.InstantReq, nowTick uint64) {
-	boardID := featureobserver.ResolveBoardID(inst.BoardID, inst.TargetID)
+	boardID := postingpkg.ResolveBoardID(inst.BoardID, inst.TargetID)
 	query := strings.TrimSpace(inst.Text)
-	if ok, code, message := featureobserver.ValidateSearchInput(boardID, query); !ok {
+	if ok, code, message := postingpkg.ValidateSearchInput(boardID, query); !ok {
 		a.AddEvent(actionResult(nowTick, inst.ID, false, code, message))
 		return
 	}
 
-	limit := featureobserver.NormalizeBoardSearchLimit(inst.Limit)
+	limit := searchpkg.NormalizeBoardSearchLimit(inst.Limit)
 
 	// Physical bulletin boards are addressed by id "BULLETIN_BOARD@x,y,z" and require proximity.
 	if typ, pos, ok := parseContainerID(boardID); ok && typ == "BULLETIN_BOARD" {
-		if w.blockName(w.chunks.GetBlock(pos)) != "BULLETIN_BOARD" {
-			a.AddEvent(actionResult(nowTick, inst.ID, false, "E_INVALID_TARGET", "bulletin board not found"))
-			return
-		}
-		if Manhattan(a.Pos, pos) > 3 {
-			a.AddEvent(actionResult(nowTick, inst.ID, false, "E_BLOCKED", "too far"))
+		if ok, code, message := targetspkg.ValidatePhysicalBoardTarget(
+			typ,
+			w.blockName(w.chunks.GetBlock(pos)),
+			Manhattan(a.Pos, pos),
+			true,
+		); !ok {
+			a.AddEvent(actionResult(nowTick, inst.ID, false, code, message))
 			return
 		}
 		boardID = boardIDAt(pos) // canonicalize
@@ -104,7 +104,7 @@ func handleInstantSearchBoard(w *World, a *Agent, inst protocol.InstantReq, nowT
 		return
 	}
 
-	results := featureobserver.MatchBoardPosts(b.Posts, query, limit)
+	results := searchpkg.MatchBoardPosts(b.Posts, query, limit)
 	a.AddEvent(protocol.Event{
 		"t":           nowTick,
 		"type":        "BOARD_SEARCH",
@@ -123,20 +123,17 @@ func handleInstantSetSign(w *World, a *Agent, inst protocol.InstantReq, nowTick 
 		return
 	}
 	typ, pos, ok := parseContainerID(target)
-	if !ok || typ != "SIGN" {
+	if !ok {
 		a.AddEvent(actionResult(nowTick, inst.ID, false, "E_BAD_REQUEST", "invalid sign target"))
 		return
 	}
-	if w.blockName(w.chunks.GetBlock(pos)) != "SIGN" {
-		a.AddEvent(actionResult(nowTick, inst.ID, false, "E_INVALID_TARGET", "sign not found"))
-		return
-	}
-	if Manhattan(a.Pos, pos) > 3 {
-		a.AddEvent(actionResult(nowTick, inst.ID, false, "E_BLOCKED", "too far"))
-		return
-	}
-	if len(inst.Text) > 200 {
-		a.AddEvent(actionResult(nowTick, inst.ID, false, "E_BAD_REQUEST", "text too large"))
+	if ok, code, message := targetspkg.ValidateSetSignTarget(
+		typ,
+		w.blockName(w.chunks.GetBlock(pos)),
+		Manhattan(a.Pos, pos),
+		len(inst.Text),
+	); !ok {
+		a.AddEvent(actionResult(nowTick, inst.ID, false, code, message))
 		return
 	}
 	if !w.canBuildAt(a.ID, pos, nowTick) {

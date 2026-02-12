@@ -3,7 +3,7 @@ package world
 import (
 	"voxelcraft.ai/internal/protocol"
 	"voxelcraft.ai/internal/sim/tasks"
-	"voxelcraft.ai/internal/sim/world/feature/movement"
+	paramspkg "voxelcraft.ai/internal/sim/world/feature/movement/params"
 )
 
 func handleTaskStop(_ *World, a *Agent, tr protocol.TaskReq, nowTick uint64) {
@@ -18,7 +18,7 @@ func handleTaskMoveTo(w *World, a *Agent, tr protocol.TaskReq, nowTick uint64) {
 	}
 	// Reject targets outside the world boundary to avoid agents wandering into the "void"
 	// (GetBlock returns AIR outside BoundaryR, and we don't generate chunks there).
-	tx, ty, tz := movement.NormalizeTarget(tr.Target[0], tr.Target[2])
+	tx, ty, tz := paramspkg.NormalizeTarget(tr.Target[0], tr.Target[2])
 	if !w.chunks.inBounds(Vec3i{X: tx, Y: ty, Z: tz}) {
 		a.AddEvent(actionResult(nowTick, tr.ID, false, "E_INVALID_TARGET", "out of bounds"))
 		return
@@ -50,7 +50,7 @@ func handleTaskFollow(w *World, a *Agent, tr protocol.TaskReq, nowTick uint64) {
 		a.AddEvent(actionResult(nowTick, tr.ID, false, "E_BAD_REQUEST", "missing target_id"))
 		return
 	}
-	dist := movement.ClampFollowDistance(tr.Distance)
+	dist := paramspkg.ClampFollowDistance(tr.Distance)
 	target, ok := w.followTargetPos(tr.TargetID)
 	if !ok {
 		a.AddEvent(actionResult(nowTick, tr.ID, false, "E_INVALID_TARGET", "target not found"))

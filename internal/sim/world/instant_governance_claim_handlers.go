@@ -1,16 +1,14 @@
 package world
 
 import (
-	"strings"
-
 	"voxelcraft.ai/internal/protocol"
-	"voxelcraft.ai/internal/sim/world/feature/economy"
-	"voxelcraft.ai/internal/sim/world/logic/mathx"
+	inventorypkg "voxelcraft.ai/internal/sim/world/feature/economy/inventory"
+	claimspkg "voxelcraft.ai/internal/sim/world/feature/governance/claims"
 )
 
 func handleInstantSetPermissions(w *World, a *Agent, inst protocol.InstantReq, nowTick uint64) {
-	if inst.LandID == "" || inst.Policy == nil {
-		a.AddEvent(actionResult(nowTick, inst.ID, false, "E_BAD_REQUEST", "missing land_id/policy"))
+	if ok, code, msg := claimspkg.ValidateSetPermissionsInput(inst.LandID, inst.Policy); !ok {
+		a.AddEvent(actionResult(nowTick, inst.ID, false, code, msg))
 		return
 	}
 	land := w.claims[inst.LandID]
@@ -22,24 +20,22 @@ func handleInstantSetPermissions(w *World, a *Agent, inst protocol.InstantReq, n
 		a.AddEvent(actionResult(nowTick, inst.ID, false, "E_NO_PERMISSION", "not land admin"))
 		return
 	}
-	if v, ok := inst.Policy["allow_build"]; ok {
-		land.Flags.AllowBuild = v
-	}
-	if v, ok := inst.Policy["allow_break"]; ok {
-		land.Flags.AllowBreak = v
-	}
-	if v, ok := inst.Policy["allow_damage"]; ok {
-		land.Flags.AllowDamage = v
-	}
-	if v, ok := inst.Policy["allow_trade"]; ok {
-		land.Flags.AllowTrade = v
-	}
+	next := claimspkg.ApplyPolicyFlags(claimspkg.Flags{
+		AllowBuild:  land.Flags.AllowBuild,
+		AllowBreak:  land.Flags.AllowBreak,
+		AllowDamage: land.Flags.AllowDamage,
+		AllowTrade:  land.Flags.AllowTrade,
+	}, inst.Policy)
+	land.Flags.AllowBuild = next.AllowBuild
+	land.Flags.AllowBreak = next.AllowBreak
+	land.Flags.AllowDamage = next.AllowDamage
+	land.Flags.AllowTrade = next.AllowTrade
 	a.AddEvent(actionResult(nowTick, inst.ID, true, "", "ok"))
 }
 
 func handleInstantUpgradeClaim(w *World, a *Agent, inst protocol.InstantReq, nowTick uint64) {
-	if inst.LandID == "" || inst.Radius <= 0 {
-		a.AddEvent(actionResult(nowTick, inst.ID, false, "E_BAD_REQUEST", "missing land_id/radius"))
+	if ok, code, msg := claimspkg.ValidateUpgradeInput(inst.LandID, inst.Radius); !ok {
+		a.AddEvent(actionResult(nowTick, inst.ID, false, code, msg))
 		return
 	}
 	land := w.claims[inst.LandID]
@@ -56,12 +52,8 @@ func handleInstantUpgradeClaim(w *World, a *Agent, inst protocol.InstantReq, now
 		return
 	}
 	target := inst.Radius
-	if target != 64 && target != 128 {
-		a.AddEvent(actionResult(nowTick, inst.ID, false, "E_BAD_REQUEST", "radius must be 64 or 128"))
-		return
-	}
-	if target <= land.Radius {
-		a.AddEvent(actionResult(nowTick, inst.ID, false, "E_BAD_REQUEST", "radius must increase"))
+	if ok, code, msg := claimspkg.ValidateUpgradeRadius(land.Radius, target); !ok {
+		a.AddEvent(actionResult(nowTick, inst.ID, false, code, msg))
 		return
 	}
 	if w.blockName(w.chunks.GetBlock(land.Anchor)) != "CLAIM_TOTEM" {
@@ -69,21 +61,7 @@ func handleInstantUpgradeClaim(w *World, a *Agent, inst protocol.InstantReq, now
 		return
 	}
 
-	cost := map[string]int{}
-	addCost := func(item string, n int) {
-		if item == "" || n <= 0 {
-			return
-		}
-		cost[item] += n
-	}
-	if land.Radius < 64 && target >= 64 {
-		addCost("BATTERY", 1)
-		addCost("CRYSTAL_SHARD", 2)
-	}
-	if land.Radius < 128 && target >= 128 {
-		addCost("BATTERY", 2)
-		addCost("CRYSTAL_SHARD", 4)
-	}
+	cost := claimspkg.UpgradeCost(land.Radius, target)
 	if len(cost) == 0 {
 		a.AddEvent(actionResult(nowTick, inst.ID, false, "E_BAD_REQUEST", "no upgrade needed"))
 		return
@@ -95,14 +73,21 @@ func handleInstantUpgradeClaim(w *World, a *Agent, inst protocol.InstantReq, now
 		}
 	}
 
+	zones := make([]claimspkg.Zone, 0, len(w.claims))
 	for _, c := range w.claims {
-		if c == nil || c.LandID == land.LandID {
+		if c == nil {
 			continue
 		}
-		if mathx.AbsInt(land.Anchor.X-c.Anchor.X) <= target+c.Radius && mathx.AbsInt(land.Anchor.Z-c.Anchor.Z) <= target+c.Radius {
-			a.AddEvent(actionResult(nowTick, inst.ID, false, "E_CONFLICT", "claim overlaps existing land"))
-			return
-		}
+		zones = append(zones, claimspkg.Zone{
+			LandID:  c.LandID,
+			AnchorX: c.Anchor.X,
+			AnchorZ: c.Anchor.Z,
+			Radius:  c.Radius,
+		})
+	}
+	if claimspkg.UpgradeOverlaps(land.Anchor.X, land.Anchor.Z, target, land.LandID, zones) {
+		a.AddEvent(actionResult(nowTick, inst.ID, false, "E_CONFLICT", "claim overlaps existing land"))
+		return
 	}
 
 	for item, n := range cost {
@@ -117,14 +102,14 @@ func handleInstantUpgradeClaim(w *World, a *Agent, inst protocol.InstantReq, now
 		"land_id": inst.LandID,
 		"from":    from,
 		"to":      target,
-		"cost":    economy.EncodeItemPairs(cost),
+		"cost":    inventorypkg.EncodeItemPairs(cost),
 	})
 	a.AddEvent(protocol.Event{"t": nowTick, "type": "ACTION_RESULT", "ref": inst.ID, "ok": true, "land_id": inst.LandID, "radius": target})
 }
 
 func handleInstantAddMember(w *World, a *Agent, inst protocol.InstantReq, nowTick uint64) {
-	if inst.LandID == "" || inst.MemberID == "" {
-		a.AddEvent(actionResult(nowTick, inst.ID, false, "E_BAD_REQUEST", "missing land_id/member_id"))
+	if ok, code, msg := claimspkg.ValidateMemberMutationInput(inst.LandID, inst.MemberID); !ok {
+		a.AddEvent(actionResult(nowTick, inst.ID, false, code, msg))
 		return
 	}
 	land := w.claims[inst.LandID]
@@ -144,8 +129,8 @@ func handleInstantAddMember(w *World, a *Agent, inst protocol.InstantReq, nowTic
 }
 
 func handleInstantRemoveMember(w *World, a *Agent, inst protocol.InstantReq, nowTick uint64) {
-	if inst.LandID == "" || inst.MemberID == "" {
-		a.AddEvent(actionResult(nowTick, inst.ID, false, "E_BAD_REQUEST", "missing land_id/member_id"))
+	if ok, code, msg := claimspkg.ValidateMemberMutationInput(inst.LandID, inst.MemberID); !ok {
+		a.AddEvent(actionResult(nowTick, inst.ID, false, code, msg))
 		return
 	}
 	land := w.claims[inst.LandID]
@@ -164,8 +149,8 @@ func handleInstantRemoveMember(w *World, a *Agent, inst protocol.InstantReq, now
 }
 
 func handleInstantDeedLand(w *World, a *Agent, inst protocol.InstantReq, nowTick uint64) {
-	if inst.LandID == "" || inst.NewOwner == "" {
-		a.AddEvent(actionResult(nowTick, inst.ID, false, "E_BAD_REQUEST", "missing land_id/new_owner"))
+	if ok, code, msg := claimspkg.ValidateDeedInput(inst.LandID, inst.NewOwner); !ok {
+		a.AddEvent(actionResult(nowTick, inst.ID, false, code, msg))
 		return
 	}
 	land := w.claims[inst.LandID]
@@ -177,7 +162,7 @@ func handleInstantDeedLand(w *World, a *Agent, inst protocol.InstantReq, nowTick
 		a.AddEvent(actionResult(nowTick, inst.ID, false, "E_NO_PERMISSION", "not land admin"))
 		return
 	}
-	newOwner := strings.TrimSpace(inst.NewOwner)
+	newOwner := claimspkg.NormalizeNewOwner(inst.NewOwner)
 	if newOwner == "" {
 		a.AddEvent(actionResult(nowTick, inst.ID, false, "E_BAD_REQUEST", "bad new_owner"))
 		return

@@ -3,7 +3,8 @@ package world
 import (
 	"voxelcraft.ai/internal/protocol"
 	"voxelcraft.ai/internal/sim/tasks"
-	"voxelcraft.ai/internal/sim/world/feature/economy"
+	inventorypkg "voxelcraft.ai/internal/sim/world/feature/economy/inventory"
+	interactpkg "voxelcraft.ai/internal/sim/world/feature/work/interact"
 )
 
 func (w *World) tickOpen(a *Agent, wt *tasks.WorkTask, nowTick uint64) {
@@ -11,14 +12,9 @@ func (w *World) tickOpen(a *Agent, wt *tasks.WorkTask, nowTick uint64) {
 	if c == nil {
 		// Fallback: allow OPEN on bulletin boards ("BULLETIN_BOARD@x,y,z") to read posts.
 		if typ, pos, ok := parseContainerID(wt.TargetID); ok && typ == "BULLETIN_BOARD" {
-			if w.blockName(w.chunks.GetBlock(pos)) != "BULLETIN_BOARD" {
+			if ok, code, msg := interactpkg.ValidateBoardOpen(w.blockName(w.chunks.GetBlock(pos)), Manhattan(a.Pos, pos)); !ok {
 				a.WorkTask = nil
-				a.AddEvent(protocol.Event{"t": nowTick, "type": "TASK_FAIL", "task_id": wt.TaskID, "code": "E_INVALID_TARGET", "message": "board not found"})
-				return
-			}
-			if Manhattan(a.Pos, pos) > 3 {
-				a.WorkTask = nil
-				a.AddEvent(protocol.Event{"t": nowTick, "type": "TASK_FAIL", "task_id": wt.TaskID, "code": "E_BLOCKED", "message": "too far"})
+				a.AddEvent(protocol.Event{"t": nowTick, "type": "TASK_FAIL", "task_id": wt.TaskID, "code": code, "message": msg})
 				return
 			}
 			bid := boardIDAt(pos)
@@ -27,22 +23,17 @@ func (w *World) tickOpen(a *Agent, wt *tasks.WorkTask, nowTick uint64) {
 				b = w.ensureBoard(pos)
 			}
 
-			// Return up to the 20 newest posts.
-			posts := make([]map[string]any, 0, 20)
-			start := 0
-			if n := len(b.Posts); n > 20 {
-				start = n - 20
-			}
-			for i := start; i < len(b.Posts); i++ {
-				p := b.Posts[i]
-				posts = append(posts, map[string]any{
-					"post_id": p.PostID,
-					"author":  p.Author,
-					"title":   p.Title,
-					"body":    p.Body,
-					"tick":    p.Tick,
+			boardPosts := make([]interactpkg.BoardPost, 0, len(b.Posts))
+			for _, p := range b.Posts {
+				boardPosts = append(boardPosts, interactpkg.BoardPost{
+					PostID: p.PostID,
+					Author: p.Author,
+					Title:  p.Title,
+					Body:   p.Body,
+					Tick:   p.Tick,
 				})
 			}
+			posts := interactpkg.BuildBoardPosts(boardPosts, 20)
 			a.AddEvent(protocol.Event{
 				"t":           nowTick,
 				"type":        "BOARD",
@@ -58,14 +49,9 @@ func (w *World) tickOpen(a *Agent, wt *tasks.WorkTask, nowTick uint64) {
 
 		// Fallback: allow OPEN on signs ("SIGN@x,y,z") to read text.
 		if typ, pos, ok := parseContainerID(wt.TargetID); ok && typ == "SIGN" {
-			if w.blockName(w.chunks.GetBlock(pos)) != "SIGN" {
+			if ok, code, msg := interactpkg.ValidateSignOpen(w.blockName(w.chunks.GetBlock(pos)), Manhattan(a.Pos, pos)); !ok {
 				a.WorkTask = nil
-				a.AddEvent(protocol.Event{"t": nowTick, "type": "TASK_FAIL", "task_id": wt.TaskID, "code": "E_INVALID_TARGET", "message": "sign not found"})
-				return
-			}
-			if Manhattan(a.Pos, pos) > 3 {
-				a.WorkTask = nil
-				a.AddEvent(protocol.Event{"t": nowTick, "type": "TASK_FAIL", "task_id": wt.TaskID, "code": "E_BLOCKED", "message": "too far"})
+				a.AddEvent(protocol.Event{"t": nowTick, "type": "TASK_FAIL", "task_id": wt.TaskID, "code": code, "message": msg})
 				return
 			}
 			s := w.signs[pos]
@@ -112,7 +98,7 @@ func (w *World) tickOpen(a *Agent, wt *tasks.WorkTask, nowTick uint64) {
 	// Include owed summary for this agent.
 	if c.Owed != nil {
 		if owed := c.Owed[a.ID]; owed != nil {
-			ev["owed"] = economy.EncodeItemPairs(owed)
+			ev["owed"] = inventorypkg.EncodeItemPairs(owed)
 		}
 	}
 	// Include contract summaries if it's a terminal.
@@ -132,9 +118,9 @@ func (w *World) tickTransfer(a *Agent, wt *tasks.WorkTask, nowTick uint64) {
 	item := wt.ItemID
 	n := wt.Count
 
-	if srcID == "SELF" && dstID == "SELF" {
+	if ok, code, msg := interactpkg.ValidateTransferNoop(srcID, dstID); !ok {
 		a.WorkTask = nil
-		a.AddEvent(protocol.Event{"t": nowTick, "type": "TASK_FAIL", "task_id": wt.TaskID, "code": "E_BAD_REQUEST", "message": "no-op transfer"})
+		a.AddEvent(protocol.Event{"t": nowTick, "type": "TASK_FAIL", "task_id": wt.TaskID, "code": code, "message": msg})
 		return
 	}
 
@@ -142,27 +128,25 @@ func (w *World) tickTransfer(a *Agent, wt *tasks.WorkTask, nowTick uint64) {
 	var dstC *Container
 	if srcID != "SELF" {
 		srcC = w.getContainerByID(srcID)
-		if srcC == nil {
-			a.WorkTask = nil
-			a.AddEvent(protocol.Event{"t": nowTick, "type": "TASK_FAIL", "task_id": wt.TaskID, "code": "E_INVALID_TARGET", "message": "src container not found"})
-			return
+		srcDist := 0
+		if srcC != nil {
+			srcDist = Manhattan(a.Pos, srcC.Pos)
 		}
-		if Manhattan(a.Pos, srcC.Pos) > 3 {
+		if ok, code, msg := interactpkg.ValidateContainerDistance(srcC != nil, srcDist, "src"); !ok {
 			a.WorkTask = nil
-			a.AddEvent(protocol.Event{"t": nowTick, "type": "TASK_FAIL", "task_id": wt.TaskID, "code": "E_BLOCKED", "message": "too far from src"})
+			a.AddEvent(protocol.Event{"t": nowTick, "type": "TASK_FAIL", "task_id": wt.TaskID, "code": code, "message": msg})
 			return
 		}
 	}
 	if dstID != "SELF" {
 		dstC = w.getContainerByID(dstID)
-		if dstC == nil {
-			a.WorkTask = nil
-			a.AddEvent(protocol.Event{"t": nowTick, "type": "TASK_FAIL", "task_id": wt.TaskID, "code": "E_INVALID_TARGET", "message": "dst container not found"})
-			return
+		dstDist := 0
+		if dstC != nil {
+			dstDist = Manhattan(a.Pos, dstC.Pos)
 		}
-		if Manhattan(a.Pos, dstC.Pos) > 3 {
+		if ok, code, msg := interactpkg.ValidateContainerDistance(dstC != nil, dstDist, "dst"); !ok {
 			a.WorkTask = nil
-			a.AddEvent(protocol.Event{"t": nowTick, "type": "TASK_FAIL", "task_id": wt.TaskID, "code": "E_BLOCKED", "message": "too far from dst"})
+			a.AddEvent(protocol.Event{"t": nowTick, "type": "TASK_FAIL", "task_id": wt.TaskID, "code": code, "message": msg})
 			return
 		}
 	}

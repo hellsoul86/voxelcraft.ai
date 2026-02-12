@@ -2,12 +2,16 @@ package world
 
 import (
 	"voxelcraft.ai/internal/protocol"
-	"voxelcraft.ai/internal/sim/world/feature/economy"
+	instantspkg "voxelcraft.ai/internal/sim/world/feature/economy/instants"
+	inventorypkg "voxelcraft.ai/internal/sim/world/feature/economy/inventory"
+	taxpkg "voxelcraft.ai/internal/sim/world/feature/economy/tax"
+	tradepkg "voxelcraft.ai/internal/sim/world/feature/economy/trade"
+	valuepkg "voxelcraft.ai/internal/sim/world/feature/economy/value"
 )
 
 func handleInstantOfferTrade(w *World, a *Agent, inst protocol.InstantReq, nowTick uint64) {
-	if !w.cfg.AllowTrade {
-		a.AddEvent(actionResult(nowTick, inst.ID, false, "E_NO_PERMISSION", "trade disabled in this world"))
+	if ok, code, msg := instantspkg.ValidateOfferTradeInput(w.cfg.AllowTrade, inst.To); !ok {
+		a.AddEvent(actionResult(nowTick, inst.ID, false, code, msg))
 		return
 	}
 	if ok, cd := a.RateLimitAllow("OFFER_TRADE", nowTick, uint64(w.cfg.RateLimits.OfferTradeWindowTicks), w.cfg.RateLimits.OfferTradeMax); !ok {
@@ -21,27 +25,19 @@ func handleInstantOfferTrade(w *World, a *Agent, inst protocol.InstantReq, nowTi
 		a.AddEvent(actionResult(nowTick, inst.ID, false, "E_NO_PERMISSION", "trade not allowed here"))
 		return
 	}
-	if inst.To == "" {
-		a.AddEvent(actionResult(nowTick, inst.ID, false, "E_BAD_REQUEST", "missing to"))
-		return
-	}
 	to := w.agents[inst.To]
 	if to == nil {
 		a.AddEvent(actionResult(nowTick, inst.ID, false, "E_INVALID_TARGET", "target not found"))
 		return
 	}
-	offer, err := economy.ParseItemPairs(inst.Offer)
-	if err != nil || len(offer) == 0 {
-		a.AddEvent(actionResult(nowTick, inst.ID, false, "E_BAD_REQUEST", "bad offer"))
-		return
-	}
-	req, err := economy.ParseItemPairs(inst.Request)
-	if err != nil || len(req) == 0 {
-		a.AddEvent(actionResult(nowTick, inst.ID, false, "E_BAD_REQUEST", "bad request"))
+	offer, offerErr := inventorypkg.ParseItemPairs(inst.Offer)
+	req, reqErr := inventorypkg.ParseItemPairs(inst.Request)
+	if ok, code, msg := instantspkg.ValidateTradeOfferPairs(offer, offerErr, req, reqErr); !ok {
+		a.AddEvent(actionResult(nowTick, inst.ID, false, code, msg))
 		return
 	}
 
-	tradeID := economy.TradeID(w.nextTradeNum.Add(1))
+	tradeID := tradepkg.TradeID(w.nextTradeNum.Add(1))
 	w.trades[tradeID] = &Trade{
 		TradeID:     tradeID,
 		From:        a.ID,
@@ -55,19 +51,15 @@ func handleInstantOfferTrade(w *World, a *Agent, inst protocol.InstantReq, nowTi
 		"type":     "TRADE_OFFER",
 		"trade_id": tradeID,
 		"from":     a.ID,
-		"offer":    economy.EncodeItemPairs(offer),
-		"request":  economy.EncodeItemPairs(req),
+		"offer":    inventorypkg.EncodeItemPairs(offer),
+		"request":  inventorypkg.EncodeItemPairs(req),
 	})
 	a.AddEvent(protocol.Event{"t": nowTick, "type": "ACTION_RESULT", "ref": inst.ID, "ok": true, "trade_id": tradeID})
 }
 
 func handleInstantAcceptTrade(w *World, a *Agent, inst protocol.InstantReq, nowTick uint64) {
-	if !w.cfg.AllowTrade {
-		a.AddEvent(actionResult(nowTick, inst.ID, false, "E_NO_PERMISSION", "trade disabled in this world"))
-		return
-	}
-	if inst.TradeID == "" {
-		a.AddEvent(actionResult(nowTick, inst.ID, false, "E_BAD_REQUEST", "missing trade_id"))
+	if ok, code, msg := instantspkg.ValidateTradeLifecycleInput(w.cfg.AllowTrade, inst.TradeID); !ok {
+		a.AddEvent(actionResult(nowTick, inst.ID, false, code, msg))
 		return
 	}
 	tr := w.trades[inst.TradeID]
@@ -91,14 +83,14 @@ func handleInstantAcceptTrade(w *World, a *Agent, inst protocol.InstantReq, nowT
 		a.AddEvent(actionResult(nowTick, inst.ID, false, "E_NO_PERMISSION", "trade not allowed here"))
 		return
 	}
-	if !economy.HasItems(from.Inventory, tr.Offer) || !economy.HasItems(a.Inventory, tr.Request) {
+	if !inventorypkg.HasItems(from.Inventory, tr.Offer) || !inventorypkg.HasItems(a.Inventory, tr.Request) {
 		a.AddEvent(actionResult(nowTick, inst.ID, false, "E_NO_RESOURCE", "missing items"))
 		return
 	}
 	taxRate := 0.0
 	var taxSink map[string]int
 	if landFrom != nil && landTo != nil {
-		taxRate = economy.EffectiveMarketTax(landFrom.MarketTax, landFrom.LandID == landTo.LandID, w.activeEventID, nowTick, w.activeEventEnds)
+		taxRate = taxpkg.EffectiveMarketTax(landFrom.MarketTax, landFrom.LandID == landTo.LandID, w.activeEventID, nowTick, w.activeEventEnds)
 	}
 	if taxRate > 0 {
 		if landFrom.Owner != "" {
@@ -109,25 +101,25 @@ func handleInstantAcceptTrade(w *World, a *Agent, inst protocol.InstantReq, nowT
 			}
 		}
 	}
-	economy.ApplyTransferWithTax(from.Inventory, a.Inventory, tr.Offer, taxSink, taxRate)
-	economy.ApplyTransferWithTax(a.Inventory, from.Inventory, tr.Request, taxSink, taxRate)
+	inventorypkg.ApplyTransferWithTax(from.Inventory, a.Inventory, tr.Offer, taxSink, taxRate)
+	inventorypkg.ApplyTransferWithTax(a.Inventory, from.Inventory, tr.Request, taxSink, taxRate)
 	delete(w.trades, inst.TradeID)
 
-	vOffer := economy.TradeValue(tr.Offer, economy.ItemTradeValue)
-	vReq := economy.TradeValue(tr.Request, economy.ItemTradeValue)
-	mutualOK := economy.TradeMutualBenefit(vOffer, vReq)
+	vOffer := valuepkg.TradeValue(tr.Offer, valuepkg.ItemTradeValue)
+	vReq := valuepkg.TradeValue(tr.Request, valuepkg.ItemTradeValue)
+	mutualOK := valuepkg.TradeMutualBenefit(vOffer, vReq)
 	w.auditEvent(nowTick, a.ID, "TRADE", Vec3i{}, "ACCEPT_TRADE", map[string]any{
 		"trade_id":       tr.TradeID,
 		"from":           tr.From,
 		"to":             tr.To,
-		"offer":          economy.EncodeItemPairs(tr.Offer),
-		"request":        economy.EncodeItemPairs(tr.Request),
+		"offer":          inventorypkg.EncodeItemPairs(tr.Offer),
+		"request":        inventorypkg.EncodeItemPairs(tr.Request),
 		"value_offer":    vOffer,
 		"value_request":  vReq,
 		"mutual_benefit": mutualOK,
 		"tax_rate":       taxRate,
-		"tax_paid_off":   economy.EncodeItemPairs(economy.CalcTax(tr.Offer, taxRate)),
-		"tax_paid_req":   economy.EncodeItemPairs(economy.CalcTax(tr.Request, taxRate)),
+		"tax_paid_off":   inventorypkg.EncodeItemPairs(inventorypkg.CalcTax(tr.Offer, taxRate)),
+		"tax_paid_req":   inventorypkg.EncodeItemPairs(inventorypkg.CalcTax(tr.Request, taxRate)),
 		"land_id": func() string {
 			if landFrom != nil {
 				return landFrom.LandID
@@ -171,12 +163,8 @@ func handleInstantAcceptTrade(w *World, a *Agent, inst protocol.InstantReq, nowT
 }
 
 func handleInstantDeclineTrade(w *World, a *Agent, inst protocol.InstantReq, nowTick uint64) {
-	if !w.cfg.AllowTrade {
-		a.AddEvent(actionResult(nowTick, inst.ID, false, "E_NO_PERMISSION", "trade disabled in this world"))
-		return
-	}
-	if inst.TradeID == "" {
-		a.AddEvent(actionResult(nowTick, inst.ID, false, "E_BAD_REQUEST", "missing trade_id"))
+	if ok, code, msg := instantspkg.ValidateTradeLifecycleInput(w.cfg.AllowTrade, inst.TradeID); !ok {
+		a.AddEvent(actionResult(nowTick, inst.ID, false, code, msg))
 		return
 	}
 	tr := w.trades[inst.TradeID]

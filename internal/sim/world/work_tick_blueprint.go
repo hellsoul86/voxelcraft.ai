@@ -6,7 +6,7 @@ import (
 	"voxelcraft.ai/internal/protocol"
 	"voxelcraft.ai/internal/sim/catalogs"
 	"voxelcraft.ai/internal/sim/tasks"
-	"voxelcraft.ai/internal/sim/world/feature/work"
+	limitspkg "voxelcraft.ai/internal/sim/world/feature/work/limits"
 	"voxelcraft.ai/internal/sim/world/logic/blueprint"
 )
 
@@ -104,7 +104,7 @@ func (w *World) tickBuildBlueprint(a *Agent, wt *tasks.WorkTask, nowTick uint64)
 
 	// Place up to N blocks per tick (default 2).
 	placed := 0
-	limit := work.ClampBlocksPerTick(w.cfg.BlueprintBlocksPerTick)
+	limit := limitspkg.ClampBlocksPerTick(w.cfg.BlueprintBlocksPerTick)
 	for placed < limit && wt.BuildIndex < len(bp.Blocks) {
 		p := bp.Blocks[wt.BuildIndex]
 		off := blueprint.RotateOffset(p.Pos, rot)

@@ -69,6 +69,47 @@ Pure subpackages:
 - `internal/sim/world/feature/director`
 - `internal/sim/world/feature/observer`
 
+Feature subpackage layout (second level):
+- `feature/contracts/{core,lifecycle,runtime,validation,audit,reputation}`
+- `feature/director/{feedback,metrics,resources,runtime,stats}`
+- `feature/economy/{inventory,instants,tax,trade,value}`
+- `feature/governance/{claims,laws,laws/runtime,maintenance,orgs,permissions}`
+- `feature/observer/{boards,chunks,entities,meta,posting,search,targets,tasks}`
+- `feature/session/{catalogs,chat,eat,instants,memory,resume,welcome}`
+- `feature/transfer/{agent,events,maps,org,runtime}`
+- `feature/work/{interact,limits,mining,progress,smelt}`
+
+Recent decomposition in this iteration:
+- Governance instant validators moved to `feature/governance`:
+  - claim permission/upgrade/member/deed input and overlap checks
+  - law propose/vote input and timeline normalization
+- Contracts instant/runtime helpers moved to `feature/contracts`:
+  - post/accept/submit prep DTOs
+  - tick audit payload builder
+- Observer target validators moved to `feature/observer`:
+  - physical board/sign target checks
+- Transfer runtime DTOs moved to `feature/transfer`:
+  - agent position and org metadata request/response payloads
+- Transfer world-loop handlers moved to `feature/transfer/runtime`:
+  - event cursor response shaping
+  - agent position lookup result shaping
+  - org metadata normalization/merge helpers
+- Contract settlement/runtime helpers moved to `feature/contracts/runtime`:
+  - terminal summary projection
+  - payout target selection
+  - terminal transfer, requirement consumption, and payout primitives
+- Work interaction validators/projections moved to `feature/work/interact`:
+  - OPEN board/sign target checks
+  - board post list projection
+  - TRANSFER no-op and distance validation helpers
+- Director scheduler state-machine helpers moved to `feature/director/runtime`:
+  - event/weather expiry
+  - scripted day schedule lookup
+  - evaluate-window gate logic
+- Law lifecycle transition helpers moved to `feature/governance/laws/runtime`:
+  - NOTICE->VOTING/VOTING->resolve transition checks
+  - vote pass decision primitive
+
 Dependency rules:
 1. `world` can import subpackages.
 2. Subpackages do not import `internal/sim/world`.
@@ -133,6 +174,10 @@ Before moving/changing behavior:
 - Integration tests stay in `internal/sim/world` (they need unexported state + deterministic tick wiring).
 - Pure unit tests must live in their owning subpackages (`logic/*`, `feature/*`, `policy/*`, `io/*`).
 - In Go, colocated `_test.go` files are the default for white-box tests. Separation is done by package boundaries, not a global `/tests` folder.
+- Unit tests should live beside the smallest pure package they validate (for example `feature/*/*`), while `internal/sim/world` keeps integration and determinism tests.
+- Practical rule used here:
+  - if a test needs unexported world internals, keep it in `internal/sim/world`
+  - if logic can be tested as pure DTO/callback behavior, move it to `feature/*` or `logic/*` tests
 - New test default:
   1. write unit test in subpackage first
   2. add `world` integration test only for facade wiring

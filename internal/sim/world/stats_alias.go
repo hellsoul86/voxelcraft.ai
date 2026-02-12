@@ -1,11 +1,11 @@
 package world
 
-import featuredirector "voxelcraft.ai/internal/sim/world/feature/director"
+import statspkg "voxelcraft.ai/internal/sim/world/feature/director/stats"
 
-type StatsBucket = featuredirector.StatsBucket
-type StatsChunkKey = featuredirector.StatsChunkKey
-type WorldStats = featuredirector.WorldStats
+type StatsBucket = statspkg.Bucket
+type StatsChunkKey = statspkg.ChunkKey
+type WorldStats = statspkg.WorldStats
 
 func NewWorldStats(bucketTicks, windowTicks uint64) *WorldStats {
-	return featuredirector.NewWorldStats(bucketTicks, windowTicks)
+	return statspkg.NewWorldStats(bucketTicks, windowTicks)
 }

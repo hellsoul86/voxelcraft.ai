@@ -1,28 +1,27 @@
 package world
 
 import (
-	"strings"
-
 	"voxelcraft.ai/internal/protocol"
+	orgspkg "voxelcraft.ai/internal/sim/world/feature/governance/orgs"
 )
 
 func handleInstantCreateOrg(w *World, a *Agent, inst protocol.InstantReq, nowTick uint64) {
-	kind := strings.ToUpper(strings.TrimSpace(inst.OrgKind))
+	kind := orgspkg.NormalizeOrgKind(inst.OrgKind)
 	var k OrgKind
 	switch kind {
-	case string(OrgGuild):
+	case orgspkg.KindGuild:
 		k = OrgGuild
-	case string(OrgCity):
+	case orgspkg.KindCity:
 		k = OrgCity
 	default:
 		a.AddEvent(actionResult(nowTick, inst.ID, false, "E_BAD_REQUEST", "bad org_kind"))
 		return
 	}
-	name := strings.TrimSpace(inst.OrgName)
-	if name == "" || len(name) > 40 {
+	if !orgspkg.ValidateOrgName(inst.OrgName) {
 		a.AddEvent(actionResult(nowTick, inst.ID, false, "E_BAD_REQUEST", "bad org_name"))
 		return
 	}
+	name := orgspkg.NormalizeOrgName(inst.OrgName)
 	if a.OrgID != "" {
 		a.AddEvent(actionResult(nowTick, inst.ID, false, "E_CONFLICT", "already in org"))
 		return
@@ -76,8 +75,8 @@ func handleInstantJoinOrg(w *World, a *Agent, inst protocol.InstantReq, nowTick 
 }
 
 func handleInstantOrgDeposit(w *World, a *Agent, inst protocol.InstantReq, nowTick uint64) {
-	if inst.OrgID == "" || inst.ItemID == "" || inst.Count <= 0 {
-		a.AddEvent(actionResult(nowTick, inst.ID, false, "E_BAD_REQUEST", "missing org_id/item_id/count"))
+	if ok, code, msg := orgspkg.ValidateOrgTransferInput(inst.OrgID, inst.ItemID, inst.Count); !ok {
+		a.AddEvent(actionResult(nowTick, inst.ID, false, code, msg))
 		return
 	}
 	org := w.orgByID(inst.OrgID)
@@ -108,8 +107,8 @@ func handleInstantOrgDeposit(w *World, a *Agent, inst protocol.InstantReq, nowTi
 }
 
 func handleInstantOrgWithdraw(w *World, a *Agent, inst protocol.InstantReq, nowTick uint64) {
-	if inst.OrgID == "" || inst.ItemID == "" || inst.Count <= 0 {
-		a.AddEvent(actionResult(nowTick, inst.ID, false, "E_BAD_REQUEST", "missing org_id/item_id/count"))
+	if ok, code, msg := orgspkg.ValidateOrgTransferInput(inst.OrgID, inst.ItemID, inst.Count); !ok {
+		a.AddEvent(actionResult(nowTick, inst.ID, false, code, msg))
 		return
 	}
 	org := w.orgByID(inst.OrgID)
@@ -160,12 +159,11 @@ func handleInstantLeaveOrg(w *World, a *Agent, inst protocol.InstantReq, nowTick
 		return
 	}
 	if role == OrgLeader {
-		best := ""
+		memberIDs := make([]string, 0, len(org.Members))
 		for aid := range org.Members {
-			if best == "" || aid < best {
-				best = aid
-			}
+			memberIDs = append(memberIDs, aid)
 		}
+		best := orgspkg.SelectNextLeader(memberIDs)
 		if best != "" {
 			org.Members[best] = OrgLeader
 			org.MetaVersion++

@@ -1,6 +1,9 @@
 package world
 
-import "voxelcraft.ai/internal/sim/world/feature/transfer"
+import (
+	transferagentpkg "voxelcraft.ai/internal/sim/world/feature/transfer/agent"
+	transfermapspkg "voxelcraft.ai/internal/sim/world/feature/transfer/maps"
+)
 
 type AgentTransfer struct {
 	ID    string
@@ -100,9 +103,9 @@ func (w *World) handleTransferIn(req transferInReq) {
 		RepSocial:                    t.RepSocial,
 		RepLaw:                       t.RepLaw,
 		Fun:                          t.Fun,
-		Inventory:                    transfer.CopyPositiveIntMap(t.Inventory),
+		Inventory:                    transfermapspkg.CopyPositiveIntMap(t.Inventory),
 		Equipment:                    t.Equipment,
-		Memory:                       transfer.CopyMap(t.Memory, func(k string, _ memoryEntry) bool { return k != "" }),
+		Memory:                       transfermapspkg.CopyMap(t.Memory, func(k string, _ memoryEntry) bool { return k != "" }),
 	}
 	if a.Pos.Y != 0 {
 		a.Pos.Y = 0
@@ -179,7 +182,7 @@ func (w *World) handleTransferIn(req transferInReq) {
 			_ = w.orgTreasury(org)
 		}
 	}
-	if ev, ok := transfer.BuildWorldSwitchEvent(w.tick.Load(), t.FromWorldID, w.cfg.ID, a.ID, t.FromEntryPointID, t.ToEntryPointID); ok {
+	if ev, ok := transferagentpkg.BuildWorldSwitchEvent(w.tick.Load(), t.FromWorldID, w.cfg.ID, a.ID, t.FromEntryPointID, t.ToEntryPointID); ok {
 		a.AddEvent(ev)
 	}
 

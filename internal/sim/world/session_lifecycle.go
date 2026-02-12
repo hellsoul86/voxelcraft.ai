@@ -6,11 +6,13 @@ import (
 	"time"
 
 	"voxelcraft.ai/internal/protocol"
-	"voxelcraft.ai/internal/sim/world/feature/session"
+	catalogspkg "voxelcraft.ai/internal/sim/world/feature/session/catalogs"
+	resumepkg "voxelcraft.ai/internal/sim/world/feature/session/resume"
+	welcomepkg "voxelcraft.ai/internal/sim/world/feature/session/welcome"
 )
 
 func (w *World) buildWelcome(agentID, resumeToken string) protocol.WelcomeMsg {
-	return session.BuildWelcome(session.WelcomeInput{
+	return welcomepkg.Build(welcomepkg.Input{
 		AgentID:            agentID,
 		ResumeToken:        resumeToken,
 		CurrentWorld:       w.cfg.ID,
@@ -34,11 +36,11 @@ func (w *World) buildWelcome(agentID, resumeToken string) protocol.WelcomeMsg {
 }
 
 func (w *World) buildCatalogMsgs() ([]protocol.CatalogMsg, string) {
-	tuningCat := session.TuningCatalogMsg(session.TuningInput{
+	tuningCat := catalogspkg.TuningCatalogMsg(catalogspkg.TuningInput{
 		SnapshotEveryTicks: w.cfg.SnapshotEveryTicks,
 		DirectorEveryTicks: w.cfg.DirectorEveryTicks,
 		SeasonLengthTicks:  w.cfg.SeasonLengthTicks,
-		RateLimits: session.TuningRateLimits{
+		RateLimits: catalogspkg.TuningRateLimits{
 			SayWindowTicks:        w.cfg.RateLimits.SayWindowTicks,
 			SayMax:                w.cfg.RateLimits.SayMax,
 			MarketSayWindowTicks:  w.cfg.RateLimits.MarketSayWindowTicks,
@@ -60,12 +62,12 @@ func (w *World) buildCatalogMsgs() ([]protocol.CatalogMsg, string) {
 		FunDecayBase:           w.cfg.FunDecayBase,
 		StructureSurvivalTicks: w.cfg.StructureSurvivalTicks,
 	})
-	recipesCat := session.RecipesCatalogMsg(w.catalogs.Recipes.Digest, w.catalogs.Recipes.ByID)
-	blueprintsCat := session.BlueprintsCatalogMsg(w.catalogs.Blueprints.Digest, w.catalogs.Blueprints.ByID)
-	lawsCat := session.LawTemplatesCatalogMsg(w.catalogs.Laws.Digest, w.catalogs.Laws.Templates)
-	eventsCat := session.EventsCatalogMsg(w.catalogs.Events.Digest, w.catalogs.Events.ByID)
+	recipesCat := catalogspkg.RecipesCatalogMsg(w.catalogs.Recipes.Digest, w.catalogs.Recipes.ByID)
+	blueprintsCat := catalogspkg.BlueprintsCatalogMsg(w.catalogs.Blueprints.Digest, w.catalogs.Blueprints.ByID)
+	lawsCat := catalogspkg.LawTemplatesCatalogMsg(w.catalogs.Laws.Digest, w.catalogs.Laws.Templates)
+	eventsCat := catalogspkg.EventsCatalogMsg(w.catalogs.Events.Digest, w.catalogs.Events.ByID)
 
-	catalogMsgs := session.OrderedCatalogs(
+	catalogMsgs := catalogspkg.OrderedCatalogs(
 		protocol.CatalogMsg{
 			Type:            protocol.TypeCatalog,
 			ProtocolVersion: protocol.Version,
@@ -94,7 +96,7 @@ func (w *World) buildCatalogMsgs() ([]protocol.CatalogMsg, string) {
 }
 
 func (w *World) joinAgent(name string, delta bool, out chan []byte) JoinResponse {
-	name = session.NormalizeAgentName(name)
+	name = catalogspkg.NormalizeAgentName(name)
 	nowTick := w.tick.Load()
 
 	idNum := w.nextAgentNum.Add(1)
@@ -116,7 +118,7 @@ func (w *World) joinAgent(name string, delta bool, out chan []byte) JoinResponse
 	a.CurrentWorldID = w.cfg.ID
 	// Starter items (operational config).
 	if w.cfg.StarterItems != nil {
-		keys := session.SortedIDs(w.cfg.StarterItems)
+		keys := resumepkg.SortedIDs(w.cfg.StarterItems)
 		for _, item := range keys {
 			n := w.cfg.StarterItems[item]
 			if item == "" || n <= 0 {
@@ -164,14 +166,14 @@ func (w *World) handleAttach(req AttachRequest) {
 	}
 
 	// Find agent deterministically by iterating sorted ids.
-	candidates := make([]session.ResumeCandidate, 0, len(w.agents))
+	candidates := make([]resumepkg.Candidate, 0, len(w.agents))
 	for id, aa := range w.agents {
 		if aa == nil {
 			continue
 		}
-		candidates = append(candidates, session.ResumeCandidate{ID: id, ResumeToken: aa.ResumeToken})
+		candidates = append(candidates, resumepkg.Candidate{ID: id, ResumeToken: aa.ResumeToken})
 	}
-	aid := session.FindResumeAgentID(candidates, token)
+	aid := resumepkg.FindResumeAgentID(candidates, token)
 	a := w.agents[aid]
 	if a == nil {
 		if req.Resp != nil {

@@ -5,14 +5,15 @@ import (
 
 	"voxelcraft.ai/internal/persistence/snapshot"
 	"voxelcraft.ai/internal/sim/catalogs"
-	"voxelcraft.ai/internal/sim/world/feature/economy"
-	featureobserver "voxelcraft.ai/internal/sim/world/feature/observer"
-	"voxelcraft.ai/internal/sim/world/feature/transfer"
+	tradepkg "voxelcraft.ai/internal/sim/world/feature/economy/trade"
+	boardspkg "voxelcraft.ai/internal/sim/world/feature/observer/boards"
+	transfereventspkg "voxelcraft.ai/internal/sim/world/feature/transfer/events"
+	transferruntimepkg "voxelcraft.ai/internal/sim/world/feature/transfer/runtime"
 )
 
-type Trade = economy.Trade
-type Board = featureobserver.Board
-type BoardPost = featureobserver.BoardPost
+type Trade = tradepkg.Trade
+type Board = boardspkg.Board
+type BoardPost = boardspkg.Post
 
 // World is a single-threaded authoritative simulation.
 // All state must be accessed only from the world loop goroutine.
@@ -49,11 +50,11 @@ type World struct {
 	attach        chan AttachRequest
 	admin         chan adminSnapshotReq
 	adminReset    chan adminResetReq
-	agentPosReq   chan agentPosReq
-	eventsReq     chan transfer.EventsReq
+	agentPosReq   chan transferruntimepkg.AgentPosReq
+	eventsReq     chan transfereventspkg.Req
 	actDedupeReq  chan actDedupeReq
-	orgMetaReq    chan orgMetaReq
-	orgMetaUpsert chan orgMetaUpsertReq
+	orgMetaReq    chan transferruntimepkg.OrgMetaReq
+	orgMetaUpsert chan transferruntimepkg.OrgMetaUpsertReq
 	leave         chan string
 	stop          chan struct{}
 	transferOut   chan transferOutReq

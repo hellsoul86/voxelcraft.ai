@@ -1,6 +1,9 @@
 package world
 
-import featureobserver "voxelcraft.ai/internal/sim/world/feature/observer"
+import (
+	boardspkg "voxelcraft.ai/internal/sim/world/feature/observer/boards"
+	configpkg "voxelcraft.ai/internal/sim/world/feature/observer/config"
+)
 
 func (w *World) Config() WorldConfig {
 	if w == nil {
@@ -28,7 +31,7 @@ func (w *World) BlockPalette() []string {
 }
 
 func (w *World) newPostID() string {
-	return featureobserver.NewPostID(w.nextPostNum.Add(1))
+	return boardspkg.NewPostID(w.nextPostNum.Add(1))
 }
 
 func boardIDAt(pos Vec3i) string {
@@ -56,11 +59,11 @@ func (w *World) handleObserverJoin(req ObserverJoinRequest) {
 	}
 
 	cfg := observerCfg{
-		chunkRadius:    clampInt(featureobserver.ClampChunkRadius(req.ChunkRadius), 1, 32, 6),
-		maxChunks:      clampInt(featureobserver.ClampMaxChunks(req.MaxChunks), 1, 16384, 1024),
-		focusAgentID:   featureobserver.NormalizeFocusAgentID(req.FocusAgentID),
-		voxelRadius:    clampInt(featureobserver.ClampVoxelRadius(req.VoxelRadius), 0, 8, 0),
-		voxelMaxChunks: clampInt(featureobserver.ClampVoxelMaxChunks(req.VoxelMaxChunks), 1, 2048, 256),
+		chunkRadius:    clampInt(configpkg.ClampChunkRadius(req.ChunkRadius), 1, 32, 6),
+		maxChunks:      clampInt(configpkg.ClampMaxChunks(req.MaxChunks), 1, 16384, 1024),
+		focusAgentID:   configpkg.NormalizeFocusAgentID(req.FocusAgentID),
+		voxelRadius:    clampInt(configpkg.ClampVoxelRadius(req.VoxelRadius), 0, 8, 0),
+		voxelMaxChunks: clampInt(configpkg.ClampVoxelMaxChunks(req.VoxelMaxChunks), 1, 2048, 256),
 	}
 
 	// Replace existing session id if any (defensive).
@@ -88,10 +91,10 @@ func (w *World) handleObserverSubscribe(req ObserverSubscribeRequest) {
 	c.cfg.maxChunks = clampInt(req.MaxChunks, 1, 16384, c.cfg.maxChunks)
 
 	// Voxel streaming config. Allow disabling by sending voxel_radius=0.
-	c.cfg.focusAgentID = featureobserver.NormalizeFocusAgentID(req.FocusAgentID)
-	c.cfg.voxelRadius = featureobserver.ClampVoxelRadius(req.VoxelRadius)
+	c.cfg.focusAgentID = configpkg.NormalizeFocusAgentID(req.FocusAgentID)
+	c.cfg.voxelRadius = configpkg.ClampVoxelRadius(req.VoxelRadius)
 	if req.VoxelMaxChunks > 0 {
-		c.cfg.voxelMaxChunks = clampInt(featureobserver.ClampVoxelMaxChunks(req.VoxelMaxChunks), 1, 2048, c.cfg.voxelMaxChunks)
+		c.cfg.voxelMaxChunks = clampInt(configpkg.ClampVoxelMaxChunks(req.VoxelMaxChunks), 1, 2048, c.cfg.voxelMaxChunks)
 	}
 }
 

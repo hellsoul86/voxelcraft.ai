@@ -6,8 +6,11 @@ import (
 
 	"voxelcraft.ai/internal/persistence/snapshot"
 	"voxelcraft.ai/internal/protocol"
-	"voxelcraft.ai/internal/sim/world/feature/admin"
-	"voxelcraft.ai/internal/sim/world/feature/transfer"
+	adminhandlerspkg "voxelcraft.ai/internal/sim/world/feature/admin/handlers"
+	adminrequestspkg "voxelcraft.ai/internal/sim/world/feature/admin/requests"
+	transfereventspkg "voxelcraft.ai/internal/sim/world/feature/transfer/events"
+	transferorgpkg "voxelcraft.ai/internal/sim/world/feature/transfer/org"
+	transferruntimepkg "voxelcraft.ai/internal/sim/world/feature/transfer/runtime"
 )
 
 func (w *World) SetTickLogger(l TickLogger)                    { w.tickLogger = l }
@@ -40,7 +43,7 @@ func (w *World) CurrentTick() uint64 { return w.tick.Load() }
 func (w *World) systemMovement(nowTick uint64) { w.systemMovementImpl(nowTick) }
 func (w *World) systemWork(nowTick uint64)     { w.systemWorkImpl(nowTick) }
 
-type EventCursorItem = transfer.EventCursorItem
+type EventCursorItem = transfereventspkg.CursorItem
 
 type injectEventReq struct {
 	AgentID string
@@ -51,11 +54,11 @@ func (w *World) RequestEventsAfter(ctx context.Context, agentID string, sinceCur
 	if w == nil || w.eventsReq == nil {
 		return nil, sinceCursor, errors.New("event query not available")
 	}
-	req := transfer.EventsReq{
+	req := transfereventspkg.Req{
 		AgentID:     agentID,
 		SinceCursor: sinceCursor,
 		Limit:       limit,
-		Resp:        make(chan transfer.EventsResp, 1),
+		Resp:        make(chan transfereventspkg.Resp, 1),
 	}
 	select {
 	case w.eventsReq <- req:
@@ -136,75 +139,33 @@ func (w *World) RequestTransferIn(ctx context.Context, t AgentTransfer, out chan
 	}
 }
 
-func (w *World) handleEventsReq(req transfer.EventsReq) {
-	resp := transfer.EventsResp{NextCursor: req.SinceCursor}
-	defer func() {
-		if req.Resp == nil {
-			return
+func (w *World) handleEventsReq(req transfereventspkg.Req) {
+	resp := transferruntimepkg.HandleEventsReq(req, func(agentID string, sinceCursor uint64, limit int) ([]transfereventspkg.CursorItem, uint64, bool) {
+		a := w.agents[agentID]
+		if a == nil {
+			return nil, sinceCursor, false
 		}
-		select {
-		case req.Resp <- resp:
-		default:
+		items, next := a.EventsAfter(sinceCursor, limit)
+		out := make([]transfereventspkg.CursorItem, 0, len(items))
+		for _, it := range items {
+			out = append(out, transfereventspkg.CursorItem{Cursor: it.Cursor, Event: it.Event})
 		}
-	}()
-	a := w.agents[req.AgentID]
-	if a == nil {
-		resp.Err = "agent not found"
+		return out, next, true
+	})
+	if req.Resp == nil {
 		return
 	}
-	items, next := a.EventsAfter(req.SinceCursor, req.Limit)
-	resp.Items = make([]transfer.EventCursorItem, 0, len(items))
-	for _, it := range items {
-		resp.Items = append(resp.Items, transfer.EventCursorItem{Cursor: it.Cursor, Event: it.Event})
+	select {
+	case req.Resp <- resp:
+	default:
 	}
-	resp.NextCursor = next
 }
 
-type adminSnapshotReq struct {
-	Resp chan adminSnapshotResp
-}
+type adminSnapshotReq = adminrequestspkg.SnapshotReq
+type adminSnapshotResp = adminrequestspkg.SnapshotResp
 
-type adminSnapshotResp struct {
-	Tick uint64
-	Err  string
-}
-
-type adminResetReq struct {
-	Resp chan adminResetResp
-}
-
-type adminResetResp struct {
-	Tick uint64
-	Err  string
-}
-
-type agentPosReq struct {
-	AgentID string
-	Resp    chan agentPosResp
-}
-
-type agentPosResp struct {
-	Pos Vec3i
-	Err string
-}
-
-type orgMetaReq struct {
-	Resp chan orgMetaResp
-}
-
-type orgMetaResp struct {
-	Orgs []OrgTransfer
-	Err  string
-}
-
-type orgMetaUpsertReq struct {
-	Orgs []OrgTransfer
-	Resp chan orgMetaUpsertResp
-}
-
-type orgMetaUpsertResp struct {
-	Err string
-}
+type adminResetReq = adminrequestspkg.ResetReq
+type adminResetResp = adminrequestspkg.ResetResp
 
 // RequestSnapshot asks the world loop goroutine to enqueue a snapshot.
 // It is safe to call from other goroutines (e.g. HTTP handlers).
@@ -236,28 +197,25 @@ func (w *World) handleAdminSnapshotRequests(reqs []adminSnapshotReq) {
 	if w == nil || len(reqs) == 0 {
 		return
 	}
-	cur := w.tick.Load()
-	snapTick := admin.SnapshotTick(cur)
-
-	errStr := ""
-	if w.snapshotSink == nil {
-		errStr = "snapshot sink not configured"
-	} else {
-		snap := w.ExportSnapshot(snapTick)
-		select {
-		case w.snapshotSink <- snap:
-		default:
-			errStr = "snapshot sink backpressure"
-		}
-	}
-
-	resp := adminSnapshotResp{Tick: snapTick, Err: errStr}
+	result := adminhandlerspkg.HandleSnapshot(adminhandlerspkg.SnapshotInput{
+		CurrentTick: w.tick.Load(),
+		HasSink:     w.snapshotSink != nil,
+		Enqueue: func(snapshotTick uint64) bool {
+			snap := w.ExportSnapshot(snapshotTick)
+			select {
+			case w.snapshotSink <- snap:
+				return true
+			default:
+				return false
+			}
+		},
+	})
 	for _, r := range reqs {
 		if r.Resp == nil {
 			continue
 		}
 		select {
-		case r.Resp <- resp:
+		case r.Resp <- adminSnapshotResp{Tick: result.Tick, Err: result.Err}:
 		default:
 			// Client timed out; don't block the sim loop.
 		}
@@ -294,36 +252,34 @@ func (w *World) handleAdminResetRequests(reqs []adminResetReq) {
 	if w == nil || len(reqs) == 0 {
 		return
 	}
-
-	cur := w.tick.Load()
-	archiveTick := admin.ArchiveTick(cur)
-
-	errStr := ""
-	if w.snapshotSink != nil {
-		snap := w.ExportSnapshot(archiveTick)
-		select {
-		case w.snapshotSink <- snap:
-		default:
-			errStr = "snapshot sink backpressure"
-		}
-	}
-	if errStr == "" {
-		newSeason := w.seasonIndex(cur) + 1
-		w.resetWorldForNewSeason(cur, newSeason, archiveTick)
-		w.auditEvent(cur, "SYSTEM", "WORLD_RESET", Vec3i{}, "ADMIN_RESET", map[string]any{
-			"world_id":     w.cfg.ID,
-			"archive_tick": archiveTick,
-			"new_seed":     w.cfg.Seed,
-		})
-	}
-
-	resp := adminResetResp{Tick: cur, Err: errStr}
+	result := adminhandlerspkg.HandleReset(adminhandlerspkg.ResetInput{
+		CurrentTick: w.tick.Load(),
+		HasSink:     w.snapshotSink != nil,
+		Enqueue: func(archiveTick uint64) bool {
+			snap := w.ExportSnapshot(archiveTick)
+			select {
+			case w.snapshotSink <- snap:
+				return true
+			default:
+				return false
+			}
+		},
+		OnReset: func(curTick uint64, archiveTick uint64) {
+			newSeason := w.seasonIndex(curTick) + 1
+			w.resetWorldForNewSeason(curTick, newSeason, archiveTick)
+			w.auditEvent(curTick, "SYSTEM", "WORLD_RESET", Vec3i{}, "ADMIN_RESET", map[string]any{
+				"world_id":     w.cfg.ID,
+				"archive_tick": archiveTick,
+				"new_seed":     w.cfg.Seed,
+			})
+		},
+	})
 	for _, r := range reqs {
 		if r.Resp == nil {
 			continue
 		}
 		select {
-		case r.Resp <- resp:
+		case r.Resp <- adminResetResp{Tick: result.Tick, Err: result.Err}:
 		default:
 		}
 	}
@@ -334,9 +290,9 @@ func (w *World) RequestAgentPos(ctx context.Context, agentID string) (Vec3i, err
 	if w == nil || w.agentPosReq == nil {
 		return Vec3i{}, errors.New("agent position query not available")
 	}
-	req := agentPosReq{
+	req := transferruntimepkg.AgentPosReq{
 		AgentID: agentID,
-		Resp:    make(chan agentPosResp, 1),
+		Resp:    make(chan transferruntimepkg.AgentPosResp, 1),
 	}
 	select {
 	case w.agentPosReq <- req:
@@ -348,29 +304,27 @@ func (w *World) RequestAgentPos(ctx context.Context, agentID string) (Vec3i, err
 		if resp.Err != "" {
 			return Vec3i{}, errors.New(resp.Err)
 		}
-		return resp.Pos, nil
+		return Vec3i{X: resp.Pos[0], Y: resp.Pos[1], Z: resp.Pos[2]}, nil
 	case <-ctx.Done():
 		return Vec3i{}, ctx.Err()
 	}
 }
 
-func (w *World) handleAgentPosReq(req agentPosReq) {
-	resp := agentPosResp{}
-	defer func() {
-		if req.Resp == nil {
-			return
+func (w *World) handleAgentPosReq(req transferruntimepkg.AgentPosReq) {
+	resp := transferruntimepkg.HandleAgentPosReq(req, func(agentID string) ([3]int, bool) {
+		a := w.agents[agentID]
+		if a == nil {
+			return [3]int{}, false
 		}
-		select {
-		case req.Resp <- resp:
-		default:
-		}
-	}()
-	a := w.agents[req.AgentID]
-	if a == nil {
-		resp.Err = "agent not found"
+		return a.Pos.ToArray(), true
+	})
+	if req.Resp == nil {
 		return
 	}
-	resp.Pos = a.Pos
+	select {
+	case req.Resp <- resp:
+	default:
+	}
 }
 
 // RequestOrgMetaSnapshot returns a world-local snapshot of organization metadata.
@@ -379,7 +333,7 @@ func (w *World) RequestOrgMetaSnapshot(ctx context.Context) ([]OrgTransfer, erro
 	if w == nil || w.orgMetaReq == nil {
 		return nil, errors.New("org metadata query not available")
 	}
-	req := orgMetaReq{Resp: make(chan orgMetaResp, 1)}
+	req := transferruntimepkg.OrgMetaReq{Resp: make(chan transferruntimepkg.OrgMetaResp, 1)}
 	select {
 	case w.orgMetaReq <- req:
 	case <-ctx.Done():
@@ -390,15 +344,31 @@ func (w *World) RequestOrgMetaSnapshot(ctx context.Context) ([]OrgTransfer, erro
 		if resp.Err != "" {
 			return nil, errors.New(resp.Err)
 		}
-		return resp.Orgs, nil
+		out := make([]OrgTransfer, 0, len(resp.Orgs))
+		for _, org := range resp.Orgs {
+			members := make(map[string]OrgRole, len(org.Members))
+			for aid, role := range org.Members {
+				members[aid] = OrgRole(role)
+			}
+			out = append(out, OrgTransfer{
+				OrgID:       org.OrgID,
+				Kind:        OrgKind(org.Kind),
+				Name:        org.Name,
+				CreatedTick: org.CreatedTick,
+				MetaVersion: org.MetaVersion,
+				Members:     members,
+			})
+		}
+		return out, nil
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	}
 }
 
-func (w *World) handleOrgMetaReq(req orgMetaReq) {
-	resp := orgMetaResp{}
-	defer func() {
+func (w *World) handleOrgMetaReq(req transferruntimepkg.OrgMetaReq) {
+	resp := transferruntimepkg.OrgMetaResp{}
+	if w == nil {
+		resp.Err = "world unavailable"
 		if req.Resp == nil {
 			return
 		}
@@ -406,12 +376,9 @@ func (w *World) handleOrgMetaReq(req orgMetaReq) {
 		case req.Resp <- resp:
 		default:
 		}
-	}()
-	if w == nil {
-		resp.Err = "world unavailable"
 		return
 	}
-	meta := make(map[string]transfer.OrgMeta, len(w.orgs))
+	states := make([]transferorgpkg.State, 0, len(w.orgs))
 	for id, org := range w.orgs {
 		if org == nil || id == "" {
 			continue
@@ -420,32 +387,23 @@ func (w *World) handleOrgMetaReq(req orgMetaReq) {
 		for aid, role := range org.Members {
 			members[aid] = string(role)
 		}
-		meta[id] = transfer.OrgMeta{
+		states = append(states, transferorgpkg.State{
 			OrgID:       org.OrgID,
 			Kind:        string(org.Kind),
 			Name:        org.Name,
 			CreatedTick: org.CreatedTick,
 			MetaVersion: org.MetaVersion,
 			Members:     members,
-		}
-	}
-	sorted := transfer.SortedOrgMeta(meta)
-	out := make([]OrgTransfer, 0, len(sorted))
-	for _, org := range sorted {
-		members := make(map[string]OrgRole, len(org.Members))
-		for aid, role := range org.Members {
-			members[aid] = OrgRole(role)
-		}
-		out = append(out, OrgTransfer{
-			OrgID:       org.OrgID,
-			Kind:        OrgKind(org.Kind),
-			Name:        org.Name,
-			CreatedTick: org.CreatedTick,
-			MetaVersion: org.MetaVersion,
-			Members:     members,
 		})
 	}
-	resp.Orgs = out
+	resp = transferruntimepkg.BuildOrgMetaResp(states)
+	if req.Resp == nil {
+		return
+	}
+	select {
+	case req.Resp <- resp:
+	default:
+	}
 }
 
 // RequestUpsertOrgMeta applies manager-authoritative org metadata into this world.
@@ -454,9 +412,27 @@ func (w *World) RequestUpsertOrgMeta(ctx context.Context, orgs []OrgTransfer) er
 	if w == nil || w.orgMetaUpsert == nil {
 		return errors.New("org metadata upsert not available")
 	}
-	req := orgMetaUpsertReq{
-		Orgs: orgs,
-		Resp: make(chan orgMetaUpsertResp, 1),
+	incoming := make([]transferorgpkg.State, 0, len(orgs))
+	for _, org := range orgs {
+		if org.OrgID == "" {
+			continue
+		}
+		members := map[string]string{}
+		for aid, role := range org.Members {
+			members[aid] = string(role)
+		}
+		incoming = append(incoming, transferorgpkg.State{
+			OrgID:       org.OrgID,
+			Kind:        string(org.Kind),
+			Name:        org.Name,
+			CreatedTick: org.CreatedTick,
+			MetaVersion: org.MetaVersion,
+			Members:     members,
+		})
+	}
+	req := transferruntimepkg.OrgMetaUpsertReq{
+		Orgs: incoming,
+		Resp: make(chan transferruntimepkg.OrgMetaUpsertResp, 1),
 	}
 	select {
 	case w.orgMetaUpsert <- req:
@@ -474,8 +450,8 @@ func (w *World) RequestUpsertOrgMeta(ctx context.Context, orgs []OrgTransfer) er
 	}
 }
 
-func (w *World) handleOrgMetaUpsertReq(req orgMetaUpsertReq) {
-	resp := orgMetaUpsertResp{}
+func (w *World) handleOrgMetaUpsertReq(req transferruntimepkg.OrgMetaUpsertReq) {
+	resp := transferruntimepkg.OrgMetaUpsertResp{}
 	defer func() {
 		if req.Resp == nil {
 			return
@@ -490,84 +466,47 @@ func (w *World) handleOrgMetaUpsertReq(req orgMetaUpsertReq) {
 		return
 	}
 
-	incoming := map[string]transfer.OrgMeta{}
-	for _, org := range req.Orgs {
-		if org.OrgID == "" {
+	existingStates := make([]transferorgpkg.State, 0, len(w.orgs))
+	for orgID, org := range w.orgs {
+		if org == nil {
 			continue
 		}
-		members := map[string]string{}
+		curMembers := map[string]string{}
 		for aid, role := range org.Members {
-			members[aid] = string(role)
+			curMembers[aid] = string(role)
 		}
-		incoming[org.OrgID] = transfer.OrgMeta{
-			OrgID:       org.OrgID,
+		existingStates = append(existingStates, transferorgpkg.State{
+			OrgID:       orgID,
 			Kind:        string(org.Kind),
 			Name:        org.Name,
 			CreatedTick: org.CreatedTick,
 			MetaVersion: org.MetaVersion,
-			Members:     members,
-		}
+			Members:     curMembers,
+		})
 	}
-
-	for _, src := range transfer.SortedOrgMeta(incoming) {
+	mergedStates, ownerByAgent := transferruntimepkg.BuildOrgMetaMerge(existingStates, req.Orgs)
+	for _, src := range mergedStates {
 		dst := w.orgByID(src.OrgID)
 		if dst == nil {
 			dst = &Organization{
 				OrgID:           src.OrgID,
-				Kind:            OrgKind(src.Kind),
-				Name:            src.Name,
-				CreatedTick:     src.CreatedTick,
-				MetaVersion:     src.MetaVersion,
-				Members:         map[string]OrgRole{},
 				Treasury:        map[string]int{},
 				TreasuryByWorld: map[string]map[string]int{},
 			}
 			w.orgs[src.OrgID] = dst
 		}
-		curMembers := map[string]string{}
-		for aid, role := range dst.Members {
-			curMembers[aid] = string(role)
+		dst.Kind = OrgKind(src.Kind)
+		dst.Name = src.Name
+		dst.CreatedTick = src.CreatedTick
+		dst.MetaVersion = src.MetaVersion
+		nextMembers := make(map[string]OrgRole, len(src.Members))
+		for aid, role := range src.Members {
+			nextMembers[aid] = OrgRole(role)
 		}
-		current := transfer.OrgMeta{
-			OrgID:       dst.OrgID,
-			Kind:        string(dst.Kind),
-			Name:        dst.Name,
-			CreatedTick: dst.CreatedTick,
-			MetaVersion: dst.MetaVersion,
-			Members:     curMembers,
-		}
-		merged, accepted := transfer.MergeOrgMeta(current, src)
-		if !accepted {
-			_ = w.orgTreasury(dst)
-			continue
-		}
-		dst.Kind = OrgKind(merged.Kind)
-		dst.Name = merged.Name
-		dst.CreatedTick = merged.CreatedTick
-		dst.MetaVersion = merged.MetaVersion
-		members := make(map[string]OrgRole, len(merged.Members))
-		for aid, role := range merged.Members {
-			members[aid] = OrgRole(role)
-		}
-		dst.Members = members
+		dst.Members = nextMembers
 		_ = w.orgTreasury(dst)
 	}
 
-	orgs := map[string]transfer.OrgMeta{}
-	for orgID, org := range w.orgs {
-		if org == nil {
-			continue
-		}
-		members := map[string]string{}
-		for aid, role := range org.Members {
-			members[aid] = string(role)
-		}
-		orgs[orgID] = transfer.OrgMeta{
-			OrgID:   orgID,
-			Members: members,
-		}
-	}
-	ownerByAgent := transfer.OwnerByAgent(orgs)
 	for _, a := range w.agents {
 		if a == nil {
 			continue

@@ -1,6 +1,6 @@
 package world
 
-import "voxelcraft.ai/internal/sim/world/feature/transfer"
+import transfermapspkg "voxelcraft.ai/internal/sim/world/feature/transfer/maps"
 
 func (w *World) handleTransferOut(req transferOutReq) {
 	resp := transferOutResp{}
@@ -24,8 +24,8 @@ func (w *World) handleTransferOut(req transferOutReq) {
 	a.MoveTask = nil
 	a.WorkTask = nil
 
-	inv := transfer.CopyPositiveIntMap(a.Inventory)
-	mem := transfer.CopyMap(a.Memory, func(k string, _ memoryEntry) bool { return k != "" })
+	inv := transfermapspkg.CopyPositiveIntMap(a.Inventory)
+	mem := transfermapspkg.CopyMap(a.Memory, func(k string, _ memoryEntry) bool { return k != "" })
 
 	resp.Transfer = AgentTransfer{
 		ID:                           a.ID,

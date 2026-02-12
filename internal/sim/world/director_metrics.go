@@ -1,7 +1,7 @@
 package world
 
 import (
-	featuredirector "voxelcraft.ai/internal/sim/world/feature/director"
+	metricspkg "voxelcraft.ai/internal/sim/world/feature/director/metrics"
 )
 
 func (w *World) computeDirectorMetrics(nowTick uint64) directorMetrics {
@@ -25,9 +25,9 @@ func (w *World) computeDirectorMetrics(nowTick uint64) directorMetrics {
 		if a == nil {
 			continue
 		}
-		wealth = append(wealth, featuredirector.InventoryValue(a.Inventory))
+		wealth = append(wealth, metricspkg.InventoryValue(a.Inventory))
 	}
-	m := featuredirector.ComputeMetrics(featuredirector.EvalInput{
+	m := metricspkg.ComputeMetrics(metricspkg.EvalInput{
 		Agents:      agents,
 		WindowTicks: windowTicks,
 		Trades:      sum.Trades,

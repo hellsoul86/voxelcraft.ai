@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"time"
 
-	featuredirector "voxelcraft.ai/internal/sim/world/feature/director"
+	resourcespkg "voxelcraft.ai/internal/sim/world/feature/director/resources"
 )
 
 func (w *World) stepInternal(joins []JoinRequest, leaves []string, actions []ActionEnvelope, transferOutReqs []transferOutReq, transferInReqs []transferInReq, injectEvents []injectEventReq) {
@@ -179,7 +179,7 @@ func (w *World) stepInternal(joins []JoinRequest, leaves []string, actions []Act
 func (w *World) computeResourceDensity() map[string]float64 {
 	targets := []string{"COAL_ORE", "IRON_ORE", "COPPER_ORE", "CRYSTAL_ORE", "STONE", "LOG"}
 	if w == nil || w.chunks == nil || len(w.chunks.chunks) == 0 {
-		return featuredirector.ComputeResourceDensity(targets, nil, nil)
+		return resourcespkg.ComputeResourceDensity(targets, nil, nil)
 	}
 	chunks := make([][]uint16, 0, len(w.chunks.chunks))
 	for _, ch := range w.chunks.chunks {
@@ -188,5 +188,5 @@ func (w *World) computeResourceDensity() map[string]float64 {
 		}
 		chunks = append(chunks, ch.Blocks)
 	}
-	return featuredirector.ComputeResourceDensity(targets, w.catalogs.Blocks.Index, chunks)
+	return resourcespkg.ComputeResourceDensity(targets, w.catalogs.Blocks.Index, chunks)
 }

@@ -5,7 +5,7 @@ import (
 
 	"voxelcraft.ai/internal/protocol"
 	"voxelcraft.ai/internal/sim/tasks"
-	featurework "voxelcraft.ai/internal/sim/world/feature/work"
+	miningpkg "voxelcraft.ai/internal/sim/world/feature/work/mining"
 )
 
 func (w *World) tickMine(a *Agent, wt *tasks.WorkTask, nowTick uint64) {
@@ -54,9 +54,9 @@ func (w *World) tickMine(a *Agent, wt *tasks.WorkTask, nowTick uint64) {
 	}
 	blockName := w.blockName(b)
 
-	family := featurework.MineToolFamilyForBlock(blockName)
-	tier := featurework.BestToolTier(a.Inventory, family)
-	mineWorkNeeded, mineCost := featurework.MineParamsForTier(tier)
+	family := miningpkg.MineToolFamilyForBlock(blockName)
+	tier := miningpkg.BestToolTier(a.Inventory, family)
+	mineWorkNeeded, mineCost := miningpkg.MineParamsForTier(tier)
 
 	// Mining costs stamina; if too tired, wait and recover.
 	if a.StaminaMilli < mineCost {

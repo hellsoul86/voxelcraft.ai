@@ -3,7 +3,7 @@ package world
 import (
 	"voxelcraft.ai/internal/protocol"
 	"voxelcraft.ai/internal/sim/tasks"
-	"voxelcraft.ai/internal/sim/world/feature/governance"
+	claimspkg "voxelcraft.ai/internal/sim/world/feature/governance/claims"
 	"voxelcraft.ai/internal/sim/world/logic/blueprint"
 	"voxelcraft.ai/internal/sim/world/logic/mathx"
 )
@@ -66,8 +66,8 @@ func handleTaskClaimLand(w *World, a *Agent, tr protocol.TaskReq, nowTick uint64
 	w.auditSetBlock(nowTick, a.ID, anchor, w.chunks.gen.Air, totemID, "CLAIM_LAND")
 
 	landID := w.newLandID(a.ID)
-	claimType := governance.DefaultClaimTypeForWorld(w.cfg.WorldType)
-	baseFlags := governance.DefaultClaimFlags(claimType)
+	claimType := claimspkg.DefaultClaimTypeForWorld(w.cfg.WorldType)
+	baseFlags := claimspkg.DefaultFlags(claimType)
 	due := uint64(0)
 	if w.cfg.DayTicks > 0 {
 		due = nowTick + uint64(w.cfg.DayTicks)

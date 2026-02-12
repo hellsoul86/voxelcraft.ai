@@ -3,8 +3,8 @@ package world
 import (
 	"voxelcraft.ai/internal/observerproto"
 	"voxelcraft.ai/internal/sim/tasks"
-	featurework "voxelcraft.ai/internal/sim/world/feature/work"
-	"voxelcraft.ai/internal/sim/world/logic/observerprogress"
+	taskspkg "voxelcraft.ai/internal/sim/world/feature/observer/tasks"
+	progresspkg "voxelcraft.ai/internal/sim/world/feature/work/progress"
 )
 
 func (w *World) observerMoveTaskState(a *Agent, nowTick uint64) *observerproto.TaskState {
@@ -12,41 +12,21 @@ func (w *World) observerMoveTaskState(a *Agent, nowTick uint64) *observerproto.T
 		return nil
 	}
 	mt := a.MoveTask
-
-	target := v3FromTask(mt.Target)
-	if mt.Kind == tasks.KindFollow {
-		if t, ok := w.followTargetPos(mt.TargetID); ok {
-			target = t
-		}
-		prog, eta := observerprogress.FollowProgress(
-			observerprogress.Vec3{X: a.Pos.X, Y: a.Pos.Y, Z: a.Pos.Z},
-			observerprogress.Vec3{X: target.X, Y: target.Y, Z: target.Z},
-			mt.Distance,
-		)
-		return &observerproto.TaskState{
-			Kind:     string(mt.Kind),
-			TargetID: mt.TargetID,
-			Target:   target.ToArray(),
-			Progress: prog,
-			EtaTicks: eta,
-		}
-	}
-
-	start := v3FromTask(mt.StartPos)
-
-	// Match the agent OBS semantics: completion is within tolerance, and progress/eta are based on effective XZ distance.
-	prog, eta := observerprogress.MoveProgress(
-		observerprogress.Vec3{X: start.X, Y: start.Y, Z: start.Z},
-		observerprogress.Vec3{X: a.Pos.X, Y: a.Pos.Y, Z: a.Pos.Z},
-		observerprogress.Vec3{X: target.X, Y: target.Y, Z: target.Z},
-		mt.Tolerance,
+	return taskspkg.BuildMoveTaskState(
+		taskspkg.Vec3{X: a.Pos.X, Y: a.Pos.Y, Z: a.Pos.Z},
+		taskspkg.MoveStateInput{
+			Kind:      string(mt.Kind),
+			Target:    taskspkg.Vec3{X: mt.Target.X, Y: mt.Target.Y, Z: mt.Target.Z},
+			StartPos:  taskspkg.Vec3{X: mt.StartPos.X, Y: mt.StartPos.Y, Z: mt.StartPos.Z},
+			TargetID:  mt.TargetID,
+			Distance:  mt.Distance,
+			Tolerance: mt.Tolerance,
+		},
+		func(id string) (taskspkg.Vec3, bool) {
+			t, ok := w.followTargetPos(id)
+			return taskspkg.Vec3{X: t.X, Y: t.Y, Z: t.Z}, ok
+		},
 	)
-	return &observerproto.TaskState{
-		Kind:     string(mt.Kind),
-		Target:   target.ToArray(),
-		Progress: prog,
-		EtaTicks: eta,
-	}
 }
 
 func (w *World) observerWorkTaskState(a *Agent) *observerproto.TaskState {
@@ -54,10 +34,7 @@ func (w *World) observerWorkTaskState(a *Agent) *observerproto.TaskState {
 		return nil
 	}
 	wt := a.WorkTask
-	return &observerproto.TaskState{
-		Kind:     string(wt.Kind),
-		Progress: w.workProgressForAgent(a, wt),
-	}
+	return taskspkg.BuildWorkTaskState(string(wt.Kind), w.workProgressForAgent(a, wt))
 }
 
 func (w *World) workProgressForAgent(a *Agent, wt *tasks.WorkTask) float64 {
@@ -68,25 +45,25 @@ func (w *World) workProgressForAgent(a *Agent, wt *tasks.WorkTask) float64 {
 	case tasks.KindMine:
 		pos := v3FromTask(wt.BlockPos)
 		blockName := w.blockName(w.chunks.GetBlock(pos))
-		return featurework.MineProgress(wt.WorkTicks, blockName, a.Inventory)
+		return progresspkg.MineProgress(wt.WorkTicks, blockName, a.Inventory)
 	case tasks.KindCraft:
 		rec, ok := w.catalogs.Recipes.ByID[wt.RecipeID]
 		if !ok {
 			return 0
 		}
-		return featurework.TimedProgress(wt.WorkTicks, rec.TimeTicks)
+		return progresspkg.TimedProgress(wt.WorkTicks, rec.TimeTicks)
 	case tasks.KindSmelt:
 		rec, ok := w.smeltByInput[wt.ItemID]
 		if !ok {
 			return 0
 		}
-		return featurework.TimedProgress(wt.WorkTicks, rec.TimeTicks)
+		return progresspkg.TimedProgress(wt.WorkTicks, rec.TimeTicks)
 	case tasks.KindBuildBlueprint:
 		bp, ok := w.catalogs.Blueprints.ByID[wt.BlueprintID]
 		if !ok {
 			return 0
 		}
-		return featurework.BlueprintProgress(wt.BuildIndex, len(bp.Blocks))
+		return progresspkg.BlueprintProgress(wt.BuildIndex, len(bp.Blocks))
 	default:
 		return 0
 	}

@@ -3,7 +3,8 @@ package world
 import (
 	"fmt"
 
-	"voxelcraft.ai/internal/sim/world/feature/governance"
+	claimspkg "voxelcraft.ai/internal/sim/world/feature/governance/claims"
+	permissionspkg "voxelcraft.ai/internal/sim/world/feature/governance/permissions"
 )
 
 type ClaimFlags struct {
@@ -65,7 +66,7 @@ func (w *World) landCoreRadius(c *LandClaim) int {
 	if c == nil {
 		return 0
 	}
-	return governance.CoreRadius(c.Radius, w.cfg.AccessPassCoreRadius)
+	return claimspkg.CoreRadius(c.Radius, w.cfg.AccessPassCoreRadius)
 }
 
 func (w *World) landCoreContains(c *LandClaim, pos Vec3i) bool {
@@ -73,7 +74,7 @@ func (w *World) landCoreContains(c *LandClaim, pos Vec3i) bool {
 	if c == nil {
 		return false
 	}
-	return governance.CoreContains(c.Anchor.X, c.Anchor.Z, pos.X, pos.Z, r)
+	return claimspkg.CoreContains(c.Anchor.X, c.Anchor.Z, pos.X, pos.Z, r)
 }
 
 func (w *World) landAt(pos Vec3i) *LandClaim {
@@ -88,15 +89,15 @@ func (w *World) landAt(pos Vec3i) *LandClaim {
 func (w *World) permissionsFor(agentID string, pos Vec3i) (land *LandClaim, perms map[string]bool) {
 	land = w.landAt(pos)
 	if land == nil {
-		p := governance.WildPermissions()
+		p2 := permissionspkg.WildPermissions()
 		return nil, map[string]bool{
-			"can_build":  p.CanBuild,
-			"can_break":  p.CanBreak,
-			"can_damage": p.CanDamage,
-			"can_trade":  p.CanTrade,
+			"can_build":  p2.CanBuild,
+			"can_break":  p2.CanBreak,
+			"can_damage": p2.CanDamage,
+			"can_trade":  p2.CanTrade,
 		}
 	}
-	fp := governance.PermissionsForLand(w.isLandMember(agentID, land), land.MaintenanceStage, governance.ClaimFlags{
+	fp := permissionspkg.ForLand(w.isLandMember(agentID, land), land.MaintenanceStage, claimspkg.Flags{
 		AllowBuild:  land.Flags.AllowBuild,
 		AllowBreak:  land.Flags.AllowBreak,
 		AllowDamage: land.Flags.AllowDamage,
@@ -115,7 +116,7 @@ func (w *World) canBuildAt(agentID string, pos Vec3i, nowTick uint64) bool {
 	if land == nil {
 		return perms["can_build"]
 	}
-	return governance.CanActionWithCurfew(
+	return claimspkg.CanActionWithCurfew(
 		perms["can_build"],
 		land.CurfewEnabled,
 		w.timeOfDay(nowTick),
@@ -129,7 +130,7 @@ func (w *World) canBreakAt(agentID string, pos Vec3i, nowTick uint64) bool {
 	if land == nil {
 		return perms["can_break"]
 	}
-	return governance.CanActionWithCurfew(
+	return claimspkg.CanActionWithCurfew(
 		perms["can_break"],
 		land.CurfewEnabled,
 		w.timeOfDay(nowTick),
@@ -139,7 +140,7 @@ func (w *World) canBreakAt(agentID string, pos Vec3i, nowTick uint64) bool {
 }
 
 func (w *World) timeOfDay(nowTick uint64) float64 {
-	return governance.TimeOfDay(nowTick, w.cfg.DayTicks)
+	return claimspkg.TimeOfDay(nowTick, w.cfg.DayTicks)
 }
 
 func (w *World) newLandID(owner string) string {

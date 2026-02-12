@@ -4,8 +4,9 @@ import (
 	"fmt"
 
 	"voxelcraft.ai/internal/sim/catalogs"
-	"voxelcraft.ai/internal/sim/world/feature/transfer"
-	featurework "voxelcraft.ai/internal/sim/world/feature/work"
+	transfereventspkg "voxelcraft.ai/internal/sim/world/feature/transfer/events"
+	transferruntimepkg "voxelcraft.ai/internal/sim/world/feature/transfer/runtime"
+	smeltpkg "voxelcraft.ai/internal/sim/world/feature/work/smelt"
 )
 
 func New(cfg WorldConfig, cats *catalogs.Catalogs) (*World, error) {
@@ -17,7 +18,7 @@ func New(cfg WorldConfig, cats *catalogs.Catalogs) (*World, error) {
 		return nil, err
 	}
 
-	smeltByInput, err := featurework.BuildSmeltByInput(cats.Recipes.ByID)
+	smeltByInput, err := smeltpkg.BuildSmeltByInput(cats.Recipes.ByID)
 	if err != nil {
 		return nil, err
 	}
@@ -90,11 +91,11 @@ func New(cfg WorldConfig, cats *catalogs.Catalogs) (*World, error) {
 		attach:        make(chan AttachRequest, 64),
 		admin:         make(chan adminSnapshotReq, 16),
 		adminReset:    make(chan adminResetReq, 16),
-		agentPosReq:   make(chan agentPosReq, 64),
-		eventsReq:     make(chan transfer.EventsReq, 128),
+		agentPosReq:   make(chan transferruntimepkg.AgentPosReq, 64),
+		eventsReq:     make(chan transfereventspkg.Req, 128),
 		actDedupeReq:  make(chan actDedupeReq, 256),
-		orgMetaReq:    make(chan orgMetaReq, 64),
-		orgMetaUpsert: make(chan orgMetaUpsertReq, 64),
+		orgMetaReq:    make(chan transferruntimepkg.OrgMetaReq, 64),
+		orgMetaUpsert: make(chan transferruntimepkg.OrgMetaUpsertReq, 64),
 		leave:         make(chan string, 64),
 		stop:          make(chan struct{}),
 		transferOut:   make(chan transferOutReq, 64),

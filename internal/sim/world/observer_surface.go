@@ -1,7 +1,10 @@
 package world
 
-import "sort"
-import "voxelcraft.ai/internal/sim/world/logic/mathx"
+import (
+	"math"
+
+	chunkspkg "voxelcraft.ai/internal/sim/world/feature/observer/chunks"
+)
 
 func (w *World) computeChunkSurface(cx, cz int) []surfaceCell {
 	ch := w.chunkForSurface(cx, cz)
@@ -95,47 +98,14 @@ func (w *World) chunkForVoxels(cx, cz int) *Chunk {
 }
 
 func computeWantedChunks(agents []ChunkKey, radius int, maxChunks int) []ChunkKey {
-	if radius <= 0 {
-		radius = 1
+	in := make([]chunkspkg.Key, 0, len(agents))
+	for _, k := range agents {
+		in = append(in, chunkspkg.Key{CX: k.CX, CZ: k.CZ})
 	}
-	if maxChunks <= 0 {
-		maxChunks = 1024
-	}
-	type item struct {
-		k    ChunkKey
-		dist int
-	}
-	distByKey := map[ChunkKey]int{}
-	for _, a := range agents {
-		for dz := -radius; dz <= radius; dz++ {
-			for dx := -radius; dx <= radius; dx++ {
-				k := ChunkKey{CX: a.CX + dx, CZ: a.CZ + dz}
-				d := mathx.AbsInt(dx) + mathx.AbsInt(dz)
-				if prev, ok := distByKey[k]; !ok || d < prev {
-					distByKey[k] = d
-				}
-			}
-		}
-	}
-	items := make([]item, 0, len(distByKey))
-	for k, d := range distByKey {
-		items = append(items, item{k: k, dist: d})
-	}
-	sort.Slice(items, func(i, j int) bool {
-		if items[i].dist != items[j].dist {
-			return items[i].dist < items[j].dist
-		}
-		if items[i].k.CX != items[j].k.CX {
-			return items[i].k.CX < items[j].k.CX
-		}
-		return items[i].k.CZ < items[j].k.CZ
-	})
-	if len(items) > maxChunks {
-		items = items[:maxChunks]
-	}
-	out := make([]ChunkKey, 0, len(items))
-	for _, it := range items {
-		out = append(out, it.k)
+	keys := chunkspkg.ComputeWantedChunks(in, radius, maxChunks)
+	out := make([]ChunkKey, 0, len(keys))
+	for _, k := range keys {
+		out = append(out, ChunkKey{CX: k.CX, CZ: k.CZ})
 	}
 	return out
 }
@@ -150,26 +120,10 @@ func trySend(ch chan []byte, b []byte) bool {
 }
 
 func clampInt(v, min, max, def int) int {
-	if v == 0 {
-		v = def
-	}
-	if v < min {
-		return min
-	}
-	if v > max {
-		return max
-	}
-	return v
+	return chunkspkg.ClampInt(v, min, max, def)
 }
 
 // ceil is a tiny helper to avoid importing math in the world loop hot path.
 func ceil(v float64) float64 {
-	i := int(v)
-	if v == float64(i) {
-		return v
-	}
-	if v > 0 {
-		return float64(i + 1)
-	}
-	return float64(i)
+	return math.Ceil(v)
 }

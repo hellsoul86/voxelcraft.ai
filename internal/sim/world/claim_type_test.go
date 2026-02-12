@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	"voxelcraft.ai/internal/sim/catalogs"
-	"voxelcraft.ai/internal/sim/world/feature/governance"
+	claimspkg "voxelcraft.ai/internal/sim/world/feature/governance/claims"
 )
 
 func TestClaimType_HomesteadVisitorPermissions(t *testing.T) {
@@ -29,7 +29,7 @@ func TestClaimType_HomesteadVisitorPermissions(t *testing.T) {
 	visitor := &Agent{ID: "A2", Pos: owner.Pos}
 	w.agents[owner.ID] = owner
 	w.agents[visitor.ID] = visitor
-	homeFlags := governance.DefaultClaimFlags(ClaimTypeHomestead)
+	homeFlags := claimspkg.DefaultFlags(ClaimTypeHomestead)
 	w.claims["LAND_HOME"] = &LandClaim{
 		LandID:    "LAND_HOME",
 		Owner:     owner.ID,
@@ -71,7 +71,7 @@ func TestClaimType_CityCoreTradeAndDamage(t *testing.T) {
 	visitor := &Agent{ID: "A2", Pos: owner.Pos}
 	w.agents[owner.ID] = owner
 	w.agents[visitor.ID] = visitor
-	cityFlags := governance.DefaultClaimFlags(ClaimTypeCityCore)
+	cityFlags := claimspkg.DefaultFlags(ClaimTypeCityCore)
 	w.claims["LAND_CITY"] = &LandClaim{
 		LandID:    "LAND_CITY",
 		Owner:     owner.ID,
@@ -112,7 +112,7 @@ func TestClaimType_SnapshotRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new world1: %v", err)
 	}
-	cityFlags := governance.DefaultClaimFlags(ClaimTypeCityCore)
+	cityFlags := claimspkg.DefaultFlags(ClaimTypeCityCore)
 	w1.claims["LAND_X"] = &LandClaim{
 		LandID:    "LAND_X",
 		Owner:     "A1",

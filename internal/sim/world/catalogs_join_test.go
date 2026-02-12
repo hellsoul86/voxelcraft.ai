@@ -6,7 +6,7 @@ import (
 
 	"voxelcraft.ai/internal/protocol"
 	"voxelcraft.ai/internal/sim/catalogs"
-	"voxelcraft.ai/internal/sim/world/feature/session"
+	catalogspkg "voxelcraft.ai/internal/sim/world/feature/session/catalogs"
 )
 
 func TestJoin_CatalogsIncludeFullSet(t *testing.T) {
@@ -78,7 +78,7 @@ func TestJoin_CatalogsIncludeFullSet(t *testing.T) {
 	if pal, ok := jr.Catalogs[1].Data.([]string); !ok || len(pal) == 0 {
 		t.Fatalf("item_palette data type/len unexpected: %T", jr.Catalogs[1].Data)
 	}
-	if tc, ok := jr.Catalogs[2].Data.(session.TuningCatalog); !ok || tc.SnapshotEveryTicks <= 0 {
+	if tc, ok := jr.Catalogs[2].Data.(catalogspkg.TuningCatalog); !ok || tc.SnapshotEveryTicks <= 0 {
 		t.Fatalf("tuning data type/fields unexpected: %T", jr.Catalogs[2].Data)
 	}
 	if defs, ok := jr.Catalogs[3].Data.([]catalogs.RecipeDef); !ok || len(defs) == 0 {
@@ -99,7 +99,7 @@ func TestJoin_CatalogsIncludeFullSet(t *testing.T) {
 			}
 		}
 	}
-	if lc, ok := jr.Catalogs[5].Data.(session.LawTemplatesCatalogData); !ok || len(lc.Templates) == 0 {
+	if lc, ok := jr.Catalogs[5].Data.(catalogspkg.LawTemplatesCatalogData); !ok || len(lc.Templates) == 0 {
 		t.Fatalf("law_templates data type/len unexpected: %T", jr.Catalogs[5].Data)
 	} else {
 		for i := 1; i < len(lc.Templates); i++ {

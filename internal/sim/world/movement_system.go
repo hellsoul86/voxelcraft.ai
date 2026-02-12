@@ -1,13 +1,12 @@
 package world
 
 import (
-	"math"
 	"strings"
 
 	"voxelcraft.ai/internal/protocol"
 	"voxelcraft.ai/internal/sim/tasks"
-	featuremovement "voxelcraft.ai/internal/sim/world/feature/movement"
-	"voxelcraft.ai/internal/sim/world/logic/mathx"
+	detourpkg "voxelcraft.ai/internal/sim/world/feature/movement/detour"
+	runtimepkg "voxelcraft.ai/internal/sim/world/feature/movement/runtime"
 )
 
 func (w *World) systemMovementImpl(nowTick uint64) {
@@ -20,10 +19,7 @@ func (w *World) systemMovementImpl(nowTick uint64) {
 		switch mt.Kind {
 		case tasks.KindMoveTo:
 			target = v3FromTask(mt.Target)
-			want := int(math.Ceil(mt.Tolerance))
-			if want < 1 {
-				want = 1
-			}
+			want := runtimepkg.MoveTolerance(mt.Tolerance)
 			// Complete when within tolerance; do not teleport to the exact target to avoid skipping obstacles.
 			if distXZ(a.Pos, target) <= want {
 				w.recordStructureUsage(a.ID, a.Pos, nowTick)
@@ -43,10 +39,7 @@ func (w *World) systemMovementImpl(nowTick uint64) {
 			mt.Target = v3ToTask(t)
 			target = t
 
-			want := int(math.Ceil(mt.Distance))
-			if want < 1 {
-				want = 1
-			}
+			want := runtimepkg.MoveTolerance(mt.Distance)
 			if distXZ(a.Pos, target) <= want {
 				// Stay close; keep task active until canceled.
 				continue
@@ -57,15 +50,20 @@ func (w *World) systemMovementImpl(nowTick uint64) {
 		}
 
 		// Storm slows travel but should not deadlock tasks.
-		if w.weather == "STORM" && nowTick%2 == 1 {
+		if runtimepkg.ShouldSkipStorm(w.weather, nowTick) {
 			continue
 		}
 
 		// Event hazard: flood zones slow travel.
-		if w.activeEventID == "FLOOD_WARNING" && w.activeEventRadius > 0 && nowTick < w.activeEventEnds {
-			if distXZ(a.Pos, w.activeEventCenter) <= w.activeEventRadius && nowTick%3 == 1 {
-				continue
-			}
+		if runtimepkg.ShouldSkipFlood(
+			w.activeEventID,
+			w.activeEventRadius,
+			nowTick,
+			w.activeEventEnds,
+			runtimepkg.Pos{X: a.Pos.X, Y: a.Pos.Y, Z: a.Pos.Z},
+			runtimepkg.Pos{X: w.activeEventCenter.X, Y: w.activeEventCenter.Y, Z: w.activeEventCenter.Z},
+		) {
+			continue
 		}
 
 		// Moving costs stamina; if too tired, wait and recover.
@@ -81,41 +79,17 @@ func (w *World) systemMovementImpl(nowTick uint64) {
 		dx := target.X - a.Pos.X
 		dz := target.Z - a.Pos.Z
 
-		primaryX := mathx.AbsInt(dx) >= mathx.AbsInt(dz)
+		primaryX := runtimepkg.PrimaryAxis(dx, dz)
 		next := a.Pos
-		next1 := a.Pos
-		if primaryX {
-			if dx > 0 {
-				next1.X++
-			} else if dx < 0 {
-				next1.X--
-			}
-		} else {
-			if dz > 0 {
-				next1.Z++
-			} else if dz < 0 {
-				next1.Z--
-			}
-		}
+		p1 := runtimepkg.PrimaryStep(runtimepkg.Pos{X: a.Pos.X, Y: a.Pos.Y, Z: a.Pos.Z}, dx, dz, primaryX)
+		next1 := Vec3i{X: p1.X, Y: p1.Y, Z: p1.Z}
 		next1.Y = w.surfaceY(next1.X, next1.Z)
 		next = next1
 
 		if w.blockSolid(w.chunks.GetBlock(next1)) {
 			// Try the secondary axis only when primary step is blocked.
-			next2 := a.Pos
-			if primaryX {
-				if dz > 0 {
-					next2.Z++
-				} else if dz < 0 {
-					next2.Z--
-				}
-			} else {
-				if dx > 0 {
-					next2.X++
-				} else if dx < 0 {
-					next2.X--
-				}
-			}
+			p2 := runtimepkg.SecondaryStep(runtimepkg.Pos{X: a.Pos.X, Y: a.Pos.Y, Z: a.Pos.Z}, dx, dz, primaryX)
+			next2 := Vec3i{X: p2.X, Y: p2.Y, Z: p2.Z}
 			if next2 != a.Pos {
 				next2.Y = w.surfaceY(next2.X, next2.Z)
 				if !w.blockSolid(w.chunks.GetBlock(next2)) {
@@ -127,14 +101,14 @@ func (w *World) systemMovementImpl(nowTick uint64) {
 		// If both primary+secondary are blocked, attempt a small deterministic detour so agents
 		// don't have to constantly re-issue MOVE_TO on cluttered terrain.
 		if w.blockSolid(w.chunks.GetBlock(next)) {
-			if alt, ok := featuremovement.DetourStep2D(
-				featuremovement.Pos{X: a.Pos.X, Y: a.Pos.Y, Z: a.Pos.Z},
-				featuremovement.Pos{X: target.X, Y: target.Y, Z: target.Z},
+			if alt, ok := detourpkg.DetourStep2D(
+				detourpkg.Pos{X: a.Pos.X, Y: a.Pos.Y, Z: a.Pos.Z},
+				detourpkg.Pos{X: target.X, Y: target.Y, Z: target.Z},
 				16,
-				func(p featuremovement.Pos) bool {
+				func(p detourpkg.Pos) bool {
 					return w.chunks.inBounds(Vec3i{X: p.X, Y: p.Y, Z: p.Z})
 				},
-				func(p featuremovement.Pos) bool {
+				func(p detourpkg.Pos) bool {
 					return w.blockSolid(w.chunks.GetBlock(Vec3i{X: p.X, Y: p.Y, Z: p.Z}))
 				},
 			); ok {

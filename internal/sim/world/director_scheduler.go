@@ -1,8 +1,12 @@
 package world
 
-import "sort"
-import "voxelcraft.ai/internal/sim/world/logic/directorcenter"
-import featuredirector "voxelcraft.ai/internal/sim/world/feature/director"
+import (
+	"sort"
+
+	feedbackpkg "voxelcraft.ai/internal/sim/world/feature/director/feedback"
+	runtimepkg "voxelcraft.ai/internal/sim/world/feature/director/runtime"
+	"voxelcraft.ai/internal/sim/world/logic/directorcenter"
+)
 
 type directorMetrics struct {
 	Trade       float64 // 0..1
@@ -13,19 +17,21 @@ type directorMetrics struct {
 }
 
 func (w *World) systemDirector(nowTick uint64) {
-	// Expire active event.
-	if w.activeEventEnds != 0 && nowTick >= w.activeEventEnds {
-		w.activeEventID = ""
+	next, _ := runtimepkg.Expire(runtimepkg.State{
+		ActiveEventID:   w.activeEventID,
+		ActiveEventEnds: w.activeEventEnds,
+		Weather:         w.weather,
+		WeatherUntil:    w.weatherUntilTick,
+	}, nowTick)
+	if next.ActiveEventID == "" && w.activeEventID != "" {
 		w.activeEventStart = 0
-		w.activeEventEnds = 0
 		w.activeEventCenter = Vec3i{}
 		w.activeEventRadius = 0
 	}
-	// Expire weather override.
-	if w.weatherUntilTick != 0 && nowTick >= w.weatherUntilTick {
-		w.weather = "CLEAR"
-		w.weatherUntilTick = 0
-	}
+	w.activeEventID = next.ActiveEventID
+	w.activeEventEnds = next.ActiveEventEnds
+	w.weather = next.Weather
+	w.weatherUntilTick = next.WeatherUntil
 
 	// If an event is still active, don't schedule a new one.
 	if w.activeEventID != "" {
@@ -34,35 +40,23 @@ func (w *World) systemDirector(nowTick uint64) {
 
 	// First-week scripted cadence at the start of each in-game day.
 	if w.cfg.DayTicks > 0 && nowTick%uint64(w.cfg.DayTicks) == 0 {
-		schedule := []string{
-			"MARKET_WEEK",
-			"CRYSTAL_RIFT",
-			"BUILDER_EXPO",
-			"FLOOD_WARNING",
-			"RUINS_GATE",
-			"BANDIT_CAMP",
-			"CIVIC_VOTE",
-		}
 		dayInSeason := w.seasonDay(nowTick)
-		if dayInSeason >= 1 && dayInSeason <= len(schedule) {
-			w.startEvent(nowTick, schedule[dayInSeason-1])
+		if ev := runtimepkg.ScriptedEvent(dayInSeason); ev != "" {
+			w.startEvent(nowTick, ev)
 			return
 		}
 	}
 
 	// After week 1, evaluate every N ticks (default 3000 ~= 10 minutes at 5Hz).
 	every := uint64(w.cfg.DirectorEveryTicks)
-	if every == 0 {
-		every = 3000
-	}
-	if nowTick == 0 || nowTick%every != 0 {
+	if !runtimepkg.ShouldEvaluate(nowTick, every) {
 		return
 	}
 
 	m := w.computeDirectorMetrics(nowTick)
 	weights := w.baseEventWeights()
 
-	featuredirector.ApplyFeedback(weights, featuredirector.Metrics{
+	feedbackpkg.ApplyFeedback(weights, feedbackpkg.Metrics{
 		Trade:       m.Trade,
 		Conflict:    m.Conflict,
 		Exploration: m.Exploration,
