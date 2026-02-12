@@ -187,6 +187,15 @@ func (w *World) DebugGetBlock(pos Vec3i) (uint16, error) {
 	return w.chunks.GetBlock(pos), nil
 }
 
+// DebugStateDigest returns the current world digest for the given tick label.
+// This is intended for black-box determinism tests in sibling packages.
+func (w *World) DebugStateDigest(nowTick uint64) string {
+	if w == nil {
+		return ""
+	}
+	return w.stateDigest(nowTick)
+}
+
 // CheckBlueprintPlaced is a stable helper for tests/automation.
 // It reports whether the blueprint blocks match the world at the given anchor/rotation.
 func (w *World) CheckBlueprintPlaced(blueprintID string, anchor [3]int, rotation int) bool {
