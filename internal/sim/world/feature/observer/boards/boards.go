@@ -1,19 +1,13 @@
 package boards
 
-import "fmt"
+import (
+	"fmt"
 
-type Post struct {
-	PostID string
-	Author string
-	Title  string
-	Body   string
-	Tick   uint64
-}
+	modelpkg "voxelcraft.ai/internal/sim/world/kernel/model"
+)
 
-type Board struct {
-	BoardID string
-	Posts   []Post
-}
+type Post = modelpkg.BoardPost
+type Board = modelpkg.Board
 
 func NewPostID(n uint64) string {
 	return fmt.Sprintf("P%06d", n)

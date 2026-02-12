@@ -112,7 +112,7 @@ func (w *World) joinAgent(name string, delta bool, out chan []byte) JoinResponse
 		Pos:  Vec3i{X: spawnX, Y: 0, Z: spawnZ},
 		Yaw:  0,
 	}
-	a.initDefaults()
+	a.InitDefaults()
 	a.CurrentWorldID = w.cfg.ID
 	// Starter items (operational config).
 	if w.cfg.StarterItems != nil {

@@ -83,49 +83,30 @@ func (w *World) digestAgents(h hashWriter, tmp *[8]byte) {
 		digestWriteU64(h, tmp, uint64(a.Fun.RiskRescue))
 
 		// Fun novelty memory (seen biome/recipes/events) and anti-exploit state.
-		biomes := make([]string, 0, len(a.seenBiomes))
-		for b, ok := range a.seenBiomes {
-			if ok {
-				biomes = append(biomes, b)
-			}
-		}
-		sort.Strings(biomes)
+		biomes := a.SeenBiomesSorted()
 		digestWriteU64(h, tmp, uint64(len(biomes)))
 		for _, b := range biomes {
 			h.Write([]byte(b))
 		}
-		recipes := make([]string, 0, len(a.seenRecipes))
-		for r, ok := range a.seenRecipes {
-			if ok {
-				recipes = append(recipes, r)
-			}
-		}
-		sort.Strings(recipes)
+		recipes := a.SeenRecipesSorted()
 		digestWriteU64(h, tmp, uint64(len(recipes)))
 		for _, r := range recipes {
 			h.Write([]byte(r))
 		}
-		events := make([]string, 0, len(a.seenEvents))
-		for e, ok := range a.seenEvents {
-			if ok {
-				events = append(events, e)
-			}
-		}
-		sort.Strings(events)
+		events := a.SeenEventsSorted()
 		digestWriteU64(h, tmp, uint64(len(events)))
 		for _, e := range events {
 			h.Write([]byte(e))
 		}
-		decayKeys := make([]string, 0, len(a.funDecay))
-		for k, dw := range a.funDecay {
-			if dw != nil {
-				decayKeys = append(decayKeys, k)
-			}
+		fd := a.FunDecaySnapshot()
+		decayKeys := make([]string, 0, len(fd))
+		for k := range fd {
+			decayKeys = append(decayKeys, k)
 		}
 		sort.Strings(decayKeys)
 		digestWriteU64(h, tmp, uint64(len(decayKeys)))
 		for _, k := range decayKeys {
-			dw := a.funDecay[k]
+			dw := fd[k]
 			h.Write([]byte(k))
 			digestWriteU64(h, tmp, dw.StartTick)
 			digestWriteU64(h, tmp, uint64(dw.Count))

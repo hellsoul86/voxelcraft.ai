@@ -56,8 +56,9 @@ func TestSnapshotExportImport_RateLimitWindows(t *testing.T) {
 		t.Fatalf("missing imported agent")
 	}
 
-	rw := a2.rl["SAY"]
-	if rw == nil {
+	rl := a2.RateWindowsSnapshot()
+	rw, ok := rl["SAY"]
+	if !ok {
 		t.Fatalf("missing SAY rate window after import")
 	}
 	if got, want := rw.StartTick, nowTick; got != want {

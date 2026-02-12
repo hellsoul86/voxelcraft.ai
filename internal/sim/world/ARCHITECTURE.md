@@ -45,6 +45,10 @@ World facade (`internal/sim/world`):
 - Performs all state mutation, auditing, and event emission.
 - Adapts pure helpers from subpackages.
 
+Core layers:
+- `internal/sim/world/kernel/model` for shared domain model types (agent/org/claim/contract/etc).
+- `internal/sim/world/terrain/{store,gen}` for the 2D chunk store and deterministic world generation.
+
 Pure subpackages:
 - `internal/sim/world/logic/mathx`
 - `internal/sim/world/logic/ids` for stable identifier parsing/formatting
@@ -151,26 +155,24 @@ Core runtime:
 
 Action handling:
 - `action_apply.go`: ACT entry + routing
-- `instant_dispatch.go` and `instant_*_handlers.go`
-- `task_handlers_*.go`
+- `instants_facade.go`: instant action dispatch + handlers (thin wrappers to feature packages)
+- `tasks_facade.go`: task normalization + movement/work handlers
 - `action_types.go`: canonical action names and dispatch validation
 
 System loops:
-- `movement_system.go` (uses `feature/movement` and `logic/movement`)
-- `task_handlers_work.go` + `work_ticks_mine_place.go` + `work_ticks_interact.go` + `work_tick_craft_smelt.go` + `work_tick_blueprint.go` (uses `logic/blueprint` and `feature/work`)
-- `conveyor_system.go` (uses `logic/conveyorpower`)
-- `environment_system.go` (uses `feature/survival` + `feature/entities/items`)
-- `director_*.go` (uses `logic/directorcenter` + `feature/director`)
+- `tasks_facade.go` (movement/work systems; uses `feature/movement`, `feature/work`, `logic/movement`, `logic/blueprint`)
+- `conveyor_system.go` (uses `logic/conveyorpower` + `feature/conveyor/runtime`)
+- `environment_system.go` (uses `feature/survival/*` + `feature/entities/items`)
+- `director_facade.go` (director/season/fun; uses `logic/directorcenter` + `feature/director/*`)
 
 Observation:
 - `obs_builder.go`: top-level OBS assembly
-- `obs_events.go`: task/entity/event projection
-- `obs_voxels.go`: voxel window + delta/RLE (uses `io/obscodec`)
-- `observer_*.go`: observer stream exports
+- voxel window + delta/RLE (uses `io/obscodec`)
+- observer stream selection and exports live under `feature/observer/stream`
 
 Determinism and persistence:
 - `state_digest*.go` (uses `io/digestcodec`)
-- `snapshot_export*.go`, `snapshot_import*.go` (uses `io/snapshotcodec` + `feature/persistence`)
+- `snapshot_facade.go` (uses `io/snapshotcodec` + `feature/persistence/snapshot`)
 - `audit_helpers.go`
 
 Domain types:
@@ -196,6 +198,7 @@ Before moving/changing behavior:
 ## Testing Layout
 
 - Integration tests stay in `internal/sim/world` (they need unexported state + deterministic tick wiring).
+- For readability, world-level integration tests are named `*_integration_test.go`.
 - Pure unit tests must live in their owning subpackages (`logic/*`, `feature/*`, `policy/*`, `io/*`).
 - In Go, colocated `_test.go` files are the default for white-box tests. Separation is done by package boundaries, not a global `/tests` folder.
 - Unit tests should live beside the smallest pure package they validate (for example `feature/*/*`), while `internal/sim/world` keeps integration and determinism tests.

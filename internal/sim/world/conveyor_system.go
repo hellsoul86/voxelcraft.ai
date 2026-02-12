@@ -127,7 +127,7 @@ func (w *World) systemConveyors(nowTick uint64) {
 		if c == nil {
 			continue
 		}
-		item := conveyruntimepkg.PickAvailableItem(c.Inventory, c.availableCount)
+		item := conveyruntimepkg.PickAvailableItem(c.Inventory, c.AvailableCount)
 		if item == "" {
 			continue
 		}
@@ -203,7 +203,7 @@ func (w *World) sensorOn(pos Vec3i) bool {
 		}
 		if c := w.containers[p]; c != nil && len(c.Inventory) > 0 {
 			for item := range c.Inventory {
-				if c.availableCount(item) > 0 {
+				if c.AvailableCount(item) > 0 {
 					return true
 				}
 			}

@@ -2,16 +2,262 @@ package world
 
 import (
 	"strings"
-
 	"voxelcraft.ai/internal/protocol"
 	"voxelcraft.ai/internal/sim/catalogs"
 	"voxelcraft.ai/internal/sim/tasks"
 	inventorypkg "voxelcraft.ai/internal/sim/world/feature/economy/inventory"
+	claimspkg "voxelcraft.ai/internal/sim/world/feature/governance/claims"
+	detourpkg "voxelcraft.ai/internal/sim/world/feature/movement/detour"
+	paramspkg "voxelcraft.ai/internal/sim/world/feature/movement/params"
+	runtimepkg "voxelcraft.ai/internal/sim/world/feature/movement/runtime"
 	interactpkg "voxelcraft.ai/internal/sim/world/feature/work/interact"
 	limitspkg "voxelcraft.ai/internal/sim/world/feature/work/limits"
 	miningpkg "voxelcraft.ai/internal/sim/world/feature/work/mining"
 	"voxelcraft.ai/internal/sim/world/logic/blueprint"
+	"voxelcraft.ai/internal/sim/world/logic/mathx"
 )
+
+func (w *World) systemMovementImpl(nowTick uint64) {
+	for _, a := range w.sortedAgents() {
+		mt := a.MoveTask
+		if mt == nil {
+			continue
+		}
+		var target Vec3i
+		switch mt.Kind {
+		case tasks.KindMoveTo:
+			target = v3FromTask(mt.Target)
+			want := runtimepkg.MoveTolerance(mt.Tolerance)
+			// Complete when within tolerance; do not teleport to the exact target to avoid skipping obstacles.
+			if distXZ(a.Pos, target) <= want {
+				w.recordStructureUsage(a.ID, a.Pos, nowTick)
+				w.funOnBiome(a, nowTick)
+				a.MoveTask = nil
+				a.AddEvent(protocol.Event{"t": nowTick, "type": "TASK_DONE", "task_id": mt.TaskID, "kind": string(mt.Kind)})
+				continue
+			}
+
+		case tasks.KindFollow:
+			t, ok := w.followTargetPos(mt.TargetID)
+			if !ok {
+				a.MoveTask = nil
+				a.AddEvent(protocol.Event{"t": nowTick, "type": "TASK_FAIL", "task_id": mt.TaskID, "code": "E_INVALID_TARGET", "message": "follow target not found"})
+				continue
+			}
+			mt.Target = v3ToTask(t)
+			target = t
+
+			want := runtimepkg.MoveTolerance(mt.Distance)
+			if distXZ(a.Pos, target) <= want {
+				// Stay close; keep task active until canceled.
+				continue
+			}
+
+		default:
+			continue
+		}
+
+		// Storm slows travel but should not deadlock tasks.
+		if runtimepkg.ShouldSkipStorm(w.weather, nowTick) {
+			continue
+		}
+
+		// Event hazard: flood zones slow travel.
+		if runtimepkg.ShouldSkipFlood(
+			w.activeEventID,
+			w.activeEventRadius,
+			nowTick,
+			w.activeEventEnds,
+			runtimepkg.Pos{X: a.Pos.X, Y: a.Pos.Y, Z: a.Pos.Z},
+			runtimepkg.Pos{X: w.activeEventCenter.X, Y: w.activeEventCenter.Y, Z: w.activeEventCenter.Z},
+		) {
+			continue
+		}
+
+		// Moving costs stamina; if too tired, wait and recover.
+		const moveCost = 8
+		if a.StaminaMilli < moveCost {
+			continue
+		}
+		a.StaminaMilli -= moveCost
+
+		// Deterministic 2D stepping with minimal obstacle avoidance:
+		// - Pick primary axis by abs(dx)>=abs(dz)
+		// - If the next cell on the primary axis is blocked by a solid block, try the secondary axis.
+		dx := target.X - a.Pos.X
+		dz := target.Z - a.Pos.Z
+
+		primaryX := runtimepkg.PrimaryAxis(dx, dz)
+		next := a.Pos
+		p1 := runtimepkg.PrimaryStep(runtimepkg.Pos{X: a.Pos.X, Y: a.Pos.Y, Z: a.Pos.Z}, dx, dz, primaryX)
+		next1 := Vec3i{X: p1.X, Y: p1.Y, Z: p1.Z}
+		next1.Y = w.surfaceY(next1.X, next1.Z)
+		next = next1
+
+		if w.blockSolid(w.chunks.GetBlock(next1)) {
+			// Try the secondary axis only when primary step is blocked.
+			p2 := runtimepkg.SecondaryStep(runtimepkg.Pos{X: a.Pos.X, Y: a.Pos.Y, Z: a.Pos.Z}, dx, dz, primaryX)
+			next2 := Vec3i{X: p2.X, Y: p2.Y, Z: p2.Z}
+			if next2 != a.Pos {
+				next2.Y = w.surfaceY(next2.X, next2.Z)
+				if !w.blockSolid(w.chunks.GetBlock(next2)) {
+					next = next2
+				}
+			}
+		}
+
+		// If both primary+secondary are blocked, attempt a small deterministic detour so agents
+		// don't have to constantly re-issue MOVE_TO on cluttered terrain.
+		if w.blockSolid(w.chunks.GetBlock(next)) {
+			if alt, ok := detourpkg.DetourStep2D(
+				detourpkg.Pos{X: a.Pos.X, Y: a.Pos.Y, Z: a.Pos.Z},
+				detourpkg.Pos{X: target.X, Y: target.Y, Z: target.Z},
+				16,
+				func(p detourpkg.Pos) bool {
+					return w.chunks.inBounds(Vec3i{X: p.X, Y: p.Y, Z: p.Z})
+				},
+				func(p detourpkg.Pos) bool {
+					return w.blockSolid(w.chunks.GetBlock(Vec3i{X: p.X, Y: p.Y, Z: p.Z}))
+				},
+			); ok {
+				next = Vec3i{X: alt.X, Y: alt.Y, Z: alt.Z}
+			}
+		}
+
+		// Reputation consequence: low Law rep agents may be blocked from entering a CITY core area.
+		// This is a system-level "wanted" restriction separate from access passes.
+		if toLand := w.landAt(next); toLand != nil && w.landCoreContains(toLand, next) && !w.isLandMember(a.ID, toLand) {
+			if org := w.orgByID(toLand.Owner); org != nil && org.Kind == OrgCity {
+				fromLand := w.landAt(a.Pos)
+				entering := fromLand == nil || fromLand.LandID != toLand.LandID || !w.landCoreContains(toLand, a.Pos)
+				if entering && a.RepLaw > 0 && a.RepLaw < 200 {
+					a.MoveTask = nil
+					if w.stats != nil {
+						w.stats.RecordDenied(nowTick)
+					}
+					a.AddEvent(protocol.Event{"t": nowTick, "type": "TASK_FAIL", "task_id": mt.TaskID, "code": "E_NO_PERMISSION", "message": "wanted: law reputation too low"})
+					continue
+				}
+			}
+		}
+
+		// Land core access pass (law): charge ticket on core entry for non-members.
+		if toLand := w.landAt(next); toLand != nil && toLand.AccessPassEnabled && w.landCoreContains(toLand, next) && !w.isLandMember(a.ID, toLand) {
+			fromLand := w.landAt(a.Pos)
+			entering := fromLand == nil || fromLand.LandID != toLand.LandID || !w.landCoreContains(toLand, a.Pos)
+			if entering {
+				item := strings.TrimSpace(toLand.AccessTicketItem)
+				cost := toLand.AccessTicketCost
+				if item == "" || cost <= 0 {
+					// Misconfigured law: treat as blocked.
+					a.MoveTask = nil
+					if w.stats != nil {
+						w.stats.RecordDenied(nowTick)
+					}
+					a.AddEvent(protocol.Event{"t": nowTick, "type": "TASK_FAIL", "task_id": mt.TaskID, "code": "E_NO_PERMISSION", "message": "access pass required"})
+					continue
+				}
+				if a.Inventory[item] < cost {
+					a.MoveTask = nil
+					if w.stats != nil {
+						w.stats.RecordDenied(nowTick)
+					}
+					a.AddEvent(protocol.Event{"t": nowTick, "type": "TASK_FAIL", "task_id": mt.TaskID, "code": "E_NO_RESOURCE", "message": "need access ticket"})
+					continue
+				}
+				a.Inventory[item] -= cost
+				// Credit to land owner if present (agent or org treasury); else burn.
+				if toLand.Owner != "" {
+					if owner := w.agents[toLand.Owner]; owner != nil {
+						owner.Inventory[item] += cost
+					} else if org := w.orgByID(toLand.Owner); org != nil {
+						w.orgTreasury(org)[item] += cost
+					}
+				}
+				a.AddEvent(protocol.Event{"t": nowTick, "type": "ACCESS_PASS", "land_id": toLand.LandID, "item": item, "count": cost})
+			}
+		}
+
+		// Basic collision: treat solid blocks as blocking; allow non-solid (e.g. water/torch/wire).
+		if w.blockSolid(w.chunks.GetBlock(Vec3i{X: next.X, Y: next.Y, Z: next.Z})) {
+			a.MoveTask = nil
+			a.AddEvent(protocol.Event{"t": nowTick, "type": "TASK_FAIL", "task_id": mt.TaskID, "code": "E_BLOCKED", "message": "blocked"})
+			continue
+		}
+		a.Pos = next
+		w.recordStructureUsage(a.ID, a.Pos, nowTick)
+		w.funOnBiome(a, nowTick)
+	}
+}
+
+func handleTaskStop(_ *World, a *Agent, tr protocol.TaskReq, nowTick uint64) {
+	a.MoveTask = nil
+	a.AddEvent(actionResult(nowTick, tr.ID, true, "", "stopped"))
+}
+
+func handleTaskMoveTo(w *World, a *Agent, tr protocol.TaskReq, nowTick uint64) {
+	if a.MoveTask != nil {
+		a.AddEvent(actionResult(nowTick, tr.ID, false, "E_CONFLICT", "movement task slot occupied"))
+		return
+	}
+	// Reject targets outside the world boundary to avoid agents wandering into the "void"
+	// (GetBlock returns AIR outside BoundaryR, and we don't generate chunks there).
+	tx, ty, tz := paramspkg.NormalizeTarget(tr.Target[0], tr.Target[2])
+	if !w.chunks.inBounds(Vec3i{X: tx, Y: ty, Z: tz}) {
+		a.AddEvent(actionResult(nowTick, tr.ID, false, "E_INVALID_TARGET", "out of bounds"))
+		return
+	}
+	taskID := w.newTaskID()
+	a.MoveTask = &tasks.MovementTask{
+		TaskID:      taskID,
+		Kind:        tasks.KindMoveTo,
+		Target:      tasks.Vec3i{X: tx, Y: ty, Z: tz},
+		Tolerance:   tr.Tolerance,
+		StartPos:    tasks.Vec3i{X: a.Pos.X, Y: a.Pos.Y, Z: a.Pos.Z},
+		StartedTick: nowTick,
+	}
+	a.AddEvent(protocol.Event{
+		"t":       nowTick,
+		"type":    "ACTION_RESULT",
+		"ref":     tr.ID,
+		"ok":      true,
+		"task_id": taskID,
+	})
+}
+
+func handleTaskFollow(w *World, a *Agent, tr protocol.TaskReq, nowTick uint64) {
+	if a.MoveTask != nil {
+		a.AddEvent(actionResult(nowTick, tr.ID, false, "E_CONFLICT", "movement task slot occupied"))
+		return
+	}
+	if tr.TargetID == "" {
+		a.AddEvent(actionResult(nowTick, tr.ID, false, "E_BAD_REQUEST", "missing target_id"))
+		return
+	}
+	dist := paramspkg.ClampFollowDistance(tr.Distance)
+	target, ok := w.followTargetPos(tr.TargetID)
+	if !ok {
+		a.AddEvent(actionResult(nowTick, tr.ID, false, "E_INVALID_TARGET", "target not found"))
+		return
+	}
+	taskID := w.newTaskID()
+	a.MoveTask = &tasks.MovementTask{
+		TaskID:      taskID,
+		Kind:        tasks.KindFollow,
+		Target:      v3ToTask(target),
+		TargetID:    tr.TargetID,
+		Distance:    dist,
+		StartPos:    tasks.Vec3i{X: a.Pos.X, Y: a.Pos.Y, Z: a.Pos.Z},
+		StartedTick: nowTick,
+	}
+	a.AddEvent(protocol.Event{
+		"t":       nowTick,
+		"type":    "ACTION_RESULT",
+		"ref":     tr.ID,
+		"ok":      true,
+		"task_id": taskID,
+	})
+}
 
 func handleTaskMine(w *World, a *Agent, tr protocol.TaskReq, nowTick uint64) {
 	if !w.cfg.AllowMine {
@@ -558,7 +804,7 @@ func (w *World) tickTransfer(a *Agent, wt *tasks.WorkTask, nowTick uint64) {
 			a.AddEvent(protocol.Event{"t": nowTick, "type": "TASK_FAIL", "task_id": wt.TaskID, "code": "E_NO_PERMISSION", "message": "withdraw denied"})
 			return
 		}
-		if srcC.availableCount(item) < n {
+		if srcC.AvailableCount(item) < n {
 			a.WorkTask = nil
 			a.AddEvent(protocol.Event{"t": nowTick, "type": "TASK_FAIL", "task_id": wt.TaskID, "code": "E_NO_RESOURCE", "message": "insufficient src items"})
 			return
@@ -849,14 +1095,130 @@ func (w *World) tickBuildBlueprint(a *Agent, wt *tasks.WorkTask, nowTick uint64)
 		if w.activeEventID != "" && nowTick < w.activeEventEnds {
 			switch w.activeEventID {
 			case "BUILDER_EXPO":
-				w.addFun(a, nowTick, "CREATION", "builder_expo", w.funDecay(a, "creation:builder_expo", 8, nowTick))
+				w.addFun(a, nowTick, "CREATION", "builder_expo", a.FunDecayDelta("creation:builder_expo", 8, nowTick, uint64(w.cfg.FunDecayWindowTicks), w.cfg.FunDecayBase))
 				a.AddEvent(protocol.Event{"t": nowTick, "type": "EVENT_GOAL", "event_id": w.activeEventID, "kind": "EXPO_BUILD", "blueprint_id": wt.BlueprintID})
 			case "BLUEPRINT_FAIR":
-				w.addFun(a, nowTick, "INFLUENCE", "blueprint_fair", w.funDecay(a, "influence:blueprint_fair", 6, nowTick))
+				w.addFun(a, nowTick, "INFLUENCE", "blueprint_fair", a.FunDecayDelta("influence:blueprint_fair", 6, nowTick, uint64(w.cfg.FunDecayWindowTicks), w.cfg.FunDecayBase))
 				a.AddEvent(protocol.Event{"t": nowTick, "type": "EVENT_GOAL", "event_id": w.activeEventID, "kind": "FAIR_BUILD", "blueprint_id": wt.BlueprintID})
 			}
 		}
 		a.WorkTask = nil
 		a.AddEvent(protocol.Event{"t": nowTick, "type": "TASK_DONE", "task_id": wt.TaskID, "kind": string(wt.Kind)})
 	}
+}
+
+func handleTaskClaimLand(w *World, a *Agent, tr protocol.TaskReq, nowTick uint64) {
+	if !w.cfg.AllowClaims {
+		a.AddEvent(actionResult(nowTick, tr.ID, false, "E_NO_PERMISSION", "claims disabled in this world"))
+		return
+	}
+	r := tr.Radius
+	if r <= 0 {
+		r = 32
+	}
+	if r > 128 {
+		r = 128
+	}
+	if tr.Anchor[1] != 0 {
+		a.AddEvent(actionResult(nowTick, tr.ID, false, "E_INVALID_TARGET", "2D world requires y==0"))
+		return
+	}
+	anchor := Vec3i{X: tr.Anchor[0], Y: tr.Anchor[1], Z: tr.Anchor[2]}
+	if !w.chunks.inBounds(anchor) {
+		a.AddEvent(actionResult(nowTick, tr.ID, false, "E_INVALID_TARGET", "out of bounds"))
+		return
+	}
+	// Must be allowed to build at anchor (unclaimed or owned land with build permission).
+	if !w.canBuildAt(a.ID, anchor, nowTick) {
+		a.AddEvent(actionResult(nowTick, tr.ID, false, "E_NO_PERMISSION", "cannot claim here"))
+		return
+	}
+	// Must have resources: 1 battery + 1 crystal shard (MVP).
+	if a.Inventory["BATTERY"] < 1 || a.Inventory["CRYSTAL_SHARD"] < 1 {
+		a.AddEvent(actionResult(nowTick, tr.ID, false, "E_NO_RESOURCE", "need BATTERY + CRYSTAL_SHARD"))
+		return
+	}
+	// Must not overlap existing claims.
+	for _, c := range w.claims {
+		// Conservative overlap check: if anchors are close enough, treat as overlap.
+		if mathx.AbsInt(anchor.X-c.Anchor.X) <= r+c.Radius && mathx.AbsInt(anchor.Z-c.Anchor.Z) <= r+c.Radius {
+			a.AddEvent(actionResult(nowTick, tr.ID, false, "E_CONFLICT", "claim overlaps existing land"))
+			return
+		}
+	}
+	// Place Claim Totem block at anchor.
+	if w.chunks.GetBlock(anchor) != w.chunks.gen.Air {
+		a.AddEvent(actionResult(nowTick, tr.ID, false, "E_BLOCKED", "anchor occupied"))
+		return
+	}
+	totemID, ok := w.catalogs.Blocks.Index["CLAIM_TOTEM"]
+	if !ok {
+		a.AddEvent(actionResult(nowTick, tr.ID, false, "E_INTERNAL", "missing CLAIM_TOTEM block"))
+		return
+	}
+
+	// Consume cost.
+	a.Inventory["BATTERY"]--
+	a.Inventory["CRYSTAL_SHARD"]--
+
+	w.chunks.SetBlock(anchor, totemID)
+	w.auditSetBlock(nowTick, a.ID, anchor, w.chunks.gen.Air, totemID, "CLAIM_LAND")
+
+	landID := w.newLandID(a.ID)
+	claimType := claimspkg.DefaultClaimTypeForWorld(w.cfg.WorldType)
+	baseFlags := claimspkg.DefaultFlags(claimType)
+	due := uint64(0)
+	if w.cfg.DayTicks > 0 {
+		due = nowTick + uint64(w.cfg.DayTicks)
+	}
+	w.claims[landID] = &LandClaim{
+		LandID:    landID,
+		Owner:     a.ID,
+		ClaimType: claimType,
+		Anchor:    anchor,
+		Radius:    r,
+		Flags: ClaimFlags{
+			AllowBuild:  baseFlags.AllowBuild,
+			AllowBreak:  baseFlags.AllowBreak,
+			AllowDamage: baseFlags.AllowDamage,
+			AllowTrade:  baseFlags.AllowTrade,
+		},
+		MaintenanceDueTick: due,
+		MaintenanceStage:   0,
+	}
+	a.AddEvent(protocol.Event{"t": nowTick, "type": "ACTION_RESULT", "ref": tr.ID, "ok": true, "land_id": landID})
+}
+
+func handleTaskBuildBlueprint(w *World, a *Agent, tr protocol.TaskReq, nowTick uint64) {
+	if !w.cfg.AllowBuild {
+		a.AddEvent(actionResult(nowTick, tr.ID, false, "E_NO_PERMISSION", "blueprint build disabled in this world"))
+		return
+	}
+	if a.WorkTask != nil {
+		a.AddEvent(actionResult(nowTick, tr.ID, false, "E_CONFLICT", "work task slot occupied"))
+		return
+	}
+	if tr.BlueprintID == "" {
+		a.AddEvent(actionResult(nowTick, tr.ID, false, "E_BAD_REQUEST", "missing blueprint_id"))
+		return
+	}
+	if tr.Anchor[1] != 0 {
+		a.AddEvent(actionResult(nowTick, tr.ID, false, "E_INVALID_TARGET", "2D world requires y==0"))
+		return
+	}
+	if _, ok := w.catalogs.Blueprints.ByID[tr.BlueprintID]; !ok {
+		a.AddEvent(actionResult(nowTick, tr.ID, false, "E_INVALID_TARGET", "unknown blueprint"))
+		return
+	}
+	taskID := w.newTaskID()
+	a.WorkTask = &tasks.WorkTask{
+		TaskID:      taskID,
+		Kind:        tasks.KindBuildBlueprint,
+		BlueprintID: tr.BlueprintID,
+		Anchor:      tasks.Vec3i{X: tr.Anchor[0], Y: 0, Z: tr.Anchor[2]},
+		Rotation:    blueprint.NormalizeRotation(tr.Rotation),
+		BuildIndex:  0,
+		StartedTick: nowTick,
+	}
+	a.AddEvent(protocol.Event{"t": nowTick, "type": "ACTION_RESULT", "ref": tr.ID, "ok": true, "task_id": taskID})
 }

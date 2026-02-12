@@ -105,7 +105,7 @@ func BenchmarkPerfSnapshotImport(b *testing.B) {
 
 func BenchmarkPerfEventCursorQuery(b *testing.B) {
 	a := &Agent{ID: "A1"}
-	a.initDefaults()
+	a.InitDefaults()
 	for i := 0; i < 4000; i++ {
 		a.AddEvent(protocol.Event{
 			"t":    i,

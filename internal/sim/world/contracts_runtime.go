@@ -11,36 +11,6 @@ import (
 	"voxelcraft.ai/internal/sim/world/logic/blueprint"
 )
 
-type ContractState string
-
-const (
-	ContractOpen      ContractState = "OPEN"
-	ContractAccepted  ContractState = "ACCEPTED"
-	ContractCompleted ContractState = "COMPLETED"
-	ContractFailed    ContractState = "FAILED"
-)
-
-type Contract struct {
-	ContractID  string
-	TerminalPos Vec3i
-	Poster      string
-	Acceptor    string
-
-	Kind         string
-	Requirements map[string]int
-	Reward       map[string]int
-	Deposit      map[string]int
-
-	// BUILD contracts:
-	BlueprintID string
-	Anchor      Vec3i
-	Rotation    int
-
-	CreatedTick  uint64
-	DeadlineTick uint64
-	State        ContractState
-}
-
 func (w *World) newContractID() string {
 	n := w.nextContractNum.Add(1)
 	return fmt.Sprintf("C%06d", n)
@@ -75,14 +45,14 @@ func (w *World) tickContracts(nowTick uint64) {
 		reqOK := false
 		buildPlaced := false
 		buildStable := false
-		if terminal != nil && c.State == ContractAccepted {
-			switch c.Kind {
-			case "GATHER", "DELIVER":
-				reqOK = reppkg.HasAvailable(c.Requirements, terminal.availableCount)
-			case "BUILD":
-				buildPlaced = w.checkBlueprintPlaced(c.BlueprintID, c.Anchor, c.Rotation)
-				if buildPlaced {
-					bp, okBP := w.catalogs.Blueprints.ByID[c.BlueprintID]
+			if terminal != nil && c.State == ContractAccepted {
+				switch c.Kind {
+				case "GATHER", "DELIVER":
+					reqOK = reppkg.HasAvailable(c.Requirements, terminal.AvailableCount)
+				case "BUILD":
+					buildPlaced = w.checkBlueprintPlaced(c.BlueprintID, c.Anchor, c.Rotation)
+					if buildPlaced {
+						bp, okBP := w.catalogs.Blueprints.ByID[c.BlueprintID]
 					if okBP && w.structureStable(&bp, c.Anchor, c.Rotation) {
 						buildStable = true
 					}
@@ -165,7 +135,7 @@ func (w *World) contractTerminalTransfer(terminal *Container, items map[string]i
 		items,
 		toAgentID,
 		unreserve,
-		terminal.unreserve,
+		terminal.Unreserve,
 		func(agentID, item string, n int) bool {
 			a := w.agents[agentID]
 			if a == nil {
@@ -175,7 +145,7 @@ func (w *World) contractTerminalTransfer(terminal *Container, items map[string]i
 			return true
 		},
 		func(agentID, item string, n int) {
-			terminal.addOwed(agentID, item, n)
+			terminal.AddOwed(agentID, item, n)
 		},
 	)
 }

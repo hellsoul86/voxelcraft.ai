@@ -3,6 +3,7 @@ package world
 import (
 	transferagentpkg "voxelcraft.ai/internal/sim/world/feature/transfer/agent"
 	transfermapspkg "voxelcraft.ai/internal/sim/world/feature/transfer/maps"
+	idspkg "voxelcraft.ai/internal/sim/world/logic/ids"
 )
 
 type AgentTransfer struct {
@@ -32,7 +33,7 @@ type AgentTransfer struct {
 	Fun       FunScore
 	Inventory map[string]int
 	Equipment Equipment
-	Memory    map[string]memoryEntry
+	Memory    map[string]MemoryEntry
 }
 
 type OrgTransfer struct {
@@ -105,7 +106,7 @@ func (w *World) handleTransferIn(req transferInReq) {
 		Fun:                          t.Fun,
 		Inventory:                    transfermapspkg.CopyPositiveIntMap(t.Inventory),
 		Equipment:                    t.Equipment,
-		Memory:                       transfermapspkg.CopyMap(t.Memory, func(k string, _ memoryEntry) bool { return k != "" }),
+		Memory:                       transfermapspkg.CopyMap(t.Memory, func(k string, _ MemoryEntry) bool { return k != "" }),
 	}
 	if a.Pos.Y != 0 {
 		a.Pos.Y = 0
@@ -115,7 +116,7 @@ func (w *World) handleTransferIn(req transferInReq) {
 	}
 	a.MoveTask = nil
 	a.WorkTask = nil
-	a.initDefaults()
+	a.InitDefaults()
 	if a.OrgID != "" {
 		var org *Organization
 		if t.Org != nil && t.Org.OrgID != "" {
@@ -132,10 +133,10 @@ func (w *World) handleTransferIn(req transferInReq) {
 					TreasuryByWorld: map[string]map[string]int{},
 				}
 				w.orgs[org.OrgID] = org
-				if n, ok := parseUintAfterPrefix("ORG", org.OrgID); ok && n > w.nextOrgNum.Load() {
-					w.nextOrgNum.Store(n)
+					if n, ok := idspkg.ParseUintAfterPrefix("ORG", org.OrgID); ok && n > w.nextOrgNum.Load() {
+						w.nextOrgNum.Store(n)
+					}
 				}
-			}
 			if org.Kind == "" {
 				org.Kind = t.Org.Kind
 			}

@@ -25,7 +25,7 @@ func (w *World) handleTransferOut(req transferOutReq) {
 	a.WorkTask = nil
 
 	inv := transfermapspkg.CopyPositiveIntMap(a.Inventory)
-	mem := transfermapspkg.CopyMap(a.Memory, func(k string, _ memoryEntry) bool { return k != "" })
+	mem := transfermapspkg.CopyMap(a.Memory, func(k string, _ MemoryEntry) bool { return k != "" })
 
 	resp.Transfer = AgentTransfer{
 		ID:                           a.ID,

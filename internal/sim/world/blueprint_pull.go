@@ -100,7 +100,7 @@ func (w *World) blueprintEnsureMaterials(a *Agent, anchor Vec3i, cost []catalogs
 		deficit := required - have
 		avail := 0
 		for _, cand := range cands {
-			avail += cand.c.availableCount(item)
+			avail += cand.c.AvailableCount(item)
 			if avail >= deficit {
 				break
 			}
@@ -117,7 +117,7 @@ func (w *World) blueprintEnsureMaterials(a *Agent, anchor Vec3i, cost []catalogs
 			deficit := required - a.Inventory[item]
 			tookAny := false
 			for _, cand := range cands {
-				avail := cand.c.availableCount(item)
+				avail := cand.c.AvailableCount(item)
 				if avail <= 0 {
 					continue
 				}

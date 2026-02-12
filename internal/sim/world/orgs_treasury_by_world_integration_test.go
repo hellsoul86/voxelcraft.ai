@@ -5,13 +5,13 @@ import "testing"
 func TestOrgTreasuryFor_MigratesLegacyOnce(t *testing.T) {
 	org := &Organization{Treasury: map[string]int{"IRON_INGOT": 3}}
 
-	overworld := org.treasuryFor("OVERWORLD")
+	overworld := org.TreasuryFor("OVERWORLD")
 	if got := overworld["IRON_INGOT"]; got != 3 {
 		t.Fatalf("overworld seed mismatch: got %d want 3", got)
 	}
 	overworld["PLANK"] = 2
 
-	mine := org.treasuryFor("MINE_L1")
+	mine := org.TreasuryFor("MINE_L1")
 	if len(mine) != 0 {
 		t.Fatalf("new world treasury should start empty, got %v", mine)
 	}
@@ -22,7 +22,7 @@ func TestOrgTreasuryFor_MigratesLegacyOnce(t *testing.T) {
 
 func TestOrgTreasuryFor_UsesGlobalKeyForEmptyWorldID(t *testing.T) {
 	org := &Organization{Treasury: map[string]int{"COAL": 1}}
-	got := org.treasuryFor("")
+	got := org.TreasuryFor("")
 	if got == nil {
 		t.Fatalf("expected treasury map")
 	}

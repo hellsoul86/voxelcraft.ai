@@ -5,15 +5,14 @@ import (
 
 	"voxelcraft.ai/internal/persistence/snapshot"
 	"voxelcraft.ai/internal/sim/catalogs"
-	tradepkg "voxelcraft.ai/internal/sim/world/feature/economy/trade"
-	boardspkg "voxelcraft.ai/internal/sim/world/feature/observer/boards"
 	transfereventspkg "voxelcraft.ai/internal/sim/world/feature/transfer/events"
 	transferruntimepkg "voxelcraft.ai/internal/sim/world/feature/transfer/runtime"
+	modelpkg "voxelcraft.ai/internal/sim/world/kernel/model"
 )
 
-type Trade = tradepkg.Trade
-type Board = boardspkg.Board
-type BoardPost = boardspkg.Post
+type Trade = modelpkg.Trade
+type Board = modelpkg.Board
+type BoardPost = modelpkg.BoardPost
 
 // World is a single-threaded authoritative simulation.
 // All state must be accessed only from the world loop goroutine.
