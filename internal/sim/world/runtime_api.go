@@ -98,6 +98,29 @@ func (w *World) DebugSetAgentVitals(agentID string, hp, hunger, staminaMilli int
 	return true
 }
 
+func (w *World) DebugSetAgentReputation(agentID string, repTrade, repBuild, repSocial, repLaw int) bool {
+	if w == nil || agentID == "" {
+		return false
+	}
+	a := w.agents[agentID]
+	if a == nil {
+		return false
+	}
+	if repTrade >= 0 {
+		a.RepTrade = repTrade
+	}
+	if repBuild >= 0 {
+		a.RepBuild = repBuild
+	}
+	if repSocial >= 0 {
+		a.RepSocial = repSocial
+	}
+	if repLaw >= 0 {
+		a.RepLaw = repLaw
+	}
+	return true
+}
+
 func (w *World) DebugAddInventory(agentID string, item string, delta int) bool {
 	if w == nil || agentID == "" {
 		return false

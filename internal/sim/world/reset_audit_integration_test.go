@@ -7,6 +7,15 @@ import (
 	"voxelcraft.ai/internal/sim/catalogs"
 )
 
+type memAudit struct {
+	entries []AuditEntry
+}
+
+func (m *memAudit) WriteAudit(e AuditEntry) error {
+	m.entries = append(m.entries, e)
+	return nil
+}
+
 func TestAdminReset_WritesWorldResetAudit(t *testing.T) {
 	cats, err := catalogs.Load("../../../configs")
 	if err != nil {

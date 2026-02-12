@@ -161,6 +161,17 @@ func (h *Harness) SetAgentPosFor(agentID string, pos world.Vec3i) {
 	}
 }
 
+func (h *Harness) SetAgentReputation(repTrade, repBuild, repSocial, repLaw int) {
+	h.SetAgentReputationFor(h.DefaultAgentID, repTrade, repBuild, repSocial, repLaw)
+}
+
+func (h *Harness) SetAgentReputationFor(agentID string, repTrade, repBuild, repSocial, repLaw int) {
+	h.T.Helper()
+	if ok := h.W.DebugSetAgentReputation(agentID, repTrade, repBuild, repSocial, repLaw); !ok {
+		h.T.Fatalf("DebugSetAgentReputation returned false")
+	}
+}
+
 func (h *Harness) ClearAgentEventsFor(agentID string) {
 	h.T.Helper()
 	if ok := h.W.DebugClearAgentEvents(agentID); !ok {
