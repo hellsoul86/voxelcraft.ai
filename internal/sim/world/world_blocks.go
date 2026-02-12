@@ -1,6 +1,9 @@
 package world
 
-import "voxelcraft.ai/internal/sim/world/logic/mathx"
+import (
+	"voxelcraft.ai/internal/sim/world/logic/mathx"
+	genpkg "voxelcraft.ai/internal/sim/world/terrain/gen"
+)
 
 func (w *World) surfaceY(x, z int) int {
 	// Pure 2D world: the only valid y coordinate is 0.
@@ -97,4 +100,17 @@ func (w *World) blockSolid(b uint16) bool {
 		return true
 	}
 	return def.Solid
+}
+
+func floorDiv(a, b int) int                   { return genpkg.FloorDiv(a, b) }
+func mod(a, b int) int                        { return genpkg.Mod(a, b) }
+func hash2(seed int64, x, z int) uint64       { return genpkg.Hash2(seed, x, z) }
+func hash3(seed int64, x, y, z int) uint64    { return genpkg.Hash3(seed, x, y, z) }
+func biomeFrom(noise uint64) string           { return genpkg.BiomeFrom(noise) }
+func biomeAt(seed int64, x, z, r int) string  { return genpkg.BiomeAt(seed, x, z, r) }
+func withinSpawnClear(x, z, radius int) bool  { return genpkg.WithinSpawnClear(x, z, radius) }
+func clampPermille(v int) int                 { return genpkg.ClampPermille(v) }
+func scalePermille(base uint64, p int) uint64 { return genpkg.ScalePermille(base, p) }
+func inCluster(seed int64, x, z, grid, radius int, probPermille uint64) bool {
+	return genpkg.InCluster(seed, x, z, grid, radius, probPermille)
 }

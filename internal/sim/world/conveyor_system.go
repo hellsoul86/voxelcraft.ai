@@ -3,6 +3,7 @@ package world
 import (
 	"sort"
 
+	conveyruntimepkg "voxelcraft.ai/internal/sim/world/feature/conveyor/runtime"
 	"voxelcraft.ai/internal/sim/world/logic/conveyorpower"
 )
 
@@ -23,14 +24,18 @@ func (w *World) systemConveyors(nowTick uint64) {
 
 	// Pass 1: move existing item entities along conveyors.
 	if len(w.items) > 0 {
-		itemIDs := make([]string, 0, len(w.items))
+		items := make(map[string]conveyruntimepkg.ItemEntry, len(w.items))
 		for id, e := range w.items {
 			if e == nil || e.Item == "" || e.Count <= 0 {
 				continue
 			}
-			itemIDs = append(itemIDs, id)
+			items[id] = conveyruntimepkg.ItemEntry{
+				ID:    id,
+				Item:  e.Item,
+				Count: e.Count,
+			}
 		}
-		sort.Strings(itemIDs)
+		itemIDs := conveyruntimepkg.SortedLiveItemIDs(items)
 
 		for _, id := range itemIDs {
 			e := w.items[id]
@@ -122,7 +127,7 @@ func (w *World) systemConveyors(nowTick uint64) {
 		if c == nil {
 			continue
 		}
-		item := pickAvailableContainerItem(c)
+		item := conveyruntimepkg.PickAvailableItem(c.Inventory, c.availableCount)
 		if item == "" {
 			continue
 		}
@@ -138,27 +143,6 @@ func (w *World) systemConveyors(nowTick uint64) {
 			"count": 1,
 		})
 	}
-}
-
-func pickAvailableContainerItem(c *Container) string {
-	if c == nil || len(c.Inventory) == 0 {
-		return ""
-	}
-	keys := make([]string, 0, len(c.Inventory))
-	for item, n := range c.Inventory {
-		if item == "" || n <= 0 {
-			continue
-		}
-		if c.availableCount(item) <= 0 {
-			continue
-		}
-		keys = append(keys, item)
-	}
-	if len(keys) == 0 {
-		return ""
-	}
-	sort.Strings(keys)
-	return keys[0]
 }
 
 type conveyorEnvAdapter struct {
@@ -198,31 +182,21 @@ func (w *World) sensorOn(pos Vec3i) bool {
 		return false
 	}
 
-	dirs := []Vec3i{
-		{X: 0, Y: 0, Z: 0},
-		{X: 1, Y: 0, Z: 0},
-		{X: -1, Y: 0, Z: 0},
-		{X: 0, Y: 1, Z: 0},
-		{X: 0, Y: -1, Z: 0},
-		{X: 0, Y: 0, Z: 1},
-		{X: 0, Y: 0, Z: -1},
-	}
-
 	hasLiveItemAt := func(p Vec3i) bool {
-		ids := w.itemsAt[p]
-		if len(ids) == 0 {
-			return false
-		}
-		for _, id := range ids {
+		return conveyruntimepkg.HasLiveItem(w.itemsAt[p], func(id string) (conveyruntimepkg.ItemEntry, bool) {
 			e := w.items[id]
-			if e != nil && e.Item != "" && e.Count > 0 {
-				return true
+			if e == nil {
+				return conveyruntimepkg.ItemEntry{}, false
 			}
-		}
-		return false
+			return conveyruntimepkg.ItemEntry{
+				ID:    id,
+				Item:  e.Item,
+				Count: e.Count,
+			}, true
+		})
 	}
 
-	for _, d := range dirs {
+	for _, d := range conveyruntimepkg.SensorNeighborOffsets() {
 		p := Vec3i{X: pos.X + d.X, Y: pos.Y + d.Y, Z: pos.Z + d.Z}
 		if hasLiveItemAt(p) {
 			return true

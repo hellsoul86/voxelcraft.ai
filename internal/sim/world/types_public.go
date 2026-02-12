@@ -2,6 +2,16 @@ package world
 
 import "voxelcraft.ai/internal/protocol"
 
+import modelpkg "voxelcraft.ai/internal/sim/world/kernel/model"
+
+type Vec3i = modelpkg.Vec3i
+type Sign = modelpkg.Sign
+type ConveyorMeta = modelpkg.ConveyorMeta
+
+func Manhattan(a, b Vec3i) int {
+	return modelpkg.Manhattan(a, b)
+}
+
 type JoinRequest struct {
 	Name        string
 	DeltaVoxels bool

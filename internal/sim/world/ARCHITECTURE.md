@@ -68,14 +68,22 @@ Pure subpackages:
 - `internal/sim/world/feature/governance`
 - `internal/sim/world/feature/director`
 - `internal/sim/world/feature/observer`
+- `internal/sim/world/feature/survival`
+- `internal/sim/world/feature/entities`
+- `internal/sim/world/feature/conveyor`
+- `internal/sim/world/feature/persistence`
 
 Feature subpackage layout (second level):
-- `feature/contracts/{core,lifecycle,runtime,validation,audit,reputation}`
-- `feature/director/{feedback,metrics,resources,runtime,stats}`
+- `feature/contracts/{core,instants,lifecycle,runtime,validation,audit,reputation}`
+- `feature/director/{events,feedback,metrics,resources,runtime,spawns,stats}`
+- `feature/conveyor/{runtime}`
 - `feature/economy/{inventory,instants,tax,trade,value}`
-- `feature/governance/{claims,laws,laws/runtime,maintenance,orgs,permissions}`
-- `feature/observer/{boards,chunks,entities,meta,posting,search,targets,tasks}`
-- `feature/session/{catalogs,chat,eat,instants,memory,resume,welcome}`
+- `feature/entities/{items}`
+- `feature/governance/{claims,instants,laws,laws/runtime,maintenance,orgs,permissions}`
+- `feature/observer/{boards,chunks,entities,meta,posting,runtime,search,stream,targets,tasks}`
+- `feature/persistence/{digest,snapshot}`
+- `feature/session/{catalogs,chat,eat,instants,lifecycle,memory,resume,welcome}`
+- `feature/survival/{respawn,runtime}`
 - `feature/transfer/{agent,events,maps,org,runtime}`
 - `feature/work/{interact,limits,mining,progress,smelt}`
 
@@ -109,6 +117,22 @@ Recent decomposition in this iteration:
 - Law lifecycle transition helpers moved to `feature/governance/laws/runtime`:
   - NOTICE->VOTING/VOTING->resolve transition checks
   - vote pass decision primitive
+- Survival and item-entity pure rules moved to feature packages:
+  - `feature/survival/runtime`: hunger/night/stamina recovery calculations
+  - `feature/survival/respawn`: deterministic inventory-loss and agent id parsing
+  - `feature/entities/items`: merge/expiration/removal primitives for dropped items
+- Director decomposition extended:
+  - `feature/director/events`: event reward/effect decision helpers
+  - `feature/director/spawns`: deterministic spawn geometry for event instantiation
+- Observer decomposition extended:
+  - `feature/observer/runtime`: status/build projection helpers
+  - `feature/observer/stream`: wanted-chunk selection and stream clamp helpers
+- Persistence decomposition extended:
+  - `feature/persistence/snapshot`: snapshot-level positive-map adapters
+  - `feature/persistence/digest`: digest helper adapter surface
+- Governance/contracts instant decomposition extended:
+  - `feature/governance/instants`: admin and overlap helper DTOs
+  - `feature/contracts/instants`: terminal context helper DTOs
 
 Dependency rules:
 1. `world` can import subpackages.
@@ -135,8 +159,8 @@ System loops:
 - `movement_system.go` (uses `feature/movement` and `logic/movement`)
 - `task_handlers_work.go` + `work_ticks_mine_place.go` + `work_ticks_interact.go` + `work_tick_craft_smelt.go` + `work_tick_blueprint.go` (uses `logic/blueprint` and `feature/work`)
 - `conveyor_system.go` (uses `logic/conveyorpower`)
-- `environment_system.go`
-- `director_*.go` (uses `logic/directorcenter`)
+- `environment_system.go` (uses `feature/survival` + `feature/entities/items`)
+- `director_*.go` (uses `logic/directorcenter` + `feature/director`)
 
 Observation:
 - `obs_builder.go`: top-level OBS assembly
@@ -146,7 +170,7 @@ Observation:
 
 Determinism and persistence:
 - `state_digest*.go` (uses `io/digestcodec`)
-- `snapshot_export*.go`, `snapshot_import*.go` (uses `io/snapshotcodec`)
+- `snapshot_export*.go`, `snapshot_import*.go` (uses `io/snapshotcodec` + `feature/persistence`)
 - `audit_helpers.go`
 
 Domain types:

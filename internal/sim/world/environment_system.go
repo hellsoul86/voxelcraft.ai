@@ -5,6 +5,8 @@ import (
 
 	"voxelcraft.ai/internal/protocol"
 	inventorypkg "voxelcraft.ai/internal/sim/world/feature/economy/inventory"
+	respawnpkg "voxelcraft.ai/internal/sim/world/feature/survival/respawn"
+	survivalruntimepkg "voxelcraft.ai/internal/sim/world/feature/survival/runtime"
 )
 
 func (w *World) systemEnvironment(nowTick uint64) {
@@ -17,15 +19,9 @@ func (w *World) systemEnvironment(nowTick uint64) {
 				continue
 			}
 			if a.Hunger > 0 {
-				a.Hunger--
-				// Event hazard: blight zones increase hunger drain.
-				if w.activeEventID == "BLIGHT_ZONE" && w.activeEventRadius > 0 && nowTick < w.activeEventEnds &&
-					distXZ(a.Pos, w.activeEventCenter) <= w.activeEventRadius {
-					a.Hunger--
-					if a.Hunger < 0 {
-						a.Hunger = 0
-					}
-				}
+				inBlight := w.activeEventID == "BLIGHT_ZONE" && w.activeEventRadius > 0 && nowTick < w.activeEventEnds &&
+					distXZ(a.Pos, w.activeEventCenter) <= w.activeEventRadius
+				a.Hunger = survivalruntimepkg.HungerAfterTick(a.Hunger, inBlight)
 			} else {
 				// Starvation pressure (slow, non-lethal alone unless ignored).
 				if a.HP > 0 {
@@ -38,9 +34,7 @@ func (w *World) systemEnvironment(nowTick uint64) {
 
 	// Weather hazards (minimal): cold snaps hurt at night unless near a torch.
 	if w.weather == "COLD" && nowTick%50 == 0 { // ~10s
-		t := w.timeOfDay(nowTick)
-		isNight := t < 0.25 || t > 0.75
-		if isNight {
+		if survivalruntimepkg.IsNight(w.timeOfDay(nowTick)) {
 			for _, a := range agents {
 				if a == nil || a.HP <= 0 {
 					continue
@@ -72,32 +66,9 @@ func (w *World) systemEnvironment(nowTick uint64) {
 			continue
 		}
 
-		// Stamina recovery: faster when fed, slower during storms/cold.
-		rec := 2
-		if w.weather == "STORM" {
-			rec = 1
-		}
-		if w.weather == "COLD" {
-			rec = 1
-		}
-		if a.Hunger == 0 {
-			rec = 0
-		} else if a.Hunger < 5 && rec > 1 {
-			rec = 1
-		}
-
-		// Event hazards.
-		if w.activeEventID != "" && w.activeEventRadius > 0 && nowTick < w.activeEventEnds &&
-			distXZ(a.Pos, w.activeEventCenter) <= w.activeEventRadius {
-			switch w.activeEventID {
-			case "BLIGHT_ZONE":
-				rec = 0
-			case "FLOOD_WARNING":
-				if rec > 1 {
-					rec = 1
-				}
-			}
-		}
+		inEventRadius := w.activeEventID != "" && w.activeEventRadius > 0 && nowTick < w.activeEventEnds &&
+			distXZ(a.Pos, w.activeEventCenter) <= w.activeEventRadius
+		rec := survivalruntimepkg.StaminaRecovery(w.weather, a.Hunger, w.activeEventID, inEventRadius)
 
 		// Bandit camp damage: when alone, take periodic hits.
 		if w.activeEventID == "BANDIT_CAMP" && w.activeEventRadius > 0 && nowTick < w.activeEventEnds &&
@@ -137,41 +108,7 @@ func (w *World) respawnAgent(nowTick uint64, a *Agent, reason string) {
 
 	// Drop ~30% of each stack (deterministic) at the downed position.
 	dropPos := a.Pos
-	lost := map[string]int{}
-	if len(a.Inventory) > 0 {
-		keys := make([]string, 0, len(a.Inventory))
-		for k, n := range a.Inventory {
-			if k != "" && n > 0 {
-				keys = append(keys, k)
-			}
-		}
-		sort.Strings(keys)
-		for _, k := range keys {
-			n := a.Inventory[k]
-			d := (n * 3) / 10
-			if d <= 0 {
-				continue
-			}
-			a.Inventory[k] -= d
-			if a.Inventory[k] <= 0 {
-				delete(a.Inventory, k)
-			}
-			lost[k] = d
-		}
-		if len(lost) == 0 {
-			// Ensure at least something is lost if inventory is non-empty.
-			for _, k := range keys {
-				if a.Inventory[k] > 0 {
-					a.Inventory[k]--
-					if a.Inventory[k] <= 0 {
-						delete(a.Inventory, k)
-					}
-					lost[k] = 1
-					break
-				}
-			}
-		}
-	}
+	lost := respawnpkg.ComputeInventoryLoss(a.Inventory)
 
 	// Spawn dropped items as world item entities.
 	if len(lost) > 0 {
@@ -190,7 +127,7 @@ func (w *World) respawnAgent(nowTick uint64, a *Agent, reason string) {
 	}
 
 	// Respawn at a stable spawn point near origin.
-	n := agentNum(a.ID)
+	n := respawnpkg.AgentNumber(a.ID)
 	spawnXZ := n * 2
 	spawnX := spawnXZ
 	spawnZ := -spawnXZ
@@ -213,21 +150,6 @@ func (w *World) respawnAgent(nowTick uint64, a *Agent, reason string) {
 		ev["lost"] = inventorypkg.EncodeItemPairs(lost)
 	}
 	a.AddEvent(ev)
-}
-
-func agentNum(agentID string) int {
-	if len(agentID) < 2 || agentID[0] != 'A' {
-		return 0
-	}
-	n := 0
-	for i := 1; i < len(agentID); i++ {
-		c := agentID[i]
-		if c < '0' || c > '9' {
-			return 0
-		}
-		n = n*10 + int(c-'0')
-	}
-	return n
 }
 
 func (w *World) sortedAgents() []*Agent {

@@ -3,6 +3,7 @@ package world
 import (
 	"voxelcraft.ai/internal/protocol"
 	auditpkg "voxelcraft.ai/internal/sim/world/feature/contracts/audit"
+	contractinstantspkg "voxelcraft.ai/internal/sim/world/feature/contracts/instants"
 	lifecyclepkg "voxelcraft.ai/internal/sim/world/feature/contracts/lifecycle"
 	reppkg "voxelcraft.ai/internal/sim/world/feature/contracts/reputation"
 	runtimepkg "voxelcraft.ai/internal/sim/world/feature/contracts/runtime"
@@ -100,9 +101,16 @@ func handleInstantAcceptContract(w *World, a *Agent, inst protocol.InstantReq, n
 		state = string(c.State)
 		deadline = c.DeadlineTick
 		if term != nil {
-			terminalType = term.Type
-			distance = Manhattan(a.Pos, term.Pos)
-			terminalMatch = term.Pos == c.TerminalPos
+			ctx := contractinstantspkg.BuildTerminalContext(
+				true,
+				term.Type,
+				contractinstantspkg.Vec3{X: term.Pos.X, Y: term.Pos.Y, Z: term.Pos.Z},
+				contractinstantspkg.Vec3{X: c.TerminalPos.X, Y: c.TerminalPos.Y, Z: c.TerminalPos.Z},
+				contractinstantspkg.Vec3{X: a.Pos.X, Y: a.Pos.Y, Z: a.Pos.Z},
+			)
+			terminalType = ctx.Type
+			distance = ctx.Distance
+			terminalMatch = ctx.Matches
 		}
 	}
 	prep := validationpkg.PrepareAccept(validationpkg.AcceptPrepInput{
@@ -165,8 +173,15 @@ func handleInstantSubmitContract(w *World, a *Agent, inst protocol.InstantReq, n
 			terminalType = term.Type
 		}
 		if term != nil && terminalType == "CONTRACT_TERMINAL" && term.Pos == c.TerminalPos {
-			terminalMatch = true
-			distance = Manhattan(a.Pos, term.Pos)
+			ctx := contractinstantspkg.BuildTerminalContext(
+				true,
+				terminalType,
+				contractinstantspkg.Vec3{X: term.Pos.X, Y: term.Pos.Y, Z: term.Pos.Z},
+				contractinstantspkg.Vec3{X: c.TerminalPos.X, Y: c.TerminalPos.Y, Z: c.TerminalPos.Z},
+				contractinstantspkg.Vec3{X: a.Pos.X, Y: a.Pos.Y, Z: a.Pos.Z},
+			)
+			terminalMatch = ctx.Matches
+			distance = ctx.Distance
 			switch c.Kind {
 			case "GATHER", "DELIVER":
 				requirementsOK = reppkg.HasAvailable(c.Requirements, term.availableCount)

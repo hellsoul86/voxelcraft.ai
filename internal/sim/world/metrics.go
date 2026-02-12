@@ -1,5 +1,7 @@
 package world
 
+import statspkg "voxelcraft.ai/internal/sim/world/feature/director/stats"
+
 // WorldMetrics is a thread-safe read-only view of key world runtime signals.
 // It is updated from the world loop goroutine and read from HTTP handlers/tests.
 type WorldMetrics struct {
@@ -59,4 +61,12 @@ func (w *World) Metrics() WorldMetrics {
 		return WorldMetrics{}
 	}
 	return m
+}
+
+type StatsBucket = statspkg.Bucket
+type StatsChunkKey = statspkg.ChunkKey
+type WorldStats = statspkg.WorldStats
+
+func NewWorldStats(bucketTicks, windowTicks uint64) *WorldStats {
+	return statspkg.NewWorldStats(bucketTicks, windowTicks)
 }

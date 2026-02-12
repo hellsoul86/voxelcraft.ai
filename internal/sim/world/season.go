@@ -4,6 +4,7 @@ import (
 	"sort"
 
 	"voxelcraft.ai/internal/protocol"
+	respawnpkg "voxelcraft.ai/internal/sim/world/feature/survival/respawn"
 )
 
 func (w *World) maybeSeasonRollover(nowTick uint64) {
@@ -196,12 +197,12 @@ func (w *World) resetAgentForNewSeason(nowTick uint64, a *Agent) {
 	a.Fun = FunScore{}
 
 	// Respawn at deterministic spawn point (depends on agent number) on new terrain.
-	n := agentNum(a.ID)
+	n := respawnpkg.AgentNumber(a.ID)
 	spawnXZ := n * 2
 	spawnX := spawnXZ
 	spawnZ := -spawnXZ
-	y := w.surfaceY(spawnX, spawnZ)
-	a.Pos = Vec3i{X: spawnX, Y: y, Z: spawnZ}
+	spawnX, spawnZ = w.findSpawnAir(spawnX, spawnZ, 8)
+	a.Pos = Vec3i{X: spawnX, Y: 0, Z: spawnZ}
 
 	// Award novelty for the first biome arrival in the season.
 	w.funOnBiome(a, nowTick)

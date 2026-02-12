@@ -7,6 +7,26 @@ import (
 	"voxelcraft.ai/internal/sim/catalogs"
 )
 
+type Structure struct {
+	StructureID string
+	BlueprintID string
+	BuilderID   string
+	Anchor      Vec3i
+	Rotation    int
+	Min         Vec3i
+	Max         Vec3i
+
+	CompletedTick uint64
+	AwardDueTick  uint64
+	Awarded       bool
+
+	// Usage: agent_id -> last tick seen inside the structure.
+	UsedBy map[string]uint64
+
+	// Influence: last day index we awarded influence for.
+	LastInfluenceDay int
+}
+
 func (w *World) registerStructure(nowTick uint64, builderID string, blueprintID string, anchor Vec3i, rotation int) {
 	w.funInit()
 	bp, ok := w.catalogs.Blueprints.ByID[blueprintID]

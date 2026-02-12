@@ -2,7 +2,8 @@ package world
 
 import (
 	"fmt"
-	"sort"
+
+	itemspkg "voxelcraft.ai/internal/sim/world/feature/entities/items"
 )
 
 // ItemEntity is a dropped item stack in the world (e.g. from respawn drops).
@@ -44,11 +45,20 @@ func (w *World) spawnItemEntity(nowTick uint64, actor string, pos Vec3i, item st
 
 	// Merge into an existing entity at the same position when possible.
 	if ids := w.itemsAt[pos]; len(ids) > 0 {
-		for _, id := range ids {
+		mergeID, ok := itemspkg.FindMergeTarget(ids, item, func(id string) (itemspkg.Entry, bool) {
 			e := w.items[id]
-			if e == nil || e.Item != item || e.Count <= 0 {
-				continue
+			if e == nil {
+				return itemspkg.Entry{}, false
 			}
+			return itemspkg.Entry{
+				ID:          e.EntityID,
+				Item:        e.Item,
+				Count:       e.Count,
+				ExpiresTick: e.ExpiresTick,
+			}, true
+		})
+		if ok {
+			e := w.items[mergeID]
 			e.Count += count
 			exp := nowTick + itemEntityTTLTicksDefault
 			if exp > e.ExpiresTick {
@@ -90,14 +100,7 @@ func (w *World) removeItemEntity(nowTick uint64, actor string, id string, reason
 		return
 	}
 	delete(w.items, id)
-	ids := w.itemsAt[e.Pos]
-	for i := 0; i < len(ids); i++ {
-		if ids[i] == id {
-			copy(ids[i:], ids[i+1:])
-			ids = ids[:len(ids)-1]
-			break
-		}
-	}
+	ids := itemspkg.RemoveID(w.itemsAt[e.Pos], id)
 	if len(ids) == 0 {
 		delete(w.itemsAt, e.Pos)
 	} else {
@@ -121,14 +124,7 @@ func (w *World) moveItemEntity(nowTick uint64, actor string, id string, to Vec3i
 	}
 
 	// Remove from old position list.
-	ids := w.itemsAt[from]
-	for i := 0; i < len(ids); i++ {
-		if ids[i] == id {
-			copy(ids[i:], ids[i+1:])
-			ids = ids[:len(ids)-1]
-			break
-		}
-	}
+	ids := itemspkg.RemoveID(w.itemsAt[from], id)
 	if len(ids) == 0 {
 		delete(w.itemsAt, from)
 	} else {
@@ -151,19 +147,25 @@ func (w *World) cleanupExpiredItemEntities(nowTick uint64) {
 	if len(w.items) == 0 {
 		return
 	}
-	expired := make([]string, 0)
-	for id, e := range w.items {
-		if e == nil {
-			continue
-		}
-		if e.ExpiresTick != 0 && nowTick >= e.ExpiresTick {
-			expired = append(expired, id)
-		}
+	ids := make([]string, 0, len(w.items))
+	for id := range w.items {
+		ids = append(ids, id)
 	}
+	expired := itemspkg.SortedExpired(ids, func(id string) (itemspkg.Entry, bool) {
+		e := w.items[id]
+		if e == nil {
+			return itemspkg.Entry{}, false
+		}
+		return itemspkg.Entry{
+			ID:          e.EntityID,
+			Item:        e.Item,
+			Count:       e.Count,
+			ExpiresTick: e.ExpiresTick,
+		}, true
+	}, nowTick)
 	if len(expired) == 0 {
 		return
 	}
-	sort.Strings(expired)
 	for _, id := range expired {
 		w.removeItemEntity(nowTick, "WORLD", id, "EXPIRE")
 	}

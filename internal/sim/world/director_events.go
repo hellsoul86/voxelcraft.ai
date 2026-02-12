@@ -2,6 +2,7 @@ package world
 
 import (
 	"voxelcraft.ai/internal/protocol"
+	eventspkg "voxelcraft.ai/internal/sim/world/feature/director/events"
 	"voxelcraft.ai/internal/sim/world/logic/directorcenter"
 	"voxelcraft.ai/internal/sim/world/logic/mathx"
 )
@@ -180,30 +181,19 @@ func (w *World) onMinedBlockDuringEvent(a *Agent, pos Vec3i, blockName string, n
 	if distXZ(pos, w.activeEventCenter) > w.activeEventRadius {
 		return
 	}
-	switch w.activeEventID {
-	case "CRYSTAL_RIFT":
-		if blockName != "CRYSTAL_ORE" {
-			return
-		}
-		// Bonus shard to make the expedition feel rewarding.
-		a.Inventory["CRYSTAL_SHARD"]++
-		w.funOnWorldEventParticipation(a, w.activeEventID, nowTick)
-		w.addFun(a, nowTick, "NARRATIVE", "event_mine", w.funDecay(a, "narrative:event_mine:"+w.activeEventID, 5, nowTick))
-		a.AddEvent(protocol.Event{"t": nowTick, "type": "EVENT_GOAL", "event_id": w.activeEventID, "kind": "MINE_CRYSTAL"})
-
-	case "DEEP_VEIN":
-		// Bonus ore in the event zone.
-		switch blockName {
-		case "IRON_ORE":
-			a.Inventory["IRON_ORE"]++
-		case "COPPER_ORE":
-			a.Inventory["COPPER_ORE"]++
-		default:
-			return
-		}
-		w.funOnWorldEventParticipation(a, w.activeEventID, nowTick)
-		w.addFun(a, nowTick, "NARRATIVE", "event_mine", w.funDecay(a, "narrative:event_mine:"+w.activeEventID, 5, nowTick))
-		a.AddEvent(protocol.Event{"t": nowTick, "type": "EVENT_GOAL", "event_id": w.activeEventID, "kind": "MINE_VEIN"})
+	out := eventspkg.MineOutcome(w.activeEventID, blockName)
+	if !out.OK {
+		return
+	}
+	if out.GrantItem != "" && out.GrantCount > 0 {
+		a.Inventory[out.GrantItem] += out.GrantCount
+	}
+	w.funOnWorldEventParticipation(a, w.activeEventID, nowTick)
+	if out.Narrative > 0 {
+		w.addFun(a, nowTick, "NARRATIVE", "event_mine", w.funDecay(a, "narrative:event_mine:"+w.activeEventID, out.Narrative, nowTick))
+	}
+	if out.GoalKind != "" {
+		a.AddEvent(protocol.Event{"t": nowTick, "type": "EVENT_GOAL", "event_id": w.activeEventID, "kind": out.GoalKind})
 	}
 }
 
@@ -214,22 +204,18 @@ func (w *World) onContainerOpenedDuringEvent(a *Agent, c *Container, nowTick uin
 	if distXZ(c.Pos, w.activeEventCenter) > w.activeEventRadius {
 		return
 	}
-	switch w.activeEventID {
-	case "RUINS_GATE":
-		if c.Type != "CHEST" {
-			return
-		}
-		w.funOnWorldEventParticipation(a, w.activeEventID, nowTick)
-		w.addFun(a, nowTick, "NARRATIVE", "ruins_open", w.funDecay(a, "narrative:ruins_open", 12, nowTick))
-		a.AddEvent(protocol.Event{"t": nowTick, "type": "EVENT_GOAL", "event_id": w.activeEventID, "kind": "OPEN_RUINS"})
-
-	case "BANDIT_CAMP":
-		if c.Type != "CHEST" {
-			return
-		}
-		w.funOnWorldEventParticipation(a, w.activeEventID, nowTick)
-		w.addFun(a, nowTick, "RISK_RESCUE", "bandit_loot", w.funDecay(a, "risk:bandit_loot", 10, nowTick))
-		w.addFun(a, nowTick, "NARRATIVE", "bandit_loot", w.funDecay(a, "narrative:bandit_loot", 8, nowTick))
-		a.AddEvent(protocol.Event{"t": nowTick, "type": "EVENT_GOAL", "event_id": w.activeEventID, "kind": "LOOT_BANDITS"})
+	out := eventspkg.OpenContainerOutcome(w.activeEventID, c.Type)
+	if !out.OK {
+		return
+	}
+	w.funOnWorldEventParticipation(a, w.activeEventID, nowTick)
+	if out.Risk > 0 {
+		w.addFun(a, nowTick, "RISK_RESCUE", "bandit_loot", w.funDecay(a, "risk:bandit_loot", out.Risk, nowTick))
+	}
+	if out.Narrative > 0 {
+		w.addFun(a, nowTick, "NARRATIVE", "bandit_loot", w.funDecay(a, "narrative:bandit_loot", out.Narrative, nowTick))
+	}
+	if out.GoalKind != "" {
+		a.AddEvent(protocol.Event{"t": nowTick, "type": "EVENT_GOAL", "event_id": w.activeEventID, "kind": out.GoalKind})
 	}
 }

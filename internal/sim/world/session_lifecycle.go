@@ -1,12 +1,12 @@
 package world
 
 import (
-	"fmt"
 	"strings"
 	"time"
 
 	"voxelcraft.ai/internal/protocol"
 	catalogspkg "voxelcraft.ai/internal/sim/world/feature/session/catalogs"
+	lifecyclepkg "voxelcraft.ai/internal/sim/world/feature/session/lifecycle"
 	resumepkg "voxelcraft.ai/internal/sim/world/feature/session/resume"
 	welcomepkg "voxelcraft.ai/internal/sim/world/feature/session/welcome"
 )
@@ -100,12 +100,10 @@ func (w *World) joinAgent(name string, delta bool, out chan []byte) JoinResponse
 	nowTick := w.tick.Load()
 
 	idNum := w.nextAgentNum.Add(1)
-	agentID := fmt.Sprintf("A%d", idNum)
+	agentID := lifecyclepkg.NewAgentID(idNum)
 
 	// Spawn near origin on surface.
-	spawnXZ := int(idNum) * 2
-	spawnX := spawnXZ
-	spawnZ := -spawnXZ
+	spawnX, spawnZ := lifecyclepkg.SpawnSeed(idNum)
 	spawnX, spawnZ = w.findSpawnAir(spawnX, spawnZ, 8)
 
 	a := &Agent{
@@ -139,7 +137,7 @@ func (w *World) joinAgent(name string, delta bool, out chan []byte) JoinResponse
 		w.clients[agentID] = &clientState{Out: out, DeltaVoxels: delta}
 	}
 
-	token := fmt.Sprintf("resume_%s_%d", w.cfg.ID, time.Now().UnixNano())
+	token := lifecyclepkg.NewResumeToken(w.cfg.ID, time.Now().UnixNano())
 	a.ResumeToken = token
 
 	welcome := w.buildWelcome(agentID, token)
@@ -187,7 +185,7 @@ func (w *World) handleAttach(req AttachRequest) {
 	w.clients[a.ID] = &clientState{Out: req.Out, DeltaVoxels: req.DeltaVoxels}
 
 	// Rotate token on successful resume.
-	newToken := fmt.Sprintf("resume_%s_%d", w.cfg.ID, time.Now().UnixNano())
+	newToken := lifecyclepkg.NewResumeToken(w.cfg.ID, time.Now().UnixNano())
 	a.ResumeToken = newToken
 
 	// If a world event is active, inform the resuming agent.
