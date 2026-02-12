@@ -199,6 +199,7 @@ Before moving/changing behavior:
 
 - Integration tests stay in `internal/sim/world` (they need unexported state + deterministic tick wiring).
 - For readability, world-level integration tests are named `*_integration_test.go`.
+- Black-box regression tests live in `internal/sim/worldtest` and only use exported `world` APIs (plus explicit `Debug*` helpers).
 - Pure unit tests must live in their owning subpackages (`logic/*`, `feature/*`, `policy/*`, `io/*`).
 - In Go, colocated `_test.go` files are the default for white-box tests. Separation is done by package boundaries, not a global `/tests` folder.
 - Unit tests should live beside the smallest pure package they validate (for example `feature/*/*`), while `internal/sim/world` keeps integration and determinism tests.

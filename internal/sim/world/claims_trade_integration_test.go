@@ -7,62 +7,6 @@ import (
 	"voxelcraft.ai/internal/sim/catalogs"
 )
 
-func TestCurfewBlocksBuildAndBreak(t *testing.T) {
-	cats, err := catalogs.Load("../../../configs")
-	if err != nil {
-		t.Fatalf("load catalogs: %v", err)
-	}
-	w, err := New(WorldConfig{
-		ID:         "test",
-		TickRateHz: 5,
-		DayTicks:   100,
-		ObsRadius:  7,
-		Height:     1,
-		Seed:       1,
-		BoundaryR:  4000,
-	}, cats)
-	if err != nil {
-		t.Fatalf("world: %v", err)
-	}
-
-	out := make(chan []byte, 1)
-	resp := make(chan JoinResponse, 1)
-	w.handleJoin(JoinRequest{Name: "owner", DeltaVoxels: false, Out: out, Resp: resp})
-	jr := <-resp
-	owner := w.agents[jr.Welcome.AgentID]
-	if owner == nil {
-		t.Fatalf("expected owner agent")
-	}
-
-	land := &LandClaim{
-		LandID:        "LAND_TEST",
-		Owner:         owner.ID,
-		Anchor:        owner.Pos,
-		Radius:        32,
-		Flags:         ClaimFlags{AllowBuild: true, AllowBreak: true, AllowDamage: false, AllowTrade: true},
-		CurfewEnabled: true,
-		CurfewStart:   0.0,
-		CurfewEnd:     0.1,
-	}
-	w.claims[land.LandID] = land
-
-	// nowTick=5 => time_of_day=0.05, inside curfew window.
-	if w.canBuildAt(owner.ID, owner.Pos, 5) {
-		t.Fatalf("expected canBuildAt=false during curfew")
-	}
-	if w.canBreakAt(owner.ID, owner.Pos, 5) {
-		t.Fatalf("expected canBreakAt=false during curfew")
-	}
-
-	// nowTick=20 => time_of_day=0.2, outside curfew window.
-	if !w.canBuildAt(owner.ID, owner.Pos, 20) {
-		t.Fatalf("expected canBuildAt=true outside curfew")
-	}
-	if !w.canBreakAt(owner.ID, owner.Pos, 20) {
-		t.Fatalf("expected canBreakAt=true outside curfew")
-	}
-}
-
 func TestTradeMarketTax(t *testing.T) {
 	cats, err := catalogs.Load("../../../configs")
 	if err != nil {

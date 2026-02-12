@@ -3,6 +3,8 @@ package world
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strings"
 
 	"voxelcraft.ai/internal/persistence/snapshot"
 	"voxelcraft.ai/internal/protocol"
@@ -42,6 +44,134 @@ func (w *World) CurrentTick() uint64 { return w.tick.Load() }
 
 func (w *World) systemMovement(nowTick uint64) { w.systemMovementImpl(nowTick) }
 func (w *World) systemWork(nowTick uint64)     { w.systemWorkImpl(nowTick) }
+
+// ---- Debug/Test Helpers ----
+//
+// These helpers exist to allow black-box tests in sibling packages (e.g. internal/sim/worldtest)
+// to set up deterministic preconditions without reaching into world internals.
+//
+// They are NOT safe to call concurrently with Run(). Prefer using them only in tests that drive
+// the world via StepOnce(), from a single goroutine.
+
+func (w *World) DebugSetAgentPos(agentID string, pos Vec3i) bool {
+	if w == nil || agentID == "" {
+		return false
+	}
+	a := w.agents[agentID]
+	if a == nil {
+		return false
+	}
+	pos.Y = 0
+	a.Pos = pos
+	return true
+}
+
+func (w *World) DebugClearAgentEvents(agentID string) bool {
+	if w == nil || agentID == "" {
+		return false
+	}
+	a := w.agents[agentID]
+	if a == nil {
+		return false
+	}
+	a.Events = nil
+	return true
+}
+
+func (w *World) DebugSetAgentVitals(agentID string, hp, hunger, staminaMilli int) bool {
+	if w == nil || agentID == "" {
+		return false
+	}
+	a := w.agents[agentID]
+	if a == nil {
+		return false
+	}
+	if hp >= 0 {
+		a.HP = hp
+	}
+	if hunger >= 0 {
+		a.Hunger = hunger
+	}
+	if staminaMilli >= 0 {
+		a.StaminaMilli = staminaMilli
+	}
+	return true
+}
+
+func (w *World) DebugAddInventory(agentID string, item string, delta int) bool {
+	if w == nil || agentID == "" {
+		return false
+	}
+	a := w.agents[agentID]
+	if a == nil {
+		return false
+	}
+	it := strings.TrimSpace(item)
+	if it == "" {
+		return false
+	}
+	if w.catalogs == nil {
+		return false
+	}
+	if _, ok := w.catalogs.Items.Defs[it]; !ok {
+		return false
+	}
+	if a.Inventory == nil {
+		a.Inventory = map[string]int{}
+	}
+	if delta == 0 {
+		return true
+	}
+	next := a.Inventory[it] + delta
+	if next <= 0 {
+		delete(a.Inventory, it)
+		return true
+	}
+	a.Inventory[it] = next
+	return true
+}
+
+// DebugSetBlock sets a single world tile directly (2D: y must be 0).
+// It does not write audit entries and does not update derived runtime meta (containers/signs/etc).
+func (w *World) DebugSetBlock(pos Vec3i, blockName string) error {
+	if w == nil {
+		return errors.New("nil world")
+	}
+	if pos.Y != 0 {
+		return fmt.Errorf("2D world requires y==0: %+v", pos)
+	}
+	bid, ok := w.catalogs.Blocks.Index[blockName]
+	if !ok {
+		return fmt.Errorf("unknown block: %q", blockName)
+	}
+	if !w.chunks.inBounds(pos) {
+		return fmt.Errorf("out of bounds: %+v", pos)
+	}
+	w.chunks.SetBlock(pos, bid)
+	return nil
+}
+
+func (w *World) DebugGetBlock(pos Vec3i) (uint16, error) {
+	if w == nil {
+		return 0, errors.New("nil world")
+	}
+	if pos.Y != 0 {
+		return 0, fmt.Errorf("2D world requires y==0: %+v", pos)
+	}
+	if !w.chunks.inBounds(pos) {
+		return 0, fmt.Errorf("out of bounds: %+v", pos)
+	}
+	return w.chunks.GetBlock(pos), nil
+}
+
+// CheckBlueprintPlaced is a stable helper for tests/automation.
+// It reports whether the blueprint blocks match the world at the given anchor/rotation.
+func (w *World) CheckBlueprintPlaced(blueprintID string, anchor [3]int, rotation int) bool {
+	if w == nil {
+		return false
+	}
+	return w.checkBlueprintPlaced(blueprintID, Vec3i{X: anchor[0], Y: anchor[1], Z: anchor[2]}, rotation)
+}
 
 type EventCursorItem = transfereventspkg.CursorItem
 
