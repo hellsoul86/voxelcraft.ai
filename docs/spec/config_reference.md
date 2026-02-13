@@ -90,7 +90,8 @@
 - Audit: `data/worlds/<world>/audit/*.jsonl.zst`
 - Snapshot: `data/worlds/<world>/snapshots/*.snap.zst`
 - Archive: `data/worlds/<world>/archives/season_<n>/`
-- Index DB: `data/worlds/<world>/index/world.sqlite`
+- Index DB (local/dev): `data/worlds/<world>/index/world.sqlite`
+- Index DB (Cloudflare runtime): D1 tables via `/_cf/indexdb/ingest`
 - Global state: `data/global/state.json`
 
 ## 9. Metrics（`/metrics`）

@@ -5,9 +5,10 @@ This document describes the production deployment path for `voxelcraft.ai` using
 ## Architecture
 
 - **Cloudflare Worker**: public HTTP/WS entrypoint.
-- **Durable Object (Container-backed)**: `WorldCoordinator` routes requests by `world_id` to container instances.
+- **Durable Object (Container-backed)**: `WorldCoordinator` routes requests by `shard_id` (legacy `world_id` alias still accepted) to container instances.
 - **Cloudflare Containers**: run the Go server (`cmd/server`) from `Dockerfile.cloudflare`.
-- **D1**: stores request metadata (`world_heads`) for quick state visibility.
+- Runtime hardening defaults in Cloudflare env: admin HTTP/pprof endpoints disabled and strict origin checks enabled (`VC_ENABLE_ADMIN_HTTP=false`, `VC_ENABLE_PPROF_HTTP=false`, `VC_WS_ALLOW_ANY_ORIGIN=false`, `VC_OBSERVER_ALLOW_ANY_ORIGIN=false`).
+- **D1**: stores request metadata (`world_heads`) and Cloud index tables (replacing local sqlite index in Cloudflare runtime).
 - **R2**: stores the latest world head JSON (`worlds/<world_id>/head.json`).
 - **Container->R2 mirror (S3 API)**: server snapshots/events/audit files are uploaded from container runtime to R2 asynchronously.
 
@@ -58,6 +59,8 @@ custom_domain = true
 
 For `VC_R2_ACCESS_KEY_ID` / `VC_R2_SECRET_ACCESS_KEY`, create an R2 API token pair in Cloudflare (S3-compatible credentials) with read/write access to the production bucket, then store those values as `production` environment secrets in GitHub Actions.
 
+`VC_INDEX_D1_TOKEN` is derived automatically in workflow from existing `CLOUDFLARE_API_TOKEN` and written as Worker secret (no extra GitHub secret required).
+
 ## Release flow
 
 - Commit to `staging` for pre-release verification.
@@ -69,4 +72,5 @@ For `VC_R2_ACCESS_KEY_ID` / `VC_R2_SECRET_ACCESS_KEY`, create an R2 API token pa
 
 - `GET /healthz`
 - `GET /_cf/persistence/healthz`
-- `GET /_cf/persistence/head?world_id=world_1`
+- `GET /_cf/persistence/head?shard_id=world_1` (`world_id` still accepted as legacy alias)
+- `GET /_cf/indexdb/healthz?world_id=OVERWORLD`

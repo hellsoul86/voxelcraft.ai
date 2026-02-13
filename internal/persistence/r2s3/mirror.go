@@ -9,8 +9,21 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
+
+type Stats struct {
+	QueueDepth          int
+	QueueCapacity       int
+	EnqueuedTotal       uint64
+	QueueSaturatedTotal uint64
+	DroppedTotal        uint64
+	UploadSuccessTotal  uint64
+	UploadFailTotal     uint64
+	LastSuccessUnix     int64
+	LastErrorUnix       int64
+}
 
 type Mirror struct {
 	client  *Client
@@ -20,6 +33,14 @@ type Mirror struct {
 
 	jobs chan string
 	wg   sync.WaitGroup
+
+	enqueuedTotal       atomic.Uint64
+	queueSaturatedTotal atomic.Uint64
+	droppedTotal        atomic.Uint64
+	uploadSuccessTotal  atomic.Uint64
+	uploadFailTotal     atomic.Uint64
+	lastSuccessUnix     atomic.Int64
+	lastErrorUnix       atomic.Int64
 }
 
 func NewMirror(client *Client, dataDir, prefix string, workers int, logger *log.Logger) *Mirror {
@@ -49,11 +70,25 @@ func (m *Mirror) Enqueue(localPath string) {
 	if m == nil || m.client == nil {
 		return
 	}
+	m.enqueuedTotal.Add(1)
+
 	select {
 	case m.jobs <- localPath:
+		return
 	default:
-		// Do not block world tick paths when queue is saturated.
-		go m.uploadOne(localPath)
+	}
+
+	m.queueSaturatedTotal.Add(1)
+	// Keep enqueue non-blocking for world-tick call sites, but avoid spawning
+	// unbounded goroutines under sustained pressure.
+	timer := time.NewTimer(25 * time.Millisecond)
+	defer timer.Stop()
+	select {
+	case m.jobs <- localPath:
+		return
+	case <-timer.C:
+		m.droppedTotal.Add(1)
+		m.printf("r2 mirror drop local=%s reason=queue_saturated", localPath)
 	}
 }
 
@@ -65,6 +100,23 @@ func (m *Mirror) Close() {
 	m.wg.Wait()
 }
 
+func (m *Mirror) Stats() Stats {
+	if m == nil {
+		return Stats{}
+	}
+	return Stats{
+		QueueDepth:          len(m.jobs),
+		QueueCapacity:       cap(m.jobs),
+		EnqueuedTotal:       m.enqueuedTotal.Load(),
+		QueueSaturatedTotal: m.queueSaturatedTotal.Load(),
+		DroppedTotal:        m.droppedTotal.Load(),
+		UploadSuccessTotal:  m.uploadSuccessTotal.Load(),
+		UploadFailTotal:     m.uploadFailTotal.Load(),
+		LastSuccessUnix:     m.lastSuccessUnix.Load(),
+		LastErrorUnix:       m.lastErrorUnix.Load(),
+	}
+}
+
 func (m *Mirror) uploadOne(localPath string) {
 	key, err := m.objectKey(localPath)
 	if err != nil {
@@ -72,14 +124,34 @@ func (m *Mirror) uploadOne(localPath string) {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
-	defer cancel()
-
-	if err := m.client.PutFile(ctx, key, localPath); err != nil {
+	if err := m.uploadWithRetry(key, localPath); err != nil {
+		m.uploadFailTotal.Add(1)
+		m.lastErrorUnix.Store(time.Now().UTC().Unix())
 		m.printf("r2 mirror upload failed key=%s local=%s err=%v", key, localPath, err)
 		return
 	}
+	m.uploadSuccessTotal.Add(1)
+	m.lastSuccessUnix.Store(time.Now().UTC().Unix())
 	m.printf("r2 mirror uploaded key=%s local=%s", key, localPath)
+}
+
+func (m *Mirror) uploadWithRetry(key, localPath string) error {
+	const maxAttempts = 4
+	var lastErr error
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		err := m.client.PutFile(ctx, key, localPath)
+		cancel()
+		if err == nil {
+			return nil
+		}
+		lastErr = err
+		if attempt < maxAttempts {
+			backoff := time.Duration(attempt*attempt) * 200 * time.Millisecond
+			time.Sleep(backoff)
+		}
+	}
+	return lastErr
 }
 
 func (m *Mirror) objectKey(localPath string) (string, error) {

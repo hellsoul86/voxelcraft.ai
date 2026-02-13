@@ -10,6 +10,19 @@ import (
 	"voxelcraft.ai/internal/persistence/r2s3"
 )
 
+type r2MirrorStats struct {
+	Enabled             bool
+	QueueDepth          int
+	QueueCapacity       int
+	EnqueuedTotal       uint64
+	QueueSaturatedTotal uint64
+	DroppedTotal        uint64
+	UploadSuccessTotal  uint64
+	UploadFailTotal     uint64
+	LastSuccessUnix     int64
+	LastErrorUnix       int64
+}
+
 type r2MirrorRuntime struct {
 	enabled      bool
 	rotateLayout string
@@ -59,6 +72,25 @@ func (r *r2MirrorRuntime) Enqueue(localPath string) {
 		return
 	}
 	r.mirror.Enqueue(localPath)
+}
+
+func (r *r2MirrorRuntime) Stats() r2MirrorStats {
+	if r == nil || !r.enabled || r.mirror == nil {
+		return r2MirrorStats{Enabled: false}
+	}
+	s := r.mirror.Stats()
+	return r2MirrorStats{
+		Enabled:             true,
+		QueueDepth:          s.QueueDepth,
+		QueueCapacity:       s.QueueCapacity,
+		EnqueuedTotal:       s.EnqueuedTotal,
+		QueueSaturatedTotal: s.QueueSaturatedTotal,
+		DroppedTotal:        s.DroppedTotal,
+		UploadSuccessTotal:  s.UploadSuccessTotal,
+		UploadFailTotal:     s.UploadFailTotal,
+		LastSuccessUnix:     s.LastSuccessUnix,
+		LastErrorUnix:       s.LastErrorUnix,
+	}
 }
 
 func envBool(key string, def bool) bool {
