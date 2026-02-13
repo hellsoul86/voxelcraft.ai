@@ -126,7 +126,7 @@ Four workflows are wired:
     - repository secret: `CLOUDFLARE_API_TOKEN`
     - repository variable: `CLOUDFLARE_ACCOUNT_ID`
     - `staging` environment variables: `CLOUDFLARE_D1_DATABASE_ID`, `CLOUDFLARE_R2_BUCKET`
-    - `staging` environment secrets: `VC_R2_ACCESS_KEY_ID`, `VC_R2_SECRET_ACCESS_KEY`
+    - `staging` environment secrets: `VC_R2_ACCESS_KEY_ID`, `VC_R2_SECRET_ACCESS_KEY`, `VC_INDEX_D1_TOKEN`
 
 - `Deploy Cloudflare Production` (`.github/workflows/deploy-cloudflare-production.yml`)
   - triggers automatically on push to `main` (deploy-relevant paths) and manual dispatch
@@ -136,7 +136,7 @@ Four workflows are wired:
     - repository secret: `CLOUDFLARE_API_TOKEN`
     - repository variable: `CLOUDFLARE_ACCOUNT_ID`
     - `production` environment variables: `CLOUDFLARE_D1_DATABASE_ID`, `CLOUDFLARE_R2_BUCKET`
-    - `production` environment secrets: `VC_R2_ACCESS_KEY_ID`, `VC_R2_SECRET_ACCESS_KEY`
+    - `production` environment secrets: `VC_R2_ACCESS_KEY_ID`, `VC_R2_SECRET_ACCESS_KEY`, `VC_INDEX_D1_TOKEN`
 
 Release flow:
 - Commit to `staging` -> auto deploy `staging-api.voxelcraft.ai`
@@ -158,11 +158,21 @@ Cloudflare deployment details:
 - `docs/deploy/cloudflare-staging.md`
 - `docs/deploy/cloudflare-production.md`
 
+Cloudflare index backend (D1 ingest):
+- Worker exposes `POST /_cf/indexdb/ingest` (token-protected via `VC_INDEX_D1_TOKEN`)
+- Container uses env vars from wrangler:
+  - `VC_INDEX_BACKEND=d1`
+  - `VC_INDEX_D1_INGEST_URL` (staging/prod domain endpoint)
+  - `VC_INDEX_D1_FLUSH_MS`, `VC_INDEX_D1_BATCH_SIZE`
+
 Persistence (defaults under `./data`):
 - tick log: `data/worlds/<world>/events/*.jsonl.zst`
 - audit log: `data/worlds/<world>/audit/*.jsonl.zst`
 - snapshots: `data/worlds/<world>/snapshots/*.snap.zst` (every `snapshot_every_ticks`, default 3000)
-- sqlite index (read model): `data/worlds/<world>/index/world.sqlite` (can be disabled via `-disable_db`)
+- index backend (read model):
+  - local/dev default: sqlite at `data/worlds/<world>/index/world.sqlite`
+  - Cloudflare deployment default: D1 ingest (`VC_INDEX_BACKEND=d1`, endpoint `/_cf/indexdb/ingest`)
+  - can be disabled via `-disable_db`
 
 Admin tools:
 - Rollback a region using audit logs (offline):  

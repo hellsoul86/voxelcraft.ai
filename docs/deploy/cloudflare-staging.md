@@ -7,7 +7,7 @@ This document describes the staging deployment path for `voxelcraft.ai` using Cl
 - **Cloudflare Worker**: public HTTP/WS entrypoint.
 - **Durable Object (Container-backed)**: `WorldCoordinator` routes requests by `world_id` to container instances.
 - **Cloudflare Containers**: run the Go server (`cmd/server`) from `Dockerfile.cloudflare`.
-- **D1**: stores request metadata (`world_heads`) for quick state visibility.
+- **D1**: stores request metadata (`world_heads`) and Cloud index tables (replacing local sqlite index in Cloudflare runtime).
 - **R2**: stores the latest world head JSON (`worlds/<world_id>/head.json`).
 - **Container->R2 mirror (S3 API)**: server snapshots/events/audit files are uploaded from container runtime to R2 asynchronously.
 
@@ -39,6 +39,7 @@ Environment-level (`staging`):
 - Variable: `CLOUDFLARE_R2_BUCKET`
 - Secret: `VC_R2_ACCESS_KEY_ID`
 - Secret: `VC_R2_SECRET_ACCESS_KEY`
+- Secret: `VC_INDEX_D1_TOKEN`
 
 The deploy workflow is bound to `environment: staging`.
 
@@ -72,6 +73,8 @@ Then set the returned D1 `database_id` and R2 bucket name as environment variabl
 
 For `VC_R2_ACCESS_KEY_ID` / `VC_R2_SECRET_ACCESS_KEY`, create an R2 API token pair in Cloudflare (S3-compatible credentials) with read/write access to the staging bucket, then store those values as `staging` environment secrets in GitHub Actions.
 
+For `VC_INDEX_D1_TOKEN`, generate a random secret used by container -> Worker index ingest (`/_cf/indexdb/ingest`) and store it as a `staging` environment secret.
+
 ## Release flow
 
 - Commit to `staging` and validate the deployment at `staging-api.voxelcraft.ai`.
@@ -83,3 +86,4 @@ For `VC_R2_ACCESS_KEY_ID` / `VC_R2_SECRET_ACCESS_KEY`, create an R2 API token pa
 - `GET /healthz` (from Go server)
 - `GET /_cf/persistence/healthz` (Worker checks D1 + R2)
 - `GET /_cf/persistence/head?world_id=world_1` (latest head from D1/R2)
+- `GET /_cf/indexdb/healthz?world_id=OVERWORLD` (Cloud index row counts in D1)

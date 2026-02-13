@@ -18,7 +18,6 @@ import (
 	"time"
 
 	"voxelcraft.ai/internal/persistence/archive"
-	"voxelcraft.ai/internal/persistence/indexdb"
 	persistlog "voxelcraft.ai/internal/persistence/log"
 	"voxelcraft.ai/internal/persistence/snapshot"
 	"voxelcraft.ai/internal/sim/catalogs"
@@ -38,7 +37,7 @@ func main() {
 		worldsPath = flag.String("worlds", "./configs/worlds.yaml", "multi-world config path (if exists, server runs in multi-world mode)")
 		dataDir    = flag.String("data", "./data", "runtime data directory")
 		tuningPath = flag.String("tuning", "", "path to tuning.yaml (default: <configs>/tuning.yaml)")
-		disableDB  = flag.Bool("disable_db", false, "disable sqlite indexing (tick/audit + catalogs + snapshot metadata)")
+		disableDB  = flag.Bool("disable_db", false, "disable indexing (tick/audit + catalogs + snapshot metadata)")
 
 		snapPath   = flag.String("snapshot", "", "path to snapshot to load (optional)")
 		loadLatest = flag.Bool("load_latest_snapshot", true, "load latest snapshot from data dir if present (when -snapshot is empty)")
@@ -60,15 +59,12 @@ func main() {
 		tp = filepath.Join(*configDir, "tuning.yaml")
 	}
 
-	// Optional: read-model index db (does not affect sim determinism).
-	var idx *indexdb.SQLiteIndex
-	if !*disableDB {
-		dbPath := filepath.Join(worldDir, "index", "world.sqlite")
-		var err error
-		idx, err = indexdb.OpenSQLite(dbPath)
-		if err != nil {
-			logger.Fatalf("open index db: %v", err)
-		}
+	// Optional: read-model index backend (does not affect sim determinism).
+	idx, err := openRuntimeIndex(worldDir, *worldID, *disableDB, logger)
+	if err != nil {
+		logger.Fatalf("open index backend: %v", err)
+	}
+	if idx != nil {
 		defer idx.Close()
 	}
 
@@ -120,7 +116,7 @@ func main() {
 
 	if idx != nil {
 		if err := idx.UpsertCatalogs(*configDir, cats, tune); err != nil {
-			logger.Printf("index db: upsert catalogs: %v", err)
+			logger.Printf("index backend: upsert catalogs: %v", err)
 		}
 	}
 

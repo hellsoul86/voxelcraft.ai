@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"voxelcraft.ai/internal/persistence/archive"
-	"voxelcraft.ai/internal/persistence/indexdb"
 	persistlog "voxelcraft.ai/internal/persistence/log"
 	"voxelcraft.ai/internal/persistence/snapshot"
 	"voxelcraft.ai/internal/sim/catalogs"
@@ -48,17 +47,14 @@ func runMultiWorld(rtCfg serverRuntimeConfig, cfg multiworld.Config, tune tuning
 		worldDir := filepath.Join(rtCfg.DataDir, "worlds", spec.ID)
 		_ = os.MkdirAll(worldDir, 0o755)
 
-		var idx *indexdb.SQLiteIndex
-		if !rtCfg.DisableDB {
-			dbPath := filepath.Join(worldDir, "index", "world.sqlite")
-			var err error
-			idx, err = indexdb.OpenSQLite(dbPath)
-			if err != nil {
-				logger.Fatalf("open index db (%s): %v", spec.ID, err)
-			}
+		idx, err := openRuntimeIndex(worldDir, spec.ID, rtCfg.DisableDB, logger)
+		if err != nil {
+			logger.Fatalf("open index backend (%s): %v", spec.ID, err)
+		}
+		if idx != nil {
 			defer idx.Close()
 			if err := idx.UpsertCatalogs(rtCfg.ConfigDir, cats, tune); err != nil {
-				logger.Printf("index db upsert catalogs (%s): %v", spec.ID, err)
+				logger.Printf("index upsert catalogs (%s): %v", spec.ID, err)
 			}
 		}
 
@@ -131,7 +127,7 @@ func runMultiWorld(rtCfg serverRuntimeConfig, cfg multiworld.Config, tune tuning
 
 		snapCh := make(chan snapshot.SnapshotV1, 2)
 		w.SetSnapshotSink(snapCh)
-		go func(worldID, dir string, db *indexdb.SQLiteIndex) {
+		go func(worldID, dir string, db runtimeIndex) {
 			for {
 				select {
 				case <-ctx.Done():

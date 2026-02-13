@@ -38,6 +38,7 @@ jobs:
       CLOUDFLARE_R2_BUCKET: ${{ vars.CLOUDFLARE_R2_BUCKET }}
       VC_R2_ACCESS_KEY_ID: ${{ secrets.VC_R2_ACCESS_KEY_ID }}
       VC_R2_SECRET_ACCESS_KEY: ${{ secrets.VC_R2_SECRET_ACCESS_KEY }}
+      VC_INDEX_D1_TOKEN: ${{ secrets.VC_INDEX_D1_TOKEN }}
 
     steps:
       - name: Checkout
@@ -52,6 +53,7 @@ jobs:
             CLOUDFLARE_R2_BUCKET
             VC_R2_ACCESS_KEY_ID
             VC_R2_SECRET_ACCESS_KEY
+            VC_INDEX_D1_TOKEN
           )
           missing=0
           for key in "${required[@]}"; do
@@ -93,11 +95,12 @@ jobs:
           sed -i "s|__R2_BUCKET_NAME__|${CLOUDFLARE_R2_BUCKET}|g" wrangler.generated.toml
           sed -i "s|__CF_ACCOUNT_ID__|${CLOUDFLARE_ACCOUNT_ID}|g" wrangler.generated.toml
 
-      - name: Upsert container R2 credentials (Worker secrets)
+      - name: Upsert container credentials (Worker secrets)
         working-directory: cloudflare
         run: |
           printf '%s' "$VC_R2_ACCESS_KEY_ID" | npx wrangler secret put VC_R2_ACCESS_KEY_ID --env production --config wrangler.generated.toml
           printf '%s' "$VC_R2_SECRET_ACCESS_KEY" | npx wrangler secret put VC_R2_SECRET_ACCESS_KEY --env production --config wrangler.generated.toml
+          printf '%s' "$VC_INDEX_D1_TOKEN" | npx wrangler secret put VC_INDEX_D1_TOKEN --env production --config wrangler.generated.toml
 
       - name: Apply D1 schema (idempotent)
         working-directory: cloudflare
@@ -110,4 +113,4 @@ jobs:
       - name: Post-deploy quick checks
         run: |
           echo "Deployment finished."
-          echo "Check /healthz and /_cf/persistence/healthz on https://api.voxelcraft.ai"
+          echo "Check /healthz, /_cf/persistence/healthz, and /_cf/indexdb/healthz on https://api.voxelcraft.ai"
