@@ -1,7 +1,6 @@
 package world
 
 import (
-	"encoding/json"
 	"strings"
 
 	"voxelcraft.ai/internal/observerproto"
@@ -9,39 +8,10 @@ import (
 	chunkspkg "voxelcraft.ai/internal/sim/world/feature/observer/chunks"
 	observerruntimepkg "voxelcraft.ai/internal/sim/world/feature/observer/runtime"
 	streamspkg "voxelcraft.ai/internal/sim/world/feature/observer/stream"
-	"voxelcraft.ai/internal/sim/world/io/obscodec"
 )
 
 type observerClient = streamspkg.Client
-type observerCfg = streamspkg.Config
-type observerChunk = streamspkg.ChunkState
-type observerVoxelChunk = streamspkg.VoxelState
 type surfaceCell = chunkspkg.SurfaceCell
-
-func (w *World) Config() WorldConfig {
-	if w == nil {
-		return WorldConfig{}
-	}
-	cfg := w.cfg
-	if cfg.MaintenanceCost != nil {
-		m := make(map[string]int, len(cfg.MaintenanceCost))
-		for k, v := range cfg.MaintenanceCost {
-			m[k] = v
-		}
-		cfg.MaintenanceCost = m
-	}
-	return cfg
-}
-
-func (w *World) BlockPalette() []string {
-	if w == nil || w.catalogs == nil {
-		return nil
-	}
-	p := w.catalogs.Blocks.Palette
-	out := make([]string, len(p))
-	copy(out, p)
-	return out
-}
 
 func (w *World) newPostID() string {
 	return boardspkg.NewPostID(w.nextPostNum.Add(1))
@@ -161,15 +131,6 @@ func (w *World) stepObserverChunksForClient(nowTick uint64, c *observerClient, c
 	for _, k := range connected {
 		connectedIn = append(connectedIn, streamspkg.ChunkKey{CX: k.CX, CZ: k.CZ})
 	}
-	states := make(map[streamspkg.ChunkKey]*streamspkg.ChunkRuntimeState, len(c.Chunks))
-	for k, st := range c.Chunks {
-		states[streamspkg.ChunkKey{CX: k.CX, CZ: k.CZ}] = &streamspkg.ChunkRuntimeState{
-			LastWantedTick: st.LastWantedTick,
-			SentFull:       st.SentFull,
-			NeedsFull:      st.NeedsFull,
-			Surface:        st.Surface,
-		}
-	}
 	auditsIn := make([]streamspkg.AuditEntry, 0, len(audits))
 	for _, a := range audits {
 		auditsIn = append(auditsIn, streamspkg.AuditEntry{
@@ -179,15 +140,11 @@ func (w *World) stepObserverChunksForClient(nowTick uint64, c *observerClient, c
 		})
 	}
 
-	streamspkg.StepChunkRuntime(states, streamspkg.ChunkStepInput{
-		NowTick:         nowTick,
-		Connected:       connectedIn,
-		Radius:          c.Config.ChunkRadius,
-		MaxChunks:       c.Config.MaxChunks,
-		MaxFullPerTick:  streamspkg.ObserverMaxFullChunksPerTick,
-		EvictAfterTicks: streamspkg.ObserverEvictAfterTicks,
-		Audits:          auditsIn,
-	}, streamspkg.ChunkStepDeps{
+	streamspkg.StepChunkClient(c, streamspkg.ChunkClientInput{
+		NowTick:   nowTick,
+		Connected: connectedIn,
+		Audits:    auditsIn,
+	}, streamspkg.ChunkClientDeps{
 		ComputeSurface: func(cx, cz int) []chunkspkg.SurfaceCell {
 			return w.computeChunkSurface(cx, cz)
 		},
@@ -204,114 +161,38 @@ func (w *World) stepObserverChunksForClient(nowTick uint64, c *observerClient, c
 					X: cell.X, Z: cell.Z, Y: cell.Y, Block: cell.Block,
 				})
 			}
-			msg := observerproto.ChunkPatchMsg{
-				Type:            "CHUNK_PATCH",
-				ProtocolVersion: observerproto.Version,
-				CX:              key.CX,
-				CZ:              key.CZ,
-				Cells:           out,
-			}
-			b, err := json.Marshal(msg)
+			b, err := streamspkg.BuildChunkPatchMsg(key.CX, key.CZ, out)
 			if err != nil {
 				return false
 			}
 			return trySend(c.DataOut, b)
 		},
 		SendEvict: func(key streamspkg.ChunkKey) bool {
-			msg := observerproto.ChunkEvictMsg{
-				Type:            "CHUNK_EVICT",
-				ProtocolVersion: observerproto.Version,
-				CX:              key.CX,
-				CZ:              key.CZ,
-			}
-			b, err := json.Marshal(msg)
+			b, err := streamspkg.BuildChunkEvictMsg(key.CX, key.CZ)
 			if err != nil {
 				return false
 			}
 			return trySend(c.DataOut, b)
 		},
 	})
-
-	next := make(map[streamspkg.ChunkKey]*observerChunk, len(states))
-	for k, st := range states {
-		key := streamspkg.ChunkKey{CX: k.CX, CZ: k.CZ}
-		next[key] = &observerChunk{
-			Key:            key,
-			LastWantedTick: st.LastWantedTick,
-			SentFull:       st.SentFull,
-			NeedsFull:      st.NeedsFull,
-			Surface:        st.Surface,
-		}
-	}
-	c.Chunks = next
-}
-
-func (w *World) sendChunkSurface(c *observerClient, st *observerChunk) bool {
-	if st == nil {
-		return false
-	}
-	return w.sendChunkSurfaceRaw(c, ChunkKey{CX: st.Key.CX, CZ: st.Key.CZ}, st.Surface)
 }
 
 func (w *World) sendChunkSurfaceRaw(c *observerClient, key ChunkKey, surface []surfaceCell) bool {
 	if w == nil || c == nil || surface == nil {
 		return false
 	}
-	msg := observerproto.ChunkSurfaceMsg{
-		Type:            "CHUNK_SURFACE",
-		ProtocolVersion: observerproto.Version,
-		CX:              key.CX,
-		CZ:              key.CZ,
-		Encoding:        "PAL16_Y8",
-		Data:            encodePAL16Y8(surface),
+	blocks := make([]uint16, len(surface))
+	ys := make([]byte, len(surface))
+	for i, cell := range surface {
+		blocks[i] = cell.B
+		ys[i] = cell.Y
 	}
-	b, err := json.Marshal(msg)
+	data := streamspkg.EncodeSurfacePAL16Y8(blocks, ys)
+	b, err := streamspkg.BuildChunkSurfaceMsg(key.CX, key.CZ, data)
 	if err != nil {
 		return false
 	}
 	return trySend(c.DataOut, b)
-}
-
-func encodePAL16Y8(surface []surfaceCell) string {
-	blocks := make([]uint16, len(surface))
-	ys := make([]byte, len(surface))
-	for i, c := range surface {
-		blocks[i] = c.B
-		ys[i] = c.Y
-	}
-	return obscodec.EncodePAL16Y8(blocks, ys)
-}
-
-// ObserverJoinRequest registers a read-only observer session that receives:
-// - chunk surface tiles (dataOut)
-// - per-tick global state (tickOut)
-//
-// All observer state is maintained by the world loop goroutine.
-type ObserverJoinRequest struct {
-	SessionID string
-	TickOut   chan []byte
-	DataOut   chan []byte
-
-	ChunkRadius int
-	MaxChunks   int
-
-	// Optional: stream 3D voxels around a focused agent.
-	FocusAgentID   string
-	VoxelRadius    int
-	VoxelMaxChunks int
-}
-
-// ObserverSubscribeRequest updates an existing observer session subscription settings.
-type ObserverSubscribeRequest struct {
-	SessionID string
-
-	ChunkRadius int
-	MaxChunks   int
-
-	// Optional: stream 3D voxels around a focused agent.
-	FocusAgentID   string
-	VoxelRadius    int
-	VoxelMaxChunks int
 }
 
 func (w *World) stepObservers(nowTick uint64, joins []RecordedJoin, leaves []string, actions []RecordedAction) {
@@ -347,10 +228,12 @@ func (w *World) stepObservers(nowTick uint64, joins []RecordedJoin, leaves []str
 			StaminaMilli: a.StaminaMilli,
 		}
 		if a.MoveTask != nil {
-			st.MoveTask = w.observerMoveTaskState(a, nowTick)
+			st.MoveTask = observerruntimepkg.BuildMoveTaskStateFromWorld(a, func(id string) (Vec3i, bool) {
+				return w.followTargetPos(id)
+			})
 		}
 		if a.WorkTask != nil {
-			st.WorkTask = w.observerWorkTaskState(a)
+			st.WorkTask = observerruntimepkg.BuildWorkTaskStateFromWorld(a, w.workProgressForAgent(a, a.WorkTask))
 		}
 		agentStates = append(agentStates, st)
 	}
@@ -384,9 +267,7 @@ func (w *World) stepObservers(nowTick uint64, joins []RecordedJoin, leaves []str
 		w.stepObserverVoxelChunksForClient(nowTick, c, w.obsAuditsThisTick)
 	}
 
-	msg := observerproto.TickMsg{
-		Type:                "TICK",
-		ProtocolVersion:     observerproto.Version,
+	b, err := streamspkg.BuildTickMsgBytes(streamspkg.TickBuildInput{
 		Tick:                nowTick,
 		TimeOfDay:           w.timeOfDay(nowTick),
 		Weather:             w.weather,
@@ -397,8 +278,7 @@ func (w *World) stepObservers(nowTick uint64, joins []RecordedJoin, leaves []str
 		Leaves:              leaves,
 		Actions:             actionsOut,
 		Audits:              auditsOut,
-	}
-	b, err := json.Marshal(msg)
+	})
 	if err != nil {
 		return
 	}
@@ -424,17 +304,6 @@ func (w *World) stepObserverVoxelChunksForClient(nowTick uint64, c *observerClie
 		}
 	}
 
-	states := make(map[streamspkg.ChunkKey]*streamspkg.VoxelRuntimeState, len(c.VoxelChunks))
-	for k, st := range c.VoxelChunks {
-		blocks := make([]uint16, len(st.Blocks))
-		copy(blocks, st.Blocks)
-		states[streamspkg.ChunkKey{CX: k.CX, CZ: k.CZ}] = &streamspkg.VoxelRuntimeState{
-			LastWantedTick: st.LastWantedTick,
-			SentFull:       st.SentFull,
-			NeedsFull:      st.NeedsFull,
-			Blocks:         blocks,
-		}
-	}
 	auditsIn := make([]streamspkg.AuditEntry, 0, len(audits))
 	for _, a := range audits {
 		auditsIn = append(auditsIn, streamspkg.AuditEntry{
@@ -444,16 +313,12 @@ func (w *World) stepObserverVoxelChunksForClient(nowTick uint64, c *observerClie
 		})
 	}
 
-	streamspkg.StepVoxelRuntime(states, streamspkg.VoxelStepInput{
-		NowTick:         nowTick,
-		Enabled:         enabled,
-		FocusCenters:    centers,
-		Radius:          c.Config.VoxelRadius,
-		MaxChunks:       c.Config.VoxelMaxChunks,
-		MaxFullPerTick:  streamspkg.ObserverMaxFullVoxelChunksPerTick,
-		EvictAfterTicks: streamspkg.ObserverVoxelEvictAfterTicks,
-		Audits:          auditsIn,
-	}, streamspkg.VoxelStepDeps{
+	streamspkg.StepVoxelClient(c, streamspkg.VoxelClientInput{
+		NowTick:      nowTick,
+		Enabled:      enabled,
+		FocusCenters: centers,
+		Audits:       auditsIn,
+	}, streamspkg.VoxelClientDeps{
 		ComputeVoxels: func(cx, cz int) []uint16 {
 			return w.computeChunkVoxels(cx, cz)
 		},
@@ -467,76 +332,30 @@ func (w *World) stepObserverVoxelChunksForClient(nowTick uint64, c *observerClie
 					X: cell.X, Y: cell.Y, Z: cell.Z, Block: cell.Block,
 				})
 			}
-			msg := observerproto.ChunkVoxelPatchMsg{
-				Type:            "CHUNK_VOXEL_PATCH",
-				ProtocolVersion: observerproto.Version,
-				CX:              key.CX,
-				CZ:              key.CZ,
-				Cells:           out,
-			}
-			b, err := json.Marshal(msg)
+			b, err := streamspkg.BuildChunkVoxelPatchMsg(key.CX, key.CZ, out)
 			if err != nil {
 				return false
 			}
 			return trySend(c.DataOut, b)
 		},
 		SendEvict: func(key streamspkg.ChunkKey) bool {
-			msg := observerproto.ChunkVoxelsEvictMsg{
-				Type:            "CHUNK_VOXELS_EVICT",
-				ProtocolVersion: observerproto.Version,
-				CX:              key.CX,
-				CZ:              key.CZ,
-			}
-			b, err := json.Marshal(msg)
+			b, err := streamspkg.BuildChunkVoxelsEvictMsg(key.CX, key.CZ)
 			if err != nil {
 				return false
 			}
 			return trySend(c.DataOut, b)
 		},
 	})
-
-	next := make(map[streamspkg.ChunkKey]*observerVoxelChunk, len(states))
-	for k, st := range states {
-		key := streamspkg.ChunkKey{CX: k.CX, CZ: k.CZ}
-		blocks := make([]uint16, len(st.Blocks))
-		copy(blocks, st.Blocks)
-		next[key] = &observerVoxelChunk{
-			Key:            key,
-			LastWantedTick: st.LastWantedTick,
-			SentFull:       st.SentFull,
-			NeedsFull:      st.NeedsFull,
-			Blocks:         blocks,
-		}
-	}
-	c.VoxelChunks = next
-}
-
-func (w *World) sendChunkVoxels(c *observerClient, st *observerVoxelChunk) bool {
-	if st == nil {
-		return false
-	}
-	return w.sendChunkVoxelsRaw(c, ChunkKey{CX: st.Key.CX, CZ: st.Key.CZ}, st.Blocks)
 }
 
 func (w *World) sendChunkVoxelsRaw(c *observerClient, key ChunkKey, blocks []uint16) bool {
 	if w == nil || c == nil || blocks == nil {
 		return false
 	}
-	msg := observerproto.ChunkVoxelsMsg{
-		Type:            "CHUNK_VOXELS",
-		ProtocolVersion: observerproto.Version,
-		CX:              key.CX,
-		CZ:              key.CZ,
-		Encoding:        "PAL16_U16LE_YZX",
-		Data:            encodePAL16U16LE(blocks),
-	}
-	b, err := json.Marshal(msg)
+	data := streamspkg.EncodeVoxelsPAL16U16LE(blocks)
+	b, err := streamspkg.BuildChunkVoxelsMsg(key.CX, key.CZ, data)
 	if err != nil {
 		return false
 	}
 	return trySend(c.DataOut, b)
-}
-
-func encodePAL16U16LE(blocks []uint16) string {
-	return obscodec.EncodePAL16U16LE(blocks)
 }

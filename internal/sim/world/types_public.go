@@ -79,6 +79,38 @@ type ActionEnvelope struct {
 	Act     protocol.ActMsg
 }
 
+// ObserverJoinRequest registers a read-only observer session that receives:
+// - chunk surface tiles (dataOut)
+// - per-tick global state (tickOut)
+//
+// All observer state is maintained by the world loop goroutine.
+type ObserverJoinRequest struct {
+	SessionID string
+	TickOut   chan []byte
+	DataOut   chan []byte
+
+	ChunkRadius int
+	MaxChunks   int
+
+	// Optional: stream 3D voxels around a focused agent.
+	FocusAgentID   string
+	VoxelRadius    int
+	VoxelMaxChunks int
+}
+
+// ObserverSubscribeRequest updates an existing observer session subscription settings.
+type ObserverSubscribeRequest struct {
+	SessionID string
+
+	ChunkRadius int
+	MaxChunks   int
+
+	// Optional: stream 3D voxels around a focused agent.
+	FocusAgentID   string
+	VoxelRadius    int
+	VoxelMaxChunks int
+}
+
 type RecordedJoin struct {
 	AgentID string `json:"agent_id"`
 	Name    string `json:"name"`
