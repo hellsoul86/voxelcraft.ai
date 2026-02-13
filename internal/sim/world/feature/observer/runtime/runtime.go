@@ -73,3 +73,40 @@ func BuildPublicBoards(inputs []BoardInput, maxPosts int, maxSummaryLen int) []p
 	}
 	return out
 }
+
+type LocalRulesInput struct {
+	Permissions        map[string]bool
+	HasLand            bool
+	LandID             string
+	Owner              string
+	IsOwner            bool
+	IsMember           bool
+	MarketTax          float64
+	MaintenanceDueTick uint64
+	MaintenanceStage   int
+}
+
+func BuildLocalRules(in LocalRulesInput) protocol.LocalRulesObs {
+	out := protocol.LocalRulesObs{
+		Permissions: in.Permissions,
+		Tax:         map[string]float64{"market": 0.0},
+		Role:        "WILD",
+	}
+	if !in.HasLand {
+		return out
+	}
+	out.LandID = in.LandID
+	out.Owner = in.Owner
+	out.Tax = map[string]float64{"market": in.MarketTax}
+	out.MaintenanceDueTick = in.MaintenanceDueTick
+	out.MaintenanceStage = in.MaintenanceStage
+	switch {
+	case in.IsOwner:
+		out.Role = "OWNER"
+	case in.IsMember:
+		out.Role = "MEMBER"
+	default:
+		out.Role = "VISITOR"
+	}
+	return out
+}

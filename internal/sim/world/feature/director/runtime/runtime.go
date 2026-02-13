@@ -53,3 +53,44 @@ func ShouldEvaluate(nowTick uint64, every uint64) bool {
 	}
 	return nowTick%every == 0
 }
+
+func SeasonLengthTicks(resetEveryTicks int, seasonLengthTicks int) uint64 {
+	seasonLen := uint64(resetEveryTicks)
+	if seasonLen == 0 {
+		seasonLen = uint64(seasonLengthTicks)
+	}
+	return seasonLen
+}
+
+func SeasonIndex(nowTick uint64, resetEveryTicks int, seasonLengthTicks int) int {
+	seasonLen := SeasonLengthTicks(resetEveryTicks, seasonLengthTicks)
+	if seasonLen == 0 {
+		return 1
+	}
+	return int(nowTick/seasonLen) + 1
+}
+
+func SeasonDay(nowTick uint64, dayTicks int, resetEveryTicks int, seasonLengthTicks int) int {
+	dt := uint64(dayTicks)
+	if dt == 0 {
+		return 1
+	}
+	seasonLen := SeasonLengthTicks(resetEveryTicks, seasonLengthTicks)
+	seasonDays := seasonLen / dt
+	if seasonDays == 0 {
+		seasonDays = 1
+	}
+	return int((nowTick/dt)%seasonDays) + 1
+}
+
+func ShouldWorldResetNotice(nowTick uint64, resetEveryTicks int, resetNoticeTicks int) (bool, uint64) {
+	cycle := uint64(resetEveryTicks)
+	notice := uint64(resetNoticeTicks)
+	if cycle == 0 || notice == 0 || notice >= cycle || nowTick == 0 {
+		return false, 0
+	}
+	if nowTick%cycle != cycle-notice {
+		return false, 0
+	}
+	return true, nowTick + notice
+}

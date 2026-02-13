@@ -1,71 +1,113 @@
-# Config Reference (v0.9 defaults)
+# Config Reference（Runtime Current）
 
-## Runtime
-- Tick rate: 5Hz (`1 tick = 200ms`)
-- Day ticks: 6000
-- Season length: 42000 ticks (7 in-game days) (`season_length_ticks`)
-- Chunk size: 16×16×1 (MVP 2D tilemap; only `y==0` is writable)
-- Observation radius: 7 (15×15×15 cube; in 2D only the `y==0` layer is typically non-AIR)
-- World boundary radius: 4000 blocks
-- Worldgen (defaults; see `worldgen` in `configs/tuning.yaml`):
-  - `biome_region_size`: 64 (biomes are contiguous 64×64 regions)
-  - `spawn_clear_radius`: 6 (spawn clearing around origin)
-  - `ore_cluster_prob_scale_permille`: 1000 (scale factor for ore cluster probabilities)
-  - `terrain_cluster_prob_scale_permille`: 1000 (scale factor for terrain cluster probabilities)
-  - `sprinkle_stone_permille`: 12
-  - `sprinkle_dirt_permille`: 4
-  - `sprinkle_log_permille`: 2 (FOREST only)
-- Starter items for newly joined agents (`starter_items`):
-  - `PLANK`: 20
-  - `COAL`: 10
-  - `STONE`: 20
-  - `BERRIES`: 10
-- Snapshot frequency: every 3000 ticks
-- Director evaluation frequency: every 3000 ticks
-- Rate limits (defaults; see `rate_limits` in `configs/tuning.yaml`):
-  - `say`: window `50`, max `5`
-  - `market_say`: window `50`, max `2`
-  - `whisper`: window `50`, max `5`
-  - `offer_trade`: window `50`, max `3`
-  - `post_board`: window `600`, max `1`
+## 1. Global Runtime（`configs/tuning.yaml`）
 
-Defaults live in:
-- `configs/tuning.yaml`
+- `tick_rate_hz`: 默认 5
+- `day_ticks`: 默认 6000
+- `snapshot_every_ticks`: 默认 3000
+- `director_every_ticks`: 默认 3000
+- `season_length_ticks`: 默认 42000
+- `obs_radius`: 默认 7
+- `boundary_r`: 默认 4000
 
-## Systems (MVP defaults)
-- Claim maintenance: every `day_ticks`
-- Maintenance cost: `1x IRON_INGOT + 1x COAL` (`claim_maintenance_cost`)
-- Maintenance downgrade: stage `0=ok`, `1=late`, `2=unprotected` (visitors treated as "wild" perms)
-- Law timings: notice `3000` + vote `3000` ticks (`law_notice_ticks`, `law_vote_ticks`)
-- Access pass "core" radius: 16 blocks (capped by claim radius) (`access_pass_core_radius`)
-- Blueprint auto-pull range: 32 blocks (same-land `CHEST/CONTRACT_TERMINAL`) (`blueprint_auto_pull_range`)
-- Blueprint build speed: 2 blocks/tick (`blueprint_blocks_per_tick`)
-- Fun score decay: window `3000` ticks, multiplier base `0.70^(n-1)` (`fun_decay_window_ticks`, `fun_decay_base`)
-- Fun creation survival delay (blueprint structures): 3000 ticks (`structure_survival_ticks`)
+2D 固定语义：
+- `chunk_size=[16,16,1]`
+- `height=1`
+- 写世界动作必须 `y==0`
 
-## Content Catalogs
-- Blocks: `configs/blocks.json`
-- Items: `configs/items.json`
-- Recipes: `configs/recipes.json`
-- Blueprints: `configs/blueprints/*.json`
-- Law templates: `configs/law_templates.json`
-- Event templates: `configs/events/*.json`
+## 2. Worldgen（`worldgen`）
 
-## Observability
-- Prometheus text endpoint: `GET /metrics`
-- Metrics (MVP):
-  - `voxelcraft_world_tick`
-  - `voxelcraft_world_agents`
-  - `voxelcraft_world_clients`
-  - `voxelcraft_world_loaded_chunks`
-  - `voxelcraft_world_queue_depth{queue="inbox|join|leave|attach"}`
-  - `voxelcraft_world_step_ms`
-  - `voxelcraft_director_metric{metric="trade|conflict|exploration|inequality|public_infra"}`
-  - `voxelcraft_stats_window{metric="trades|denied|chunks_discovered|blueprints_complete"}`
-  - `voxelcraft_stats_window_ticks`
+- `biome_region_size`
+- `spawn_clear_radius`
+- `ore_cluster_prob_scale_permille`
+- `terrain_cluster_prob_scale_permille`
+- `sprinkle_stone_permille`
+- `sprinkle_dirt_permille`
+- `sprinkle_log_permille`
 
-## Persistence Layout
-- Tick events (JSONL zstd): `data/worlds/<world_id>/events/events-YYYY-MM-DD-HH.jsonl.zst`
-- Audit (JSONL zstd): `data/worlds/<world_id>/audit/audit-YYYY-MM-DD-HH.jsonl.zst`
-- Snapshots (zstd): `data/worlds/<world_id>/snapshots/<tick>.snap.zst`
-- Season archives: `data/worlds/<world_id>/archives/season_<NNN>/` (contains `meta.json` + end-of-season snapshot copy)
+## 3. Starter Items
+
+`starter_items` 默认：
+- `PLANK: 20`
+- `COAL: 10`
+- `STONE: 20`
+- `BERRIES: 10`
+
+## 4. Rate Limits
+
+`rate_limits` 默认：
+- `say_window_ticks=50`, `say_max=5`
+- `market_say_window_ticks=50`, `market_say_max=2`
+- `whisper_window_ticks=50`, `whisper_max=5`
+- `offer_trade_window_ticks=50`, `offer_trade_max=3`
+- `post_board_window_ticks=600`, `post_board_max=1`
+
+## 5. Governance / Build / Fun
+
+- `law_notice_ticks=3000`
+- `law_vote_ticks=3000`
+- `blueprint_auto_pull_range=32`
+- `blueprint_blocks_per_tick=2`
+- `access_pass_core_radius=16`
+- `claim_maintenance_cost`（默认 `IRON_INGOT + COAL`）
+- `fun_decay_window_ticks=3000`
+- `fun_decay_base=0.70`
+- `structure_survival_ticks=3000`
+
+## 6. Multi-World（`configs/worlds.yaml`）
+
+顶层：
+- `default_world_id`
+- `worlds[]`
+- `switch_routes[]`
+
+`worlds[]` 字段：
+- 基础：`id`, `type`, `seed_offset`, `boundary_r`
+- reset：`reset_every_ticks`, `reset_notice_ticks`, `allow_admin_reset`
+- 切换：`switch_cooldown_ticks`, `entry_point_id`, `entry_points[]`
+- 规则开关：`allow_claims`, `allow_mine`, `allow_place`, `allow_laws`, `allow_trade`, `allow_build`
+
+`entry_points[]`：
+- `id`, `x`, `z`, `radius`, `enabled`
+
+`switch_routes[]`：
+- `from_world`, `to_world`
+- `from_entry_id`, `to_entry_id`
+- `requires_permit`
+
+## 7. Content Catalogs
+
+- `configs/blocks.json`
+- `configs/items.json`
+- `configs/recipes.json`
+- `configs/blueprints/*.json`
+- `configs/law_templates.json`
+- `configs/events/*.json`
+
+## 8. Persistence Paths
+
+- Events: `data/worlds/<world>/events/*.jsonl.zst`
+- Audit: `data/worlds/<world>/audit/*.jsonl.zst`
+- Snapshot: `data/worlds/<world>/snapshots/*.snap.zst`
+- Archive: `data/worlds/<world>/archives/season_<n>/`
+- Index DB: `data/worlds/<world>/index/world.sqlite`
+- Global state: `data/global/state.json`
+
+## 9. Metrics（`/metrics`）
+
+单世界指标：
+- `voxelcraft_world_tick{world}`
+- `voxelcraft_world_agents{world}`
+- `voxelcraft_world_clients{world}`
+- `voxelcraft_world_loaded_chunks{world}`
+- `voxelcraft_world_queue_depth{world,queue}`
+- `voxelcraft_world_step_ms{world}`
+- `voxelcraft_director_metric{world,metric}`
+- `voxelcraft_stats_window{world,metric}`
+- `voxelcraft_stats_window_ticks{world}`
+
+多世界指标：
+- `voxelcraft_world_online_agents{world}`
+- `voxelcraft_world_switch_total{from,to,result}`
+- `voxelcraft_world_reset_total{world}`
+- `voxelcraft_world_resource_density{world,resource}`

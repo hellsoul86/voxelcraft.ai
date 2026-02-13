@@ -1,26 +1,32 @@
 # World Package Architecture
 
-This document describes the `internal/sim/world` package after the 1.0 refactor.
+本文档描述 `internal/sim/world` 的当前架构与边界，不包含历史演进信息。
 
-## Design Goals
+## 1. Runtime Model
 
-- Keep simulation behavior deterministic: one world runtime, one authoritative tick order.
-- Keep protocol behavior stable while allowing internal module refactors.
-- Keep large logic split by responsibility so changes stay local and testable.
+- 单 world = 单 goroutine 权威模拟循环
+- 网络/WS 线程只做入队与出队，不直接改世界状态
+- 所有状态写入在 world loop 内完成，保证确定性
+- 当前世界语义为 2D：所有写入动作必须 `y==0`
 
-## Tick Lifecycle (Authoritative Order)
+入口文件：
+- `world.go`：构造与依赖装配
+- `runtime_loop.go`：`Run` / `StepOnce`
+- `runtime_step.go`：单 tick 调度主流程
+- `runtime_api_core.go`：核心运行时 API
+- `runtime_api_admin.go`：admin 请求 API（snapshot/reset）
+- `runtime_api_transfer.go`：跨 world 迁移与查询 API
+- `debug_api.go`：仅测试/调试辅助 API
 
-Runtime entrypoints:
-- `runtime_loop.go`: `Run`, `StepOnce`
-- `runtime_step.go`: `stepInternal`
+## 2. Authoritative Tick Order
 
-Per tick order in `stepInternal`:
-1. season/reset notice hooks
-2. joins/leaves at boundary
-3. transfer out/in (multi-world migration)
-4. maintenance tick
-5. apply ACT envelopes in receive order
-6. systems in fixed order:
+`stepInternal` 的顺序是确定性契约：
+1. 季节与 reset notice
+2. join / leave
+3. transfer out / transfer in
+4. maintenance
+5. 应用 ACT（按接收顺序）
+6. 系统执行（固定顺序）：
    - movement
    - work
    - conveyor
@@ -28,195 +34,93 @@ Per tick order in `stepInternal`:
    - laws
    - director
    - contracts
-   - fun score
-7. build and publish OBS
+   - fun
+7. 生成并发送 OBS
 8. observer stream
-9. tick digest and optional snapshot
-10. metrics update and tick increment
+9. digest / snapshot
+10. metrics 更新与 tick 自增
 
-Do not change this order without explicit determinism review.
+## 3. Package Boundaries
 
-## Package Layout
+### 3.1 world façade（`internal/sim/world`）
 
-The package uses a "world facade + pure subpackages" layout.
+职责：
+- 持有并管理全部可变状态
+- 统一事件投递与审计写入
+- 调用 feature/logic/io/policy 子包
+- 对外暴露 `World` API
+- 仅保留“编排壳 + 适配器壳”：
+  - `*_facade.go`：系统调度与状态落点
+    - 例如：`session_facade.go`、`contracts_facade.go`、`conveyor_facade.go`、`survival_facade.go`、`entities_items_facade.go`
+  - `instants_adapter_*.go`：按功能分组的 world->feature 适配器
+  - `runtime_api_*.go`：核心/admin/transfer 三类 API 面
 
-World facade (`internal/sim/world`):
-- Owns mutable runtime state and tick ordering.
-- Performs all state mutation, auditing, and event emission.
-- Adapts pure helpers from subpackages.
+### 3.2 Kernel（`internal/sim/world/kernel/model`）
 
-Core layers:
-- `internal/sim/world/kernel/model` for shared domain model types (agent/org/claim/contract/etc).
-- `internal/sim/world/terrain/{store,gen}` for the 2D chunk store and deterministic world generation.
+职责：
+- 核心模型与通用方法
+- 例如：`Agent`、`LandClaim`、`Organization`、`Contract`、`ItemEntity`、`Vec3i`
 
-Pure subpackages:
-- `internal/sim/world/logic/mathx`
-- `internal/sim/world/logic/ids` for stable identifier parsing/formatting
-- `internal/sim/world/logic/observerprogress`
-- `internal/sim/world/logic/conveyorpower`
-- `internal/sim/world/logic/directorcenter`
-- `internal/sim/world/logic/movement`
-- `internal/sim/world/logic/blueprint`
-- `internal/sim/world/logic/rates`
-- `internal/sim/world/io/snapshotcodec`
-- `internal/sim/world/io/obscodec`
-- `internal/sim/world/io/digestcodec`
-- `internal/sim/world/policy/rules`
-- `internal/sim/world/feature/admin`
-- `internal/sim/world/feature/session`
-- `internal/sim/world/feature/transfer`
-- `internal/sim/world/feature/movement`
-- `internal/sim/world/feature/work`
-- `internal/sim/world/feature/economy`
-- `internal/sim/world/feature/contracts`
-- `internal/sim/world/feature/governance`
-- `internal/sim/world/feature/director`
-- `internal/sim/world/feature/observer`
-- `internal/sim/world/feature/survival`
-- `internal/sim/world/feature/entities`
-- `internal/sim/world/feature/conveyor`
-- `internal/sim/world/feature/persistence`
+### 3.3 Terrain（`internal/sim/world/terrain/*`）
 
-Feature subpackage layout (second level):
-- `feature/contracts/{core,instants,lifecycle,runtime,validation,audit,reputation}`
-- `feature/director/{events,feedback,metrics,resources,runtime,spawns,stats}`
-- `feature/conveyor/{runtime}`
-- `feature/economy/{inventory,instants,tax,trade,value}`
-- `feature/entities/{items}`
-- `feature/governance/{claims,instants,laws,laws/runtime,maintenance,orgs,permissions}`
-- `feature/observer/{boards,chunks,entities,meta,posting,runtime,search,stream,targets,tasks}`
-- `feature/persistence/{digest,snapshot}`
-- `feature/session/{catalogs,chat,eat,instants,lifecycle,memory,resume,welcome}`
-- `feature/survival/{respawn,runtime}`
-- `feature/transfer/{agent,events,maps,org,runtime}`
-- `feature/work/{interact,limits,mining,progress,smelt}`
+职责：
+- `terrain/store`：chunk 存储与访问
+- `terrain/gen`：确定性 worldgen
 
-Recent decomposition in this iteration:
-- Governance instant validators moved to `feature/governance`:
-  - claim permission/upgrade/member/deed input and overlap checks
-  - law propose/vote input and timeline normalization
-- Contracts instant/runtime helpers moved to `feature/contracts`:
-  - post/accept/submit prep DTOs
-  - tick audit payload builder
-- Observer target validators moved to `feature/observer`:
-  - physical board/sign target checks
-- Transfer runtime DTOs moved to `feature/transfer`:
-  - agent position and org metadata request/response payloads
-- Transfer world-loop handlers moved to `feature/transfer/runtime`:
-  - event cursor response shaping
-  - agent position lookup result shaping
-  - org metadata normalization/merge helpers
-- Contract settlement/runtime helpers moved to `feature/contracts/runtime`:
-  - terminal summary projection
-  - payout target selection
-  - terminal transfer, requirement consumption, and payout primitives
-- Work interaction validators/projections moved to `feature/work/interact`:
-  - OPEN board/sign target checks
-  - board post list projection
-  - TRANSFER no-op and distance validation helpers
-- Director scheduler state-machine helpers moved to `feature/director/runtime`:
-  - event/weather expiry
-  - scripted day schedule lookup
-  - evaluate-window gate logic
-- Law lifecycle transition helpers moved to `feature/governance/laws/runtime`:
-  - NOTICE->VOTING/VOTING->resolve transition checks
-  - vote pass decision primitive
-- Survival and item-entity pure rules moved to feature packages:
-  - `feature/survival/runtime`: hunger/night/stamina recovery calculations
-  - `feature/survival/respawn`: deterministic inventory-loss and agent id parsing
-  - `feature/entities/items`: merge/expiration/removal primitives for dropped items
-- Director decomposition extended:
-  - `feature/director/events`: event reward/effect decision helpers
-  - `feature/director/spawns`: deterministic spawn geometry for event instantiation
-- Observer decomposition extended:
-  - `feature/observer/runtime`: status/build projection helpers
-  - `feature/observer/stream`: wanted-chunk selection and stream clamp helpers
-- Persistence decomposition extended:
-  - `feature/persistence/snapshot`: snapshot-level positive-map adapters
-  - `feature/persistence/digest`: digest helper adapter surface + full state digest builder
-- Governance/contracts instant decomposition extended:
-  - `feature/governance/instants`: admin and overlap helper DTOs
-  - `feature/contracts/instants`: terminal context helper DTOs
+### 3.4 Feature（`internal/sim/world/feature/*`）
 
-Dependency rules:
-1. `world` can import subpackages.
-2. Subpackages do not import `internal/sim/world`.
-3. `feature/*`, `io/*` and `policy/*` may depend on `logic/*`.
-4. `feature/*` stays stateless and receives data/callbacks from `world` facade.
-5. `logic/*` packages stay pure and deterministic.
+按业务域拆分：
+- `admin`：admin 请求处理
+  - `admin/debug`：debug API 的纯状态变更逻辑
+- `session`：join/attach/welcome/catalog/memory/chat
+- `transfer`：跨 world agent/org/event cursor 迁移
+- `movement`：移动任务请求与执行辅助
+- `work`：采集/放置/合成/熔炼/蓝图任务
+- `economy`：交易、估值、税、库存原语
+- `contracts`：合约生命周期、验收、结算、信誉联动
+- `governance`：claim、law、org、maintenance、权限
+- `director`：事件调度、资源刷点、fun 统计
+- `observer`：OBS 视图投影与 observer stream
+- `survival`：环境压力、复活逻辑
+- `entities`：掉落物实体规则
+  - `entities/runtime`：container/sign/conveyor/switch 运行时元数据规则
+- `conveyor`：物流带运行规则
+- `persistence`：snapshot/digest 编排辅助
 
-## Main Runtime Modules
+### 3.5 Pure Helper Layers
 
-Core runtime:
-- `world.go`: world construction (`New`) only
-- `types_world_runtime.go`: runtime state shape (`World`)
-- `runtime_loop.go`, `runtime_step.go`, `runtime_api.go`
-- `session_lifecycle.go`
+- `logic/*`：纯算法与纯计算
+- `io/*`：纯编解码
+- `policy/rules`：纯规则判定
 
-Action handling:
-- `action_apply.go`: ACT entry + routing
-- `instants_facade.go`: instant action dispatch + handlers (thin wrappers to feature packages)
-- `tasks_facade.go`: task normalization + movement/work handlers
-- `action_types.go`: canonical action names and dispatch validation
+## 4. Dependency Rules
 
-System loops:
-- `tasks_facade.go` (movement/work systems; uses `feature/movement`, `feature/work`, `logic/movement`, `logic/blueprint`)
-- `conveyor_system.go` (uses `logic/conveyorpower` + `feature/conveyor/runtime`)
-- `environment_system.go` (uses `feature/survival/*` + `feature/entities/items`)
-- `director_facade.go` (director/season/fun; uses `logic/directorcenter` + `feature/director/*`)
+1. `world` 可以 import `feature/*`、`logic/*`、`io/*`、`policy/*`、`kernel/*`、`terrain/*`
+2. `feature/*` 不 import `internal/sim/world`
+3. `feature/*` 通过 DTO + 回调接口与 world façade 协作
+4. `logic/*` / `io/*` / `policy/*` 保持无状态纯函数
+5. 禁止循环依赖（`go list ./internal/sim/world/...` 必须通过）
 
-Observation:
-- `obs_builder.go`: top-level OBS assembly
-- voxel window + delta/RLE (uses `io/obscodec`)
-- observer stream selection and exports live under `feature/observer/stream`
+## 5. Determinism Invariants
 
-Determinism and persistence:
-- `digest_facade.go` (calls `feature/persistence/digest/state_digest.go`, uses `io/digestcodec`)
-- `snapshot_facade.go` (uses `io/snapshotcodec` + `feature/persistence/snapshot`)
-- `audit_helpers.go`
+- Tick 顺序不可变
+- OBS 字段与排序规则不可漂移
+- voxel 扫描与编码顺序不可漂移
+- state digest 写入顺序不可漂移
+- 写世界动作必须满足 2D 约束（`y==0`）
 
-Domain types:
-- `feature/governance/laws.go` owns `Law`/`LawStatus`
-- `feature/contracts/*` owns contract-domain pure rules
+## 6. Testing Strategy
 
-## Invariants
+- `internal/sim/world`：集成白盒（需要 world 私有状态）
+- `internal/sim/worldtest`：黑盒回归（只用公开 API + Debug 辅助）
+- `feature/*`、`logic/*`、`io/*`、`policy/*`：纯单测
 
-- 2D world semantics are enforced for write operations (`y == 0`).
-- All mutable world state is touched only from world loop goroutine.
-- Dispatch maps must stay in sync with supported action constants.
-- OBS and digest serialization order must remain deterministic.
-
-## Safe Refactor Checklist
-
-Before moving/changing behavior:
-1. keep function signatures unchanged unless all call sites are updated in one change
-2. keep tick order and event ordering unchanged
-3. preserve key sorting in digest and payload assembly
-4. preserve OBS field ordering and voxel scan order
-5. rerun agent E2E and swarm gate
-
-## Testing Layout
-
-- Integration tests stay in `internal/sim/world` (they need unexported state + deterministic tick wiring).
-- For readability, world-level integration tests are named `*_integration_test.go`.
-- Black-box regression tests live in `internal/sim/worldtest` and only use exported `world` APIs (plus explicit `Debug*` helpers).
-- Pure unit tests must live in their owning subpackages (`logic/*`, `feature/*`, `policy/*`, `io/*`).
-- In Go, colocated `_test.go` files are the default for white-box tests. Separation is done by package boundaries, not a global `/tests` folder.
-- Unit tests should live beside the smallest pure package they validate (for example `feature/*/*`), while `internal/sim/world` keeps integration and determinism tests.
-- Practical rule used here:
-  - if a test needs unexported world internals, keep it in `internal/sim/world`
-  - if logic can be tested as pure DTO/callback behavior, move it to `feature/*` or `logic/*` tests
-- New test default:
-  1. write unit test in subpackage first
-  2. add `world` integration test only for facade wiring
-  3. avoid duplicate assertions across both layers
-
-## Validation Commands
-
-From `voxelcraft.ai`:
+验证命令：
 
 ```bash
-go test ./internal/sim/world ./internal/sim/multiworld ./cmd/server
+go test ./internal/sim/world/... 
+go test ./internal/sim/multiworld ./cmd/server
 go test ./...
-scripts/release_gate.sh --with-agent
+scripts/release_gate.sh --skip-race
+scripts/release_gate.sh --with-agent --skip-race --agent-dir /home/vscode/projects/voxelcraft.agent --scenario multiworld_mine_trade_govern --count 50 --duration 60
 ```

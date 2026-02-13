@@ -98,6 +98,24 @@ type TuningInput struct {
 	StructureSurvivalTicks int
 }
 
+type BuildHandshakeCatalogsInput struct {
+	BlockPalette       []string
+	BlockPaletteDigest string
+	ItemPalette        []string
+	ItemPaletteDigest  string
+
+	RecipesDigest    string
+	RecipesByID      map[string]catalogs.RecipeDef
+	BlueprintsDigest string
+	BlueprintsByID   map[string]catalogs.BlueprintDef
+	LawsDigest       string
+	LawTemplates     []catalogs.LawTemplate
+	EventsDigest     string
+	EventsByID       map[string]catalogs.EventTemplate
+
+	Tuning TuningInput
+}
+
 func TuningCatalogMsg(in TuningInput) protocol.CatalogMsg {
 	cost := make([]protocol.ItemStack, 0, len(in.MaintenanceCost))
 	for item, n := range in.MaintenanceCost {
@@ -217,4 +235,38 @@ func EventsCatalogMsg(digest string, byID map[string]catalogs.EventTemplate) pro
 		TotalParts:      1,
 		Data:            defs,
 	}
+}
+
+func BuildHandshakeCatalogs(in BuildHandshakeCatalogsInput) ([]protocol.CatalogMsg, string) {
+	tuningCat := TuningCatalogMsg(in.Tuning)
+	recipesCat := RecipesCatalogMsg(in.RecipesDigest, in.RecipesByID)
+	blueprintsCat := BlueprintsCatalogMsg(in.BlueprintsDigest, in.BlueprintsByID)
+	lawsCat := LawTemplatesCatalogMsg(in.LawsDigest, in.LawTemplates)
+	eventsCat := EventsCatalogMsg(in.EventsDigest, in.EventsByID)
+
+	return OrderedCatalogs(
+		protocol.CatalogMsg{
+			Type:            protocol.TypeCatalog,
+			ProtocolVersion: protocol.Version,
+			Name:            "block_palette",
+			Digest:          in.BlockPaletteDigest,
+			Part:            1,
+			TotalParts:      1,
+			Data:            in.BlockPalette,
+		},
+		protocol.CatalogMsg{
+			Type:            protocol.TypeCatalog,
+			ProtocolVersion: protocol.Version,
+			Name:            "item_palette",
+			Digest:          in.ItemPaletteDigest,
+			Part:            1,
+			TotalParts:      1,
+			Data:            in.ItemPalette,
+		},
+		tuningCat,
+		recipesCat,
+		blueprintsCat,
+		lawsCat,
+		eventsCat,
+	), tuningCat.Digest
 }

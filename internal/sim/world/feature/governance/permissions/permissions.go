@@ -37,3 +37,13 @@ func ForLand(isMember bool, maintenanceStage int, flags claims.Flags) Permission
 		CanTrade:  flags.AllowTrade,
 	}
 }
+
+func CanWithdrawContainer(hasLand bool, isMember bool, maintenanceStage int) bool {
+	if !hasLand {
+		return true
+	}
+	if maintenanceStage >= 2 && !isMember {
+		return true
+	}
+	return isMember
+}

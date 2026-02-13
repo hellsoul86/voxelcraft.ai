@@ -7,23 +7,12 @@ import (
 	"voxelcraft.ai/internal/persistence/snapshot"
 	snapshotfeaturepkg "voxelcraft.ai/internal/sim/world/feature/persistence/snapshot"
 	"voxelcraft.ai/internal/sim/world/io/snapshotcodec"
+	storepkg "voxelcraft.ai/internal/sim/world/terrain/store"
 )
 
 func (w *World) exportChunkSnapshots() []snapshot.ChunkV1 {
 	keys := w.chunks.LoadedChunkKeys()
-	chunks := make([]snapshot.ChunkV1, 0, len(keys))
-	for _, k := range keys {
-		ch := w.chunks.chunks[k]
-		blocks := make([]uint16, len(ch.Blocks))
-		copy(blocks, ch.Blocks)
-		chunks = append(chunks, snapshot.ChunkV1{
-			CX:     k.CX,
-			CZ:     k.CZ,
-			Height: 1,
-			Blocks: blocks,
-		})
-	}
-	return chunks
+	return storepkg.ExportLoadedChunks(w.chunks.chunks, keys)
 }
 
 func (w *World) exportSnapshot(nowTick uint64) snapshot.SnapshotV1 {
@@ -136,19 +125,19 @@ func (w *World) importSnapshotV1(s snapshot.SnapshotV1) error {
 	agents, maxAgent, maxTask := snapshotfeaturepkg.ImportAgents(s)
 	w.agents = agents
 	w.clients = map[string]*clientState{}
-	w.nextAgentNum.Store(maxU64(maxAgent, s.Counters.NextAgent))
-	w.nextTaskNum.Store(maxU64(maxTask, s.Counters.NextTask))
+	w.nextAgentNum.Store(snapshotfeaturepkg.MaxU64(maxAgent, s.Counters.NextAgent))
+	w.nextTaskNum.Store(snapshotfeaturepkg.MaxU64(maxTask, s.Counters.NextTask))
 
 	claims, maxLand := snapshotfeaturepkg.ImportClaims(s)
 	w.claims = claims
-	w.nextLandNum.Store(maxU64(maxLand, s.Counters.NextLand))
+	w.nextLandNum.Store(snapshotfeaturepkg.MaxU64(maxLand, s.Counters.NextLand))
 
 	w.containers = snapshotfeaturepkg.ImportContainers(s)
 
 	items, itemsAt, maxItem := snapshotfeaturepkg.ImportItems(s)
 	w.items = items
 	w.itemsAt = itemsAt
-	w.nextItemNum.Store(maxU64(maxItem, s.Counters.NextItem))
+	w.nextItemNum.Store(snapshotfeaturepkg.MaxU64(maxItem, s.Counters.NextItem))
 
 	blockNameAt := func(pos Vec3i) string {
 		return w.blockName(w.chunks.GetBlock(pos))
@@ -159,23 +148,23 @@ func (w *World) importSnapshotV1(s snapshot.SnapshotV1) error {
 
 	trades, maxTrade := snapshotfeaturepkg.ImportTrades(s)
 	w.trades = trades
-	w.nextTradeNum.Store(maxU64(maxTrade, s.Counters.NextTrade))
+	w.nextTradeNum.Store(snapshotfeaturepkg.MaxU64(maxTrade, s.Counters.NextTrade))
 
 	boards, maxPost := snapshotfeaturepkg.ImportBoards(s)
 	w.boards = boards
-	w.nextPostNum.Store(maxU64(maxPost, s.Counters.NextPost))
+	w.nextPostNum.Store(snapshotfeaturepkg.MaxU64(maxPost, s.Counters.NextPost))
 
 	contracts, maxContract := snapshotfeaturepkg.ImportContracts(s)
 	w.contracts = contracts
-	w.nextContractNum.Store(maxU64(maxContract, s.Counters.NextContract))
+	w.nextContractNum.Store(snapshotfeaturepkg.MaxU64(maxContract, s.Counters.NextContract))
 
 	laws, maxLaw := snapshotfeaturepkg.ImportLaws(s)
 	w.laws = laws
-	w.nextLawNum.Store(maxU64(maxLaw, s.Counters.NextLaw))
+	w.nextLawNum.Store(snapshotfeaturepkg.MaxU64(maxLaw, s.Counters.NextLaw))
 
 	orgs, maxOrg := snapshotfeaturepkg.ImportOrgs(s)
 	w.orgs = orgs
-	w.nextOrgNum.Store(maxU64(maxOrg, s.Counters.NextOrg))
+	w.nextOrgNum.Store(snapshotfeaturepkg.MaxU64(maxOrg, s.Counters.NextOrg))
 
 	w.structures = snapshotfeaturepkg.ImportStructures(s)
 	w.stats = snapshotfeaturepkg.ImportStats(s)
@@ -185,34 +174,16 @@ func (w *World) importSnapshotV1(s snapshot.SnapshotV1) error {
 	return nil
 }
 
-func maxU64(a, b uint64) uint64 {
-	if a >= b {
-		return a
-	}
-	return b
-}
-
 func (w *World) importChunkSnapshots(gen WorldGen, chunks []snapshot.ChunkV1) error {
-	store := NewChunkStore(gen)
-	for _, ch := range chunks {
-		if ch.Height != 1 {
-			return fmt.Errorf("snapshot chunk height mismatch: got %d want 1", ch.Height)
-		}
-		if len(ch.Blocks) != 16*16 {
-			return fmt.Errorf("snapshot chunk blocks length mismatch: got %d want %d", len(ch.Blocks), 16*16)
-		}
-		k := ChunkKey{CX: ch.CX, CZ: ch.CZ}
-		blocks := make([]uint16, len(ch.Blocks))
-		copy(blocks, ch.Blocks)
-		c := &Chunk{
-			CX:     ch.CX,
-			CZ:     ch.CZ,
-			Blocks: blocks,
-		}
-		_ = c.Digest()
-		store.chunks[k] = c
+	inner, err := storepkg.ImportChunks(gen, chunks)
+	if err != nil {
+		return err
 	}
-	w.chunks = store
+	w.chunks = &ChunkStore{
+		inner:  inner,
+		gen:    inner.Gen,
+		chunks: inner.Chunks,
+	}
 	return nil
 }
 
@@ -357,4 +328,3 @@ func (w *World) applySnapshotRuntimeState(s snapshot.SnapshotV1) {
 	}
 	w.activeEventRadius = s.ActiveEventRadius
 }
-

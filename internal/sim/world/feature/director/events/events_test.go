@@ -21,3 +21,23 @@ func TestOpenContainerOutcome(t *testing.T) {
 		t.Fatalf("non-chest should not trigger outcome")
 	}
 }
+
+func TestBuildInstantiatePlan(t *testing.T) {
+	p := BuildInstantiatePlan("CRYSTAL_RIFT", nil)
+	if !p.NeedsCenter || p.Radius != 32 || p.Spawn != SpawnCrystalRift {
+		t.Fatalf("unexpected crystal plan: %+v", p)
+	}
+
+	p = BuildInstantiatePlan("BUILDER_EXPO", map[string]any{"theme": "TOWER"})
+	if p.Spawn != SpawnNoticeBoard || p.Headline == "" || p.Body == "" {
+		t.Fatalf("unexpected expo plan: %+v", p)
+	}
+	if p.Body != "主题: TOWER。完成蓝图建造并展示。" {
+		t.Fatalf("expo body mismatch: %q", p.Body)
+	}
+
+	p = BuildInstantiatePlan("UNKNOWN", nil)
+	if p.NeedsCenter || p.Spawn != SpawnNone {
+		t.Fatalf("unknown event should produce empty plan: %+v", p)
+	}
+}

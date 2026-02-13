@@ -1,9 +1,7 @@
 package world
 
 import (
-	"math"
 	"sort"
-	"strconv"
 	"voxelcraft.ai/internal/protocol"
 	"voxelcraft.ai/internal/sim/catalogs"
 	eventspkg "voxelcraft.ai/internal/sim/world/feature/director/events"
@@ -11,19 +9,12 @@ import (
 	metricspkg "voxelcraft.ai/internal/sim/world/feature/director/metrics"
 	runtimepkg "voxelcraft.ai/internal/sim/world/feature/director/runtime"
 	spawnspkg "voxelcraft.ai/internal/sim/world/feature/director/spawns"
+	statspkg "voxelcraft.ai/internal/sim/world/feature/director/stats"
 	respawnpkg "voxelcraft.ai/internal/sim/world/feature/survival/respawn"
 	"voxelcraft.ai/internal/sim/world/logic/blueprint"
 	"voxelcraft.ai/internal/sim/world/logic/directorcenter"
 	"voxelcraft.ai/internal/sim/world/logic/mathx"
 )
-
-type directorMetrics struct {
-	Trade       float64 // 0..1
-	Conflict    float64 // 0..1
-	Exploration float64 // 0..1
-	Inequality  float64 // 0..1 (Gini)
-	PublicInfra float64 // 0..1
-}
 
 func (w *World) systemDirector(nowTick uint64) {
 	next, _ := runtimepkg.Expire(runtimepkg.State{
@@ -101,10 +92,10 @@ func (w *World) baseEventWeights() map[string]float64 {
 	return weights
 }
 
-func (w *World) computeDirectorMetrics(nowTick uint64) directorMetrics {
+func (w *World) computeDirectorMetrics(nowTick uint64) metricspkg.EvalMetrics {
 	agents := len(w.agents)
 	if agents <= 0 {
-		return directorMetrics{}
+		return metricspkg.EvalMetrics{}
 	}
 
 	sum := StatsBucket{}
@@ -134,13 +125,7 @@ func (w *World) computeDirectorMetrics(nowTick uint64) directorMetrics {
 		Wealth:      wealth,
 	})
 
-	return directorMetrics{
-		Trade:       m.Trade,
-		Conflict:    m.Conflict,
-		Exploration: m.Exploration,
-		Inequality:  m.Inequality,
-		PublicInfra: m.PublicInfra,
-	}
+	return m
 }
 
 func (w *World) startEvent(nowTick uint64, eventID string) {
@@ -220,76 +205,38 @@ func (w *World) instantiateEvent(nowTick uint64, eventID string) {
 	w.activeEventCenter = Vec3i{}
 	w.activeEventRadius = 0
 
-	switch eventID {
-	case "CRYSTAL_RIFT":
-		center := w.pickEventCenter(nowTick, eventID)
-		w.activeEventCenter = center
-		w.activeEventRadius = 32
+	params := map[string]any{}
+	if tpl, ok := w.catalogs.Events.ByID[eventID]; ok && tpl.Params != nil {
+		params = tpl.Params
+	}
+	plan := eventspkg.BuildInstantiatePlan(eventID, params)
+	if !plan.NeedsCenter {
+		return
+	}
+	center := w.pickEventCenter(nowTick, eventID)
+	w.activeEventCenter = center
+	w.activeEventRadius = plan.Radius
+
+	didNotice := false
+	switch plan.Spawn {
+	case eventspkg.SpawnCrystalRift:
 		w.spawnCrystalRift(nowTick, center)
-
-	case "DEEP_VEIN":
-		center := w.pickEventCenter(nowTick, eventID)
-		w.activeEventCenter = center
-		w.activeEventRadius = 40
+	case eventspkg.SpawnDeepVein:
 		w.spawnDeepVein(nowTick, center)
-
-	case "RUINS_GATE":
-		center := w.pickEventCenter(nowTick, eventID)
-		w.activeEventCenter = center
-		w.activeEventRadius = 24
+	case eventspkg.SpawnRuinsGate:
 		w.spawnRuinsGate(nowTick, center)
-
-	case "MARKET_WEEK":
-		center := w.pickEventCenter(nowTick, eventID)
-		w.activeEventCenter = center
-		w.activeEventRadius = 32
-		w.spawnEventNoticeBoard(nowTick, center, eventID, "市集周", "市场税临时减免，鼓励交易与签约。")
-
-	case "BLUEPRINT_FAIR":
-		center := w.pickEventCenter(nowTick, eventID)
-		w.activeEventCenter = center
-		w.activeEventRadius = 32
-		w.spawnEventNoticeBoard(nowTick, center, eventID, "蓝图开放日", "分享与复用蓝图将获得额外影响力。")
-
-	case "BUILDER_EXPO":
-		center := w.pickEventCenter(nowTick, eventID)
-		w.activeEventCenter = center
-		w.activeEventRadius = 40
-		theme := "MONUMENT"
-		if tpl, ok := w.catalogs.Events.ByID[eventID]; ok {
-			if v, ok := tpl.Params["theme"]; ok {
-				if s, ok := v.(string); ok && s != "" {
-					theme = s
-				}
-			}
-		}
-		w.spawnEventNoticeBoard(nowTick, center, eventID, "建筑大赛", "主题: "+theme+"。完成蓝图建造并展示。")
-
-	case "FLOOD_WARNING":
-		center := w.pickEventCenter(nowTick, eventID)
-		w.activeEventCenter = center
-		w.activeEventRadius = 40
+	case eventspkg.SpawnFloodWarning:
 		w.spawnFloodWarning(nowTick, center)
-		w.spawnEventNoticeBoard(nowTick, center, eventID, "洪水风险", "低地可能被淹，建议修堤坝与迁移仓库。")
-
-	case "BANDIT_CAMP":
-		center := w.pickEventCenter(nowTick, eventID)
-		w.activeEventCenter = center
-		w.activeEventRadius = 24
+	case eventspkg.SpawnBanditCamp:
 		w.spawnBanditCamp(nowTick, center)
-
-	case "BLIGHT_ZONE":
-		center := w.pickEventCenter(nowTick, eventID)
-		w.activeEventCenter = center
-		w.activeEventRadius = 32
+	case eventspkg.SpawnBlightZone:
 		w.spawnBlightZone(nowTick, center)
-		w.spawnEventNoticeBoard(nowTick, center, eventID, "污染扩散", "在污染区行动会降低体力恢复并加速饥饿。")
-
-	case "CIVIC_VOTE":
-		center := w.pickEventCenter(nowTick, eventID)
-		w.activeEventCenter = center
-		w.activeEventRadius = 32
-		w.spawnEventNoticeBoard(nowTick, center, eventID, "城邦选举/公投", "提出法律并投票将获得额外叙事分。")
+	case eventspkg.SpawnNoticeBoard:
+		didNotice = true
+		w.spawnEventNoticeBoard(nowTick, center, eventID, plan.Headline, plan.Body)
+	}
+	if !didNotice && plan.Headline != "" {
+		w.spawnEventNoticeBoard(nowTick, center, eventID, plan.Headline, plan.Body)
 	}
 }
 
@@ -356,187 +303,85 @@ func (w *World) onContainerOpenedDuringEvent(a *Agent, c *Container, nowTick uin
 	}
 }
 
+func (w *World) applySpawnPlan(nowTick uint64, reason string, plan spawnspkg.Plan) {
+	if plan.Center != nil {
+		w.activeEventCenter = Vec3i{X: plan.Center.X, Y: plan.Center.Y, Z: plan.Center.Z}
+	}
+	for _, p := range plan.Placements {
+		to, ok := w.catalogs.Blocks.Index[p.Block]
+		if !ok {
+			continue
+		}
+		pos := Vec3i{X: p.Pos.X, Y: p.Pos.Y, Z: p.Pos.Z}
+		from := w.chunks.GetBlock(pos)
+		w.chunks.SetBlock(pos, to)
+		w.auditSetBlock(nowTick, "WORLD", pos, from, to, reason)
+	}
+	for _, c := range plan.Containers {
+		pos := Vec3i{X: c.Pos.X, Y: c.Pos.Y, Z: c.Pos.Z}
+		container := w.ensureContainer(pos, c.Type)
+		if container == nil {
+			continue
+		}
+		for item, count := range c.Items {
+			if count <= 0 {
+				continue
+			}
+			container.Inventory[item] += count
+		}
+	}
+	for _, s := range plan.Signs {
+		pos := Vec3i{X: s.Pos.X, Y: s.Pos.Y, Z: s.Pos.Z}
+		sign := w.ensureSign(pos)
+		sign.Text = s.Text
+		sign.UpdatedTick = nowTick
+		sign.UpdatedBy = "WORLD"
+	}
+	for _, post := range plan.BoardPosts {
+		pos := Vec3i{X: post.Pos.X, Y: post.Pos.Y, Z: post.Pos.Z}
+		w.ensureBoard(pos)
+		if b := w.boards[boardIDAt(pos)]; b != nil {
+			b.Posts = append(b.Posts, BoardPost{
+				PostID: w.newPostID(),
+				Author: post.Author,
+				Title:  post.Title,
+				Body:   post.Body,
+				Tick:   nowTick,
+			})
+		}
+	}
+}
+
 func (w *World) spawnCrystalRift(nowTick uint64, center Vec3i) {
-	ore, ok := w.catalogs.Blocks.Index["CRYSTAL_ORE"]
-	if !ok {
-		return
-	}
-	// 2D world: spawn a compact surface cluster on y=0.
-	for _, pp := range spawnspkg.Square(spawnspkg.Pos{X: center.X, Y: 0, Z: center.Z}, 2) {
-		p := Vec3i{X: pp.X, Y: pp.Y, Z: pp.Z}
-		from := w.chunks.GetBlock(p)
-		w.chunks.SetBlock(p, ore)
-		w.auditSetBlock(nowTick, "WORLD", p, from, ore, "EVENT:CRYSTAL_RIFT")
-	}
+	w.applySpawnPlan(nowTick, "EVENT:CRYSTAL_RIFT", spawnspkg.CrystalRiftPlan(spawnspkg.Pos{X: center.X, Y: 0, Z: center.Z}))
 }
 
 func (w *World) spawnDeepVein(nowTick uint64, center Vec3i) {
-	iron, ok1 := w.catalogs.Blocks.Index["IRON_ORE"]
-	copper, ok2 := w.catalogs.Blocks.Index["COPPER_ORE"]
-	if !ok1 || !ok2 {
-		return
-	}
-	// 2D world: spawn a mixed ore patch on y=0.
-	for _, pp := range spawnspkg.Square(spawnspkg.Pos{X: center.X, Y: 0, Z: center.Z}, 3) {
-		p := Vec3i{X: pp.X, Y: pp.Y, Z: pp.Z}
-		to := iron
-		if spawnspkg.DeepVeinIsCopper(pp.X-center.X, pp.Z-center.Z) {
-			to = copper
-		}
-		from := w.chunks.GetBlock(p)
-		w.chunks.SetBlock(p, to)
-		w.auditSetBlock(nowTick, "WORLD", p, from, to, "EVENT:DEEP_VEIN")
-	}
+	w.applySpawnPlan(nowTick, "EVENT:DEEP_VEIN", spawnspkg.DeepVeinPlan(spawnspkg.Pos{X: center.X, Y: 0, Z: center.Z}))
 }
 
 func (w *World) spawnRuinsGate(nowTick uint64, center Vec3i) {
-	brick, okB := w.catalogs.Blocks.Index["BRICK"]
-	chest, okC := w.catalogs.Blocks.Index["CHEST"]
-	if !okB || !okC {
-		return
-	}
-
-	// Build a small ring with a loot chest in the center.
-	p0 := Vec3i{X: center.X, Y: 0, Z: center.Z}
-
-	for _, pp := range spawnspkg.Square(spawnspkg.Pos{X: p0.X, Y: p0.Y, Z: p0.Z}, 1) {
-		p := Vec3i{X: pp.X, Y: pp.Y, Z: pp.Z}
-		from := w.chunks.GetBlock(p)
-		to := brick
-		if pp.X == p0.X && pp.Z == p0.Z {
-			to = chest
-		}
-		w.chunks.SetBlock(p, to)
-		w.auditSetBlock(nowTick, "WORLD", p, from, to, "EVENT:RUINS_GATE")
-		if pp.X == p0.X && pp.Z == p0.Z {
-			c := w.ensureContainer(p, "CHEST")
-			c.Inventory["CRYSTAL_SHARD"] += 2
-			c.Inventory["IRON_INGOT"] += 4
-			c.Inventory["COPPER_INGOT"] += 4
-		}
-	}
-
-	// Use the chest position as the event center marker.
-	w.activeEventCenter = p0
+	w.applySpawnPlan(nowTick, "EVENT:RUINS_GATE", spawnspkg.RuinsGatePlan(spawnspkg.Pos{X: center.X, Y: 0, Z: center.Z}))
 }
 
 func (w *World) spawnEventNoticeBoard(nowTick uint64, center Vec3i, eventID string, headline string, body string) {
-	board, okB := w.catalogs.Blocks.Index["BULLETIN_BOARD"]
-	sign, okS := w.catalogs.Blocks.Index["SIGN"]
-	if !okB || !okS {
-		return
-	}
-
-	boardPos := Vec3i{X: center.X, Y: 0, Z: center.Z}
-	signPos := Vec3i{X: center.X + 1, Y: 0, Z: center.Z}
-
-	from := w.chunks.GetBlock(boardPos)
-	w.chunks.SetBlock(boardPos, board)
-	w.auditSetBlock(nowTick, "WORLD", boardPos, from, board, "EVENT:"+eventID)
-	w.ensureBoard(boardPos)
-	if b := w.boards[boardIDAt(boardPos)]; b != nil {
-		postID := w.newPostID()
-		b.Posts = append(b.Posts, BoardPost{
-			PostID: postID,
-			Author: "WORLD",
-			Title:  headline,
-			Body:   body,
-			Tick:   nowTick,
-		})
-	}
-
-	from2 := w.chunks.GetBlock(signPos)
-	w.chunks.SetBlock(signPos, sign)
-	w.auditSetBlock(nowTick, "WORLD", signPos, from2, sign, "EVENT:"+eventID)
-	s := w.ensureSign(signPos)
-	s.Text = headline
-	s.UpdatedTick = nowTick
-	s.UpdatedBy = "WORLD"
+	w.applySpawnPlan(nowTick, "EVENT:"+eventID, spawnspkg.EventNoticeBoardPlan(spawnspkg.Pos{X: center.X, Y: 0, Z: center.Z}, headline, body))
 }
 
 func (w *World) spawnFloodWarning(nowTick uint64, center Vec3i) {
-	water, ok := w.catalogs.Blocks.Index["WATER"]
-	if !ok {
-		return
-	}
-	for _, pp := range spawnspkg.Square(spawnspkg.Pos{X: center.X, Y: 0, Z: center.Z}, 2) {
-		p := Vec3i{X: pp.X, Y: pp.Y, Z: pp.Z}
-		from := w.chunks.GetBlock(p)
-		w.chunks.SetBlock(p, water)
-		w.auditSetBlock(nowTick, "WORLD", p, from, water, "EVENT:FLOOD_WARNING")
-	}
+	w.applySpawnPlan(nowTick, "EVENT:FLOOD_WARNING", spawnspkg.FloodWarningPlan(spawnspkg.Pos{X: center.X, Y: 0, Z: center.Z}))
 }
 
 func (w *World) spawnBlightZone(nowTick uint64, center Vec3i) {
-	gravel, ok := w.catalogs.Blocks.Index["GRAVEL"]
-	if !ok {
-		return
-	}
-	for _, pp := range spawnspkg.Diamond(spawnspkg.Pos{X: center.X, Y: 0, Z: center.Z}, 4) {
-		dx := pp.X - center.X
-		dz := pp.Z - center.Z
-		if mathx.AbsInt(dx) > 3 || mathx.AbsInt(dz) > 3 {
-			continue // keep legacy footprint
-		}
-		p := Vec3i{X: pp.X, Y: pp.Y, Z: pp.Z}
-		from := w.chunks.GetBlock(p)
-		w.chunks.SetBlock(p, gravel)
-		w.auditSetBlock(nowTick, "WORLD", p, from, gravel, "EVENT:BLIGHT_ZONE")
-	}
+	w.applySpawnPlan(nowTick, "EVENT:BLIGHT_ZONE", spawnspkg.BlightZonePlan(spawnspkg.Pos{X: center.X, Y: 0, Z: center.Z}))
 }
 
 func (w *World) spawnBanditCamp(nowTick uint64, center Vec3i) {
-	brick, okB := w.catalogs.Blocks.Index["BRICK"]
-	chest, okC := w.catalogs.Blocks.Index["CHEST"]
-	sign, okS := w.catalogs.Blocks.Index["SIGN"]
-	if !okB || !okC || !okS {
-		return
-	}
-
-	p0 := Vec3i{X: center.X, Y: 0, Z: center.Z}
-
-	// Build a simple camp ring with a loot chest in the center.
-	for _, pp := range spawnspkg.Square(spawnspkg.Pos{X: p0.X, Y: p0.Y, Z: p0.Z}, 2) {
-		p := Vec3i{X: pp.X, Y: pp.Y, Z: pp.Z}
-		dx := pp.X - p0.X
-		dz := pp.Z - p0.Z
-		from := w.chunks.GetBlock(p)
-		to := w.chunks.gen.Air
-		if dx == 0 && dz == 0 {
-			to = chest
-		} else if mathx.AbsInt(dx) == 2 || mathx.AbsInt(dz) == 2 {
-			to = brick
-		}
-		w.chunks.SetBlock(p, to)
-		w.auditSetBlock(nowTick, "WORLD", p, from, to, "EVENT:BANDIT_CAMP")
-		if dx == 0 && dz == 0 {
-			c := w.ensureContainer(p, "CHEST")
-			c.Inventory["IRON_INGOT"] += 6
-			c.Inventory["COPPER_INGOT"] += 4
-			c.Inventory["CRYSTAL_SHARD"] += 1
-			c.Inventory["BREAD"] += 2
-		}
-	}
-
-	// Sign marker.
-	sp := Vec3i{X: p0.X + 3, Y: p0.Y, Z: p0.Z}
-	fromS := w.chunks.GetBlock(sp)
-	w.chunks.SetBlock(sp, sign)
-	w.auditSetBlock(nowTick, "WORLD", sp, fromS, sign, "EVENT:BANDIT_CAMP")
-	s := w.ensureSign(sp)
-	s.Text = "BANDIT CAMP"
-	s.UpdatedTick = nowTick
-	s.UpdatedBy = "WORLD"
-
-	// Use chest position as the event center marker.
-	w.activeEventCenter = p0
+	w.applySpawnPlan(nowTick, "EVENT:BANDIT_CAMP", spawnspkg.BanditCampPlan(spawnspkg.Pos{X: center.X, Y: 0, Z: center.Z}))
 }
 
 func (w *World) maybeSeasonRollover(nowTick uint64) {
-	seasonLen := uint64(w.cfg.ResetEveryTicks)
-	if seasonLen == 0 {
-		seasonLen = uint64(w.cfg.SeasonLengthTicks)
-	}
+	seasonLen := runtimepkg.SeasonLengthTicks(w.cfg.ResetEveryTicks, w.cfg.SeasonLengthTicks)
 	if seasonLen == 0 || nowTick == 0 || nowTick%seasonLen != 0 {
 		return
 	}
@@ -556,42 +401,19 @@ func (w *World) maybeSeasonRollover(nowTick uint64) {
 }
 
 func (w *World) seasonIndex(nowTick uint64) int {
-	seasonLen := uint64(w.cfg.ResetEveryTicks)
-	if seasonLen == 0 {
-		seasonLen = uint64(w.cfg.SeasonLengthTicks)
-	}
-	if seasonLen == 0 {
-		return 1
-	}
-	return int(nowTick/seasonLen) + 1
+	return runtimepkg.SeasonIndex(nowTick, w.cfg.ResetEveryTicks, w.cfg.SeasonLengthTicks)
 }
 
 func (w *World) seasonDay(nowTick uint64) int {
-	dayTicks := uint64(w.cfg.DayTicks)
-	if dayTicks == 0 {
-		return 1
-	}
-	seasonLen := uint64(w.cfg.ResetEveryTicks)
-	if seasonLen == 0 {
-		seasonLen = uint64(w.cfg.SeasonLengthTicks)
-	}
-	seasonDays := seasonLen / dayTicks
-	if seasonDays == 0 {
-		seasonDays = 1
-	}
-	return int((nowTick/dayTicks)%seasonDays) + 1
+	return runtimepkg.SeasonDay(nowTick, w.cfg.DayTicks, w.cfg.ResetEveryTicks, w.cfg.SeasonLengthTicks)
 }
 
 func (w *World) maybeWorldResetNotice(nowTick uint64) {
-	cycle := uint64(w.cfg.ResetEveryTicks)
+	ok, resetTick := runtimepkg.ShouldWorldResetNotice(nowTick, w.cfg.ResetEveryTicks, w.cfg.ResetNoticeTicks)
+	if !ok {
+		return
+	}
 	notice := uint64(w.cfg.ResetNoticeTicks)
-	if cycle == 0 || notice == 0 || notice >= cycle || nowTick == 0 {
-		return
-	}
-	if nowTick%cycle != cycle-notice {
-		return
-	}
-	resetTick := nowTick + notice
 	for _, a := range w.agents {
 		a.AddEvent(protocol.Event{
 			"t":          nowTick,
@@ -688,75 +510,10 @@ func (w *World) resetWorldForNewSeason(nowTick uint64, newSeason int, archiveTic
 }
 
 func (w *World) resetAgentForNewSeason(nowTick uint64, a *Agent) {
-	// Cancel ongoing tasks.
-	a.MoveTask = nil
-	a.WorkTask = nil
-
-	// Reset physical attributes.
-	a.HP = 20
-	a.Hunger = 20
-	a.StaminaMilli = 1000
-	a.Yaw = 0
-
-	// Reset inventory to starter kit; preserve memory and reputation.
-	a.Inventory = map[string]int{
-		"PLANK":   20,
-		"COAL":    10,
-		"STONE":   20,
-		"BERRIES": 10,
-	}
-
-	// Reset equipment (MVP).
-	a.Equipment = Equipment{MainHand: "NONE", Armor: [4]string{"NONE", "NONE", "NONE", "NONE"}}
-
-	// Clear ephemeral queues.
-	a.Events = nil
-	a.PendingMemory = nil
-
-	// Reset anti-exploit windows so novelty/fun can be earned per season.
-	a.ResetRateLimits()
-	a.ResetFunTracking()
-	a.Fun = FunScore{}
-
-	// Respawn at deterministic spawn point (depends on agent number) on new terrain.
-	n := respawnpkg.AgentNumber(a.ID)
-	spawnXZ := n * 2
-	spawnX := spawnXZ
-	spawnZ := -spawnXZ
-	spawnX, spawnZ = w.findSpawnAir(spawnX, spawnZ, 8)
-	a.Pos = Vec3i{X: spawnX, Y: 0, Z: spawnZ}
-
+	respawnpkg.ResetForSeason(a, w.findSpawnAir)
 	// Award novelty for the first biome arrival in the season.
 	w.funOnBiome(a, nowTick)
 }
-
-func minInt(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
-func minFloat(a, b float64) float64 {
-	if a < b {
-		return a
-	}
-	return b
-}
-
-func socialFunFactor(a *Agent) float64 {
-	rep := a.RepTrade
-	if rep >= 500 {
-		return 1.0
-	}
-	if rep <= 0 {
-		return 0.5
-	}
-	return 0.5 + 0.5*(float64(rep)/500.0)
-}
-
-func itoaU64(v uint64) string { return strconv.FormatUint(v, 10) }
-func itoaI(v int) string      { return strconv.Itoa(v) }
 
 func (w *World) funOnBiome(a *Agent, nowTick uint64) {
 	if a == nil {
@@ -807,8 +564,7 @@ func (w *World) funOnTrade(a *Agent, nowTick uint64) {
 	}
 	base := 2
 	// Low reputation makes social fun less valuable (anti-scam signal).
-	factor := socialFunFactor(a)
-	base = int(math.Round(float64(base) * factor))
+	base = statspkg.ScaleByFactor(base, statspkg.SocialFunFactor(a.RepTrade))
 	if base <= 0 {
 		return
 	}
@@ -823,8 +579,7 @@ func (w *World) funOnContractComplete(a *Agent, nowTick uint64, kind string) {
 	if kind == "BUILD" {
 		base = 7
 	}
-	factor := socialFunFactor(a)
-	base = int(math.Round(float64(base) * factor))
+	base = statspkg.ScaleByFactor(base, statspkg.SocialFunFactor(a.RepTrade))
 	if base <= 0 {
 		return
 	}
@@ -995,7 +750,7 @@ func (w *World) systemFun(nowTick uint64) {
 			if users <= 0 {
 				continue
 			}
-			pts := int(math.Round(minFloat(15, 3*math.Sqrt(float64(users)))))
+			pts := statspkg.InfluenceUsagePoints(users)
 			if pts > 0 {
 				w.addFun(builder, nowTick, "INFLUENCE", "infra_usage_day", builder.FunDecayDelta("influence:infra_usage_day", pts, nowTick, uint64(w.cfg.FunDecayWindowTicks), w.cfg.FunDecayBase))
 			}
@@ -1011,7 +766,7 @@ func (w *World) registerStructure(nowTick uint64, builderID string, blueprintID 
 	}
 	rot := blueprint.NormalizeRotation(rotation)
 
-	id := fmtStructureID(builderID, nowTick, blueprintID, anchor)
+	id := statspkg.StructureID(builderID, nowTick, blueprintID, anchor.X, anchor.Y, anchor.Z)
 
 	// Compute actual bounds from rotated block positions (rotation affects Min/Max).
 	min := Vec3i{X: anchor.X, Y: anchor.Y, Z: anchor.Z}
@@ -1060,11 +815,6 @@ func (w *World) registerStructure(nowTick uint64, builderID string, blueprintID 
 	}
 }
 
-func fmtStructureID(builderID string, nowTick uint64, blueprintID string, anchor Vec3i) string {
-	// Deterministic, stable id (no counters) so snapshots and replays match.
-	return "STRUCT_" + builderID + "_" + itoaU64(nowTick) + "_" + blueprintID + "_" + itoaI(anchor.X) + "_" + itoaI(anchor.Y) + "_" + itoaI(anchor.Z)
-}
-
 func (w *World) recordStructureUsage(agentID string, pos Vec3i, nowTick uint64) {
 	if len(w.structures) == 0 || agentID == "" {
 		return
@@ -1084,23 +834,10 @@ func (w *World) recordStructureUsage(agentID string, pos Vec3i, nowTick uint64) 
 }
 
 func (w *World) structureUniqueUsers(s *Structure, nowTick uint64, window uint64) int {
-	if s == nil || len(s.UsedBy) == 0 {
+	if s == nil {
 		return 0
 	}
-	cutoff := uint64(0)
-	if nowTick > window {
-		cutoff = nowTick - window
-	}
-	n := 0
-	for aid, last := range s.UsedBy {
-		if aid == "" || aid == s.BuilderID {
-			continue
-		}
-		if last >= cutoff {
-			n++
-		}
-	}
-	return n
+	return statspkg.StructureUniqueUsers(s.UsedBy, s.BuilderID, nowTick, window)
 }
 
 func (w *World) structureCreationScore(bp *catalogs.BlueprintDef, s *Structure, nowTick uint64) int {
@@ -1127,32 +864,17 @@ func (w *World) structureCreationScore(bp *catalogs.BlueprintDef, s *Structure, 
 		}
 	}
 
-	base := 5
-	complexity := int(math.Round(math.Log(1+float64(len(unique))) * 2))
-	modules := 0
-	if hasStorage {
-		modules += 2
-	}
-	if hasLight {
-		modules += 2
-	}
-	if hasWorkshop {
-		modules += 2
-	}
-	if hasGov {
-		modules += 2
-	}
-
 	stable := w.structureStable(bp, s.Anchor, s.Rotation)
-	stability := 0
-	if stable {
-		stability = 3
-	}
-
 	users := w.structureUniqueUsers(s, nowTick, uint64(w.cfg.DayTicks))
-	usageBonus := minInt(10, 2*users)
-
-	return base + complexity + modules + stability + usageBonus
+	return statspkg.CreationScore(statspkg.CreationScoreInput{
+		UniqueBlockTypes: len(unique),
+		HasStorage:       hasStorage,
+		HasLight:         hasLight,
+		HasWorkshop:      hasWorkshop,
+		HasGovernance:    hasGov,
+		Stable:           stable,
+		Users:            users,
+	})
 }
 
 func (w *World) structureStable(bp *catalogs.BlueprintDef, anchor Vec3i, rotation int) bool {
@@ -1160,59 +882,13 @@ func (w *World) structureStable(bp *catalogs.BlueprintDef, anchor Vec3i, rotatio
 		return true
 	}
 	rot := blueprint.NormalizeRotation(rotation)
-	positions := make([]Vec3i, 0, len(bp.Blocks))
-	index := map[Vec3i]int{}
-	for i, b := range bp.Blocks {
+	positions := make([]statspkg.Vec3, 0, len(bp.Blocks))
+	for _, b := range bp.Blocks {
 		off := blueprint.RotateOffset(b.Pos, rot)
-		p := Vec3i{X: anchor.X + off[0], Y: anchor.Y + off[1], Z: anchor.Z + off[2]}
+		p := statspkg.Vec3{X: anchor.X + off[0], Y: anchor.Y + off[1], Z: anchor.Z + off[2]}
 		positions = append(positions, p)
-		index[p] = i
 	}
-	visited := make([]bool, len(positions))
-	queue := make([]int, 0, len(positions))
-
-	// Seed BFS with blocks that have ground support (non-air below).
-	for i, p := range positions {
-		if p.Y <= 1 {
-			visited[i] = true
-			queue = append(queue, i)
-			continue
-		}
-		below := Vec3i{X: p.X, Y: p.Y - 1, Z: p.Z}
-		if _, ok := index[below]; ok {
-			// Supported by structure; not ground.
-			continue
-		}
-		if w.chunks.GetBlock(below) != w.chunks.gen.Air {
-			visited[i] = true
-			queue = append(queue, i)
-		}
-	}
-
-	dirs := []Vec3i{{X: 1}, {X: -1}, {Y: 1}, {Y: -1}, {Z: 1}, {Z: -1}}
-	for len(queue) > 0 {
-		i := queue[0]
-		queue = queue[1:]
-		p := positions[i]
-		for _, d := range dirs {
-			np := Vec3i{X: p.X + d.X, Y: p.Y + d.Y, Z: p.Z + d.Z}
-			ni, ok := index[np]
-			if !ok || visited[ni] {
-				continue
-			}
-			visited[ni] = true
-			queue = append(queue, ni)
-		}
-	}
-
-	count := 0
-	for _, v := range visited {
-		if v {
-			count++
-		}
-	}
-	if count == 0 {
-		return false
-	}
-	return float64(count)/float64(len(visited)) >= 0.95
+	return statspkg.IsStructureStable(positions, func(x, y, z int) bool {
+		return w.chunks.GetBlock(Vec3i{X: x, Y: y, Z: z}) != w.chunks.gen.Air
+	})
 }

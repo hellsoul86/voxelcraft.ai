@@ -37,3 +37,26 @@ func TestShouldEvaluate(t *testing.T) {
 		t.Fatalf("tick 3001 should not evaluate")
 	}
 }
+
+func TestSeasonHelpers(t *testing.T) {
+	if got := SeasonLengthTicks(0, 42000); got != 42000 {
+		t.Fatalf("expected fallback season length, got %d", got)
+	}
+	if got := SeasonIndex(0, 42000, 0); got != 1 {
+		t.Fatalf("expected season index 1 at tick 0, got %d", got)
+	}
+	if got := SeasonDay(6000, 6000, 42000, 0); got != 2 {
+		t.Fatalf("expected season day 2, got %d", got)
+	}
+}
+
+func TestShouldWorldResetNotice(t *testing.T) {
+	ok, resetTick := ShouldWorldResetNotice(1000, 42000, 300)
+	if ok || resetTick != 0 {
+		t.Fatalf("unexpected notice outside window")
+	}
+	ok, resetTick = ShouldWorldResetNotice(41700, 42000, 300)
+	if !ok || resetTick != 42000 {
+		t.Fatalf("expected reset notice at cycle-notice, got ok=%v resetTick=%d", ok, resetTick)
+	}
+}
