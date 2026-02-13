@@ -23,11 +23,11 @@ Trigger:
 - manual `workflow_dispatch`
 
 Pipeline steps:
-1. Run `scripts/release_gate.sh --skip-race`
+1. Run `scripts/release_gate.sh` (includes race tests)
 2. Install Cloudflare deployment dependencies (`cloudflare/package.json`)
 3. Render `cloudflare/wrangler.generated.toml` from placeholders
 4. Apply D1 schema (`cloudflare/d1/schema.sql`)
-5. Deploy Worker + Container (`wrangler deploy --env staging`)
+5. Deploy Worker + Container (`wrangler deploy --env staging`) with retry on transient domains API `502`
 
 ## Required GitHub Actions config
 

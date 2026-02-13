@@ -21,11 +21,15 @@ Endpoint:
 
 ---
 
-## Auth (Optional HMAC)
+## Auth (HMAC)
 
-By default the sidecar runs without auth (dev-friendly).
+Recommended and production default: use HMAC auth.
 
-If started with `-hmac-secret <secret>`, every `POST /mcp` request must include:
+- In `DEPLOY_ENV=staging|production`, sidecar now **requires** HMAC by default.
+- Override only if explicitly needed via `VC_MCP_REQUIRE_HMAC=false`.
+- Provide secret via `-hmac-secret <secret>` or `VC_MCP_HMAC_SECRET`.
+
+When HMAC is enabled, every `POST /mcp` request must include:
 
 ```text
 x-agent-id: <session_key>
@@ -45,6 +49,7 @@ ${x-ts}\n${METHOD}\n${PATHNAME}\n${RAW_BODY}
 Notes:
 - `PATHNAME` is the URL path only (e.g. `/mcp`).
 - `RAW_BODY` must be exactly the request body string you send.
+- If HMAC is disabled for local dev, bind MCP to loopback only (`127.0.0.1` / `::1` / `localhost`).
 
 ---
 

@@ -4,9 +4,12 @@ import (
 	"context"
 	"flag"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -18,13 +21,31 @@ func main() {
 	var (
 		listen     = flag.String("listen", "127.0.0.1:8090", "http listen address")
 		worldWSURL = flag.String("world-ws-url", "ws://127.0.0.1:8080/v1/ws", "voxelcraft ws url")
-		hmacSecret = flag.String("hmac-secret", "", "optional hmac secret; when set, requires x-agent-id/x-ts/x-signature")
+		hmacSecret = flag.String("hmac-secret", "", "hmac secret (or set VC_MCP_HMAC_SECRET)")
 		stateFile  = flag.String("state-file", "./data/mcp/sessions.json", "path to persisted session state (resume tokens)")
 		maxSess    = flag.Int("max-sessions", 256, "max concurrent sessions")
 	)
 	flag.Parse()
 
+	if strings.TrimSpace(*hmacSecret) == "" {
+		*hmacSecret = strings.TrimSpace(os.Getenv("VC_MCP_HMAC_SECRET"))
+	}
+	requireHMAC := envBoolWithDefault("VC_MCP_REQUIRE_HMAC", defaultRequireMCPHMAC())
+	if requireHMAC && strings.TrimSpace(*hmacSecret) == "" {
+		log.Fatalf("[mcp] hmac secret required (set -hmac-secret or VC_MCP_HMAC_SECRET)")
+	}
+	if strings.TrimSpace(*hmacSecret) == "" && !isLoopbackListenAddress(*listen) {
+		log.Fatalf("[mcp] refusing insecure MCP bind on non-loopback address %q without hmac secret", *listen)
+	}
+
 	logger := log.New(os.Stdout, "[mcp] ", log.LstdFlags|log.Lmicroseconds)
+	authMode := "none"
+	if strings.TrimSpace(*hmacSecret) == "" {
+		authMode = "none(loopback-only)"
+	} else {
+		authMode = "hmac"
+	}
+	logger.Printf("auth_mode=%s require_hmac=%t", authMode, requireHMAC)
 
 	br, err := bridge.NewManager(bridge.Config{
 		WorldWSURL:  *worldWSURL,
@@ -75,5 +96,43 @@ func signalContext() (context.Context, context.CancelFunc) {
 		cancel()
 	}()
 	return ctx, cancel
+}
+
+func defaultRequireMCPHMAC() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("DEPLOY_ENV"))) {
+	case "staging", "production":
+		return true
+	default:
+		return false
+	}
+}
+
+func envBoolWithDefault(key string, def bool) bool {
+	v := strings.TrimSpace(os.Getenv(key))
+	if v == "" {
+		return def
+	}
+	b, err := strconv.ParseBool(v)
+	if err != nil {
+		return def
+	}
+	return b
+}
+
+func isLoopbackListenAddress(addr string) bool {
+	host := strings.TrimSpace(addr)
+	if h, _, err := net.SplitHostPort(addr); err == nil {
+		host = strings.TrimSpace(h)
+	}
+	host = strings.Trim(strings.TrimSpace(host), "[]")
+	if host == "" {
+		return false
+	}
+	hostLower := strings.ToLower(host)
+	if hostLower == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(hostLower)
+	return ip != nil && ip.IsLoopback()
 }
 

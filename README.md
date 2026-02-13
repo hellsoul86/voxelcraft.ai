@@ -34,8 +34,12 @@ go run ./cmd/bot -url ws://localhost:8080/v1/ws -name bot1
 
 Run MCP sidecar (for OpenClaw/ClawHub-style agents):
 ```bash
-go run ./cmd/mcp -listen 127.0.0.1:8090 -world-ws-url ws://127.0.0.1:8080/v1/ws
+go run ./cmd/mcp -listen 127.0.0.1:8090 -world-ws-url ws://127.0.0.1:8080/v1/ws -hmac-secret "$VC_MCP_HMAC_SECRET"
 ```
+
+MCP auth defaults:
+- local/dev: HMAC optional (but non-HMAC mode is loopback-only)
+- `DEPLOY_ENV=staging|production`: HMAC required by default
 
 MCP smoke test:
 ```bash
@@ -66,6 +70,8 @@ HTTP surface toggles:
 - `VC_ENABLE_PPROF_HTTP` (default: `false`)
 - `VC_WS_ALLOW_ANY_ORIGIN` (default: `true` locally, `false` in `staging`/`production`)
 - `VC_OBSERVER_ALLOW_ANY_ORIGIN` (default: `true` locally, `false` in `staging`/`production`)
+- `VC_MCP_REQUIRE_HMAC` (default: `false` locally, `true` in `staging`/`production`)
+- `VC_MCP_HMAC_SECRET` (MCP sidecar HMAC secret; equivalent to `-hmac-secret`)
 
 Default reset guard in `configs/worlds.yaml`:
 - `OVERWORLD`, `CITY_HUB`: reset disabled (`403`)
@@ -114,20 +120,21 @@ Performance sentinel thresholds (optional env overrides):
 Four workflows are wired:
 
 - `CI Fast` (`.github/workflows/ci-fast.yml`)
-  - triggers on PR and push to `main/master`
+  - triggers on PR and push to `main/staging` (plus legacy `master`)
   - runs `scripts/release_gate.sh --skip-race`
   - intended for fast feedback
 
 - `CI Full` (`.github/workflows/ci-full.yml`)
-  - triggers on push to `main/master`, daily schedule, and manual dispatch
+  - triggers on push to `main/staging` (plus legacy `master`), daily schedule, and manual dispatch
   - runs `scripts/release_gate.sh` (includes `-race`)
   - manual dispatch can enable optional `voxelcraft.agent` e2e + swarm
   - agent repo defaults to `<owner>/voxelcraft.agent` and can be overridden by input
 
 - `Deploy Cloudflare Staging` (`.github/workflows/deploy-cloudflare-staging.yml`)
   - triggers on push to `staging` (deploy-relevant paths) and manual dispatch
-  - runs `scripts/release_gate.sh --skip-race` before deployment
+  - runs `scripts/release_gate.sh` (with `-race`) before deployment
   - deploys Worker + Container image + Durable Object migration + D1 schema
+  - auto-retries transient Cloudflare domains API `502` failures during `wrangler deploy`
   - requires GitHub Actions config:
     - repository secret: `CLOUDFLARE_API_TOKEN`
     - repository variable: `CLOUDFLARE_ACCOUNT_ID`
@@ -136,8 +143,9 @@ Four workflows are wired:
 
 - `Deploy Cloudflare Production` (`.github/workflows/deploy-cloudflare-production.yml`)
   - triggers automatically on push to `main` (deploy-relevant paths) and manual dispatch
-  - runs `scripts/release_gate.sh --skip-race` before deployment
+  - runs `scripts/release_gate.sh` (with `-race`) before deployment
   - deploys Worker + Container image + Durable Object migration + D1 schema
+  - auto-retries transient Cloudflare domains API `502` failures during `wrangler deploy`
   - requires GitHub Actions config:
     - repository secret: `CLOUDFLARE_API_TOKEN`
     - repository variable: `CLOUDFLARE_ACCOUNT_ID`
