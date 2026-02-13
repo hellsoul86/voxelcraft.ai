@@ -41,6 +41,17 @@ Suggested names (prefix `voxelcraft-ai-*`):
 - Worker: `voxelcraft-ai-staging`
 - D1 database: `voxelcraft-ai-staging`
 - R2 bucket: `voxelcraft-ai-staging-state`
+- Custom domain: `staging-api.voxelcraft.ai`
+
+Custom domain is configured in `cloudflare/wrangler.toml` via:
+
+```toml
+[[env.staging.routes]]
+pattern = "staging-api.voxelcraft.ai"
+custom_domain = true
+```
+
+Cloudflare will create DNS records/certificates automatically when the deploy token has the required zone permissions.
 
 ## Optional manual bootstrap commands
 

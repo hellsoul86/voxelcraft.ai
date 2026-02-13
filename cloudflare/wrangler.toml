@@ -31,3 +31,7 @@ database_id = "__D1_DATABASE_ID__"
 [[env.staging.r2_buckets]]
 binding = "VOXEL_R2"
 bucket_name = "__R2_BUCKET_NAME__"
+
+[[env.staging.routes]]
+pattern = "staging-api.voxelcraft.ai"
+custom_domain = true
