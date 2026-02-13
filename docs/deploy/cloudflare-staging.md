@@ -18,7 +18,7 @@ This document describes the staging deployment path for `voxelcraft.ai` using Cl
 Workflow file: `.github/workflows/deploy-cloudflare-staging.yml`
 
 Trigger:
-- `push` to `main` / `master` (selected paths)
+- `push` to `staging` (selected paths)
 - manual `workflow_dispatch`
 
 Pipeline steps:

@@ -119,7 +119,7 @@ Three workflows are wired:
   - agent repo defaults to `<owner>/voxelcraft.agent` and can be overridden by input
 
 - `Deploy Cloudflare Staging` (`.github/workflows/deploy-cloudflare-staging.yml`)
-  - triggers on push to `main/master` (deploy-relevant paths) and manual dispatch
+  - triggers on push to `staging` (deploy-relevant paths) and manual dispatch
   - runs `scripts/release_gate.sh --skip-race` before deployment
   - deploys Worker + Container image + Durable Object migration + D1 schema
   - requires GitHub Actions config:
