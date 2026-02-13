@@ -68,6 +68,12 @@ npx wrangler r2 bucket create voxelcraft-ai-staging-state
 
 Then set the returned D1 `database_id` and R2 bucket name as environment variables in GitHub Actions (`staging`).
 
+## Release flow
+
+- Commit to `staging` and validate the deployment at `staging-api.voxelcraft.ai`.
+- After verification, merge `staging` into `main`.
+- Push on `main` triggers automatic production deployment (`api.voxelcraft.ai`).
+
 ## Runtime diagnostics endpoints
 
 - `GET /healthz` (from Go server)

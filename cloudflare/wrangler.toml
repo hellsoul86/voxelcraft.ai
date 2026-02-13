@@ -35,3 +35,32 @@ bucket_name = "__R2_BUCKET_NAME__"
 [[env.staging.routes]]
 pattern = "staging-api.voxelcraft.ai"
 custom_domain = true
+
+[env.production]
+name = "voxelcraft-ai-production"
+
+[[env.production.containers]]
+class_name = "WorldCoordinator"
+image = "../Dockerfile.cloudflare"
+max_instances = 6
+
+[[env.production.durable_objects.bindings]]
+name = "VOXEL_WORLD"
+class_name = "WorldCoordinator"
+
+[env.production.vars]
+DEPLOY_ENV = "production"
+DEFAULT_WORLD_ID = "world_1"
+
+[[env.production.d1_databases]]
+binding = "VOXEL_D1"
+database_name = "voxelcraft-ai-production"
+database_id = "__D1_DATABASE_ID__"
+
+[[env.production.r2_buckets]]
+binding = "VOXEL_R2"
+bucket_name = "__R2_BUCKET_NAME__"
+
+[[env.production.routes]]
+pattern = "api.voxelcraft.ai"
+custom_domain = true

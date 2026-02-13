@@ -1,0 +1,67 @@
+# Cloudflare Production Deployment (Containers + Durable Objects + D1 + R2)
+
+This document describes the production deployment path for `voxelcraft.ai` using Cloudflare.
+
+## Architecture
+
+- **Cloudflare Worker**: public HTTP/WS entrypoint.
+- **Durable Object (Container-backed)**: `WorldCoordinator` routes requests by `world_id` to container instances.
+- **Cloudflare Containers**: run the Go server (`cmd/server`) from `Dockerfile.cloudflare`.
+- **D1**: stores request metadata (`world_heads`) for quick state visibility.
+- **R2**: stores the latest world head JSON (`worlds/<world_id>/head.json`).
+
+## GitHub Actions workflow
+
+Workflow file: `.github/workflows/deploy-cloudflare-production.yml`
+
+Trigger:
+- `push` to `main` (selected paths, automatic production deployment)
+- manual `workflow_dispatch`
+
+Pipeline steps:
+1. Run `scripts/release_gate.sh --skip-race`
+2. Install Cloudflare deployment dependencies (`cloudflare/package.json`)
+3. Render `cloudflare/wrangler.generated.toml` from placeholders
+4. Apply D1 schema (`cloudflare/d1/schema.sql`)
+5. Deploy Worker + Container (`wrangler deploy --env production`)
+
+## Required GitHub Actions config
+
+Repository-level:
+- Secret: `CLOUDFLARE_API_TOKEN`
+- Variable: `CLOUDFLARE_ACCOUNT_ID`
+
+Environment-level (`production`):
+- Variable: `CLOUDFLARE_D1_DATABASE_ID`
+- Variable: `CLOUDFLARE_R2_BUCKET`
+
+The deploy workflow is bound to `environment: production`.
+
+## Production resource naming
+
+Suggested names:
+- Worker: `voxelcraft-ai-production`
+- D1 database: `voxelcraft-ai-production`
+- R2 bucket: `voxelcraft-ai-production-state`
+- Custom domain: `api.voxelcraft.ai`
+
+Custom domain is configured in `cloudflare/wrangler.toml` via:
+
+```toml
+[[env.production.routes]]
+pattern = "api.voxelcraft.ai"
+custom_domain = true
+```
+
+## Release flow
+
+- Commit to `staging` for pre-release verification.
+- Validate `staging-api.voxelcraft.ai`.
+- Merge `staging` into `main`.
+- Push on `main` automatically deploys production.
+
+## Runtime diagnostics endpoints
+
+- `GET /healthz`
+- `GET /_cf/persistence/healthz`
+- `GET /_cf/persistence/head?world_id=world_1`
