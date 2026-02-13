@@ -16,8 +16,10 @@ Key idea:
 http://127.0.0.1:8090
 ```
 
-Endpoint:
+Endpoints:
 - `POST /mcp`
+- `GET /healthz`
+- `GET /readyz`
 
 ---
 
@@ -28,12 +30,14 @@ Recommended and production default: use HMAC auth.
 - In `DEPLOY_ENV=staging|production`, sidecar now **requires** HMAC by default.
 - Override only if explicitly needed via `VC_MCP_REQUIRE_HMAC=false`.
 - Provide secret via `-hmac-secret <secret>` or `VC_MCP_HMAC_SECRET`.
+- Legacy signature mode (no `x-nonce`) is controlled by `VC_MCP_HMAC_ALLOW_LEGACY` (default local `true`, staging/prod `false`).
 
 When HMAC is enabled, every `POST /mcp` request must include:
 
 ```text
 x-agent-id: <session_key>
 x-ts: <unix_ms_timestamp>
+x-nonce: <unique_nonce_per_request>
 x-signature: <hmac_sha256_hex_lowercase>
 ```
 
@@ -43,11 +47,12 @@ Time window:
 Canonical string (byte-for-byte):
 
 ```text
-${x-ts}\n${METHOD}\n${PATHNAME}\n${RAW_BODY}
+${x-ts}\n${METHOD}\n${PATHNAME}\n${x-agent-id}\n${x-nonce}\n${RAW_BODY}
 ```
 
 Notes:
 - `PATHNAME` is the URL path only (e.g. `/mcp`).
+- `x-nonce` must be unique per request (replays with same signature are rejected).
 - `RAW_BODY` must be exactly the request body string you send.
 - If HMAC is disabled for local dev, bind MCP to loopback only (`127.0.0.1` / `::1` / `localhost`).
 

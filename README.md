@@ -40,6 +40,11 @@ go run ./cmd/mcp -listen 127.0.0.1:8090 -world-ws-url ws://127.0.0.1:8080/v1/ws 
 MCP auth defaults:
 - local/dev: HMAC optional (but non-HMAC mode is loopback-only)
 - `DEPLOY_ENV=staging|production`: HMAC required by default
+- signed headers include `x-agent-id`, `x-ts`, `x-nonce`, `x-signature`
+
+MCP sidecar probes:
+- `GET /healthz` (process up)
+- `GET /readyz` (bridge session connected and OBS flow active)
 
 MCP smoke test:
 ```bash
@@ -72,6 +77,7 @@ HTTP surface toggles:
 - `VC_OBSERVER_ALLOW_ANY_ORIGIN` (default: `true` locally, `false` in `staging`/`production`)
 - `VC_MCP_REQUIRE_HMAC` (default: `false` locally, `true` in `staging`/`production`)
 - `VC_MCP_HMAC_SECRET` (MCP sidecar HMAC secret; equivalent to `-hmac-secret`)
+- `VC_MCP_HMAC_ALLOW_LEGACY` (allow legacy signatures without `x-nonce`; default: `true` locally, `false` in `staging`/`production`)
 
 Default reset guard in `configs/worlds.yaml`:
 - `OVERWORLD`, `CITY_HUB`: reset disabled (`403`)

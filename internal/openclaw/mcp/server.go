@@ -30,6 +30,7 @@ type Config struct {
 type Server struct {
 	bridge     Bridge
 	hmacSecret []byte
+	replay     *replayGuard
 	now        func() time.Time
 }
 
@@ -43,6 +44,7 @@ func NewServer(cfg Config) (*Server, error) {
 	}
 	if strings.TrimSpace(cfg.HMACSecret) != "" {
 		s.hmacSecret = []byte(cfg.HMACSecret)
+		s.replay = newReplayGuard(10 * time.Minute)
 	}
 	return s, nil
 }
@@ -53,8 +55,58 @@ func (s *Server) Handler() http.Handler {
 		rw.WriteHeader(200)
 		_, _ = rw.Write([]byte("ok"))
 	})
+	mux.HandleFunc("/readyz", s.handleReadyz)
 	mux.HandleFunc("/mcp", s.handleMCP)
 	return mux
+}
+
+func (s *Server) handleReadyz(rw http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		rw.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 3500*time.Millisecond)
+	defer cancel()
+
+	const readyzSessionKey = "__readyz__"
+	st, err := s.bridge.GetStatus(ctx, readyzSessionKey)
+	if err == nil && st.Connected && st.LastObsTick > 0 {
+		writeReadyz(rw, http.StatusOK, map[string]any{"ok": true, "connected": true, "last_obs_tick": st.LastObsTick})
+		return
+	}
+
+	_, obsErr := s.bridge.GetObs(ctx, readyzSessionKey, bridge.GetObsOpts{
+		Mode:        bridge.ObsModeSummary,
+		WaitNewTick: true,
+		TimeoutMS:   1200,
+	})
+	if obsErr != nil {
+		msg := "bridge not ready"
+		if err != nil {
+			msg = err.Error()
+		} else {
+			msg = obsErr.Error()
+		}
+		writeReadyz(rw, http.StatusServiceUnavailable, map[string]any{"ok": false, "error": msg})
+		return
+	}
+
+	st2, err := s.bridge.GetStatus(ctx, readyzSessionKey)
+	if err != nil || !st2.Connected || st2.LastObsTick == 0 {
+		msg := "bridge not ready"
+		if err != nil {
+			msg = err.Error()
+		}
+		writeReadyz(rw, http.StatusServiceUnavailable, map[string]any{"ok": false, "error": msg})
+		return
+	}
+	writeReadyz(rw, http.StatusOK, map[string]any{"ok": true, "connected": true, "last_obs_tick": st2.LastObsTick})
+}
+
+func writeReadyz(rw http.ResponseWriter, status int, payload map[string]any) {
+	rw.Header().Set("content-type", "application/json")
+	rw.WriteHeader(status)
+	_ = json.NewEncoder(rw).Encode(payload)
 }
 
 func (s *Server) handleMCP(rw http.ResponseWriter, r *http.Request) {
@@ -78,6 +130,11 @@ func (s *Server) handleMCP(rw http.ResponseWriter, r *http.Request) {
 		if vr.HTTPStatus != 0 {
 			rw.WriteHeader(vr.HTTPStatus)
 			_, _ = rw.Write([]byte(vr.Message))
+			return
+		}
+		if s.replay != nil && !s.replay.allow(vr.SessionKey, vr.Signature, s.now()) {
+			rw.WriteHeader(http.StatusConflict)
+			_, _ = rw.Write([]byte("replayed request"))
 			return
 		}
 		sessionKey = vr.SessionKey
