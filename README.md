@@ -122,11 +122,10 @@ Three workflows are wired:
   - triggers on push to `main/master` (deploy-relevant paths) and manual dispatch
   - runs `scripts/release_gate.sh --skip-race` before deployment
   - deploys Worker + Container image + Durable Object migration + D1 schema
-  - requires GitHub secrets:
-    - `CLOUDFLARE_ACCOUNT_ID`
-    - `CLOUDFLARE_API_TOKEN`
-    - `CLOUDFLARE_D1_DATABASE_ID`
-    - `CLOUDFLARE_R2_BUCKET`
+  - requires GitHub Actions config:
+    - repository secret: `CLOUDFLARE_API_TOKEN`
+    - repository variable: `CLOUDFLARE_ACCOUNT_ID`
+    - `staging` environment variables: `CLOUDFLARE_D1_DATABASE_ID`, `CLOUDFLARE_R2_BUCKET`
 
 Manual dispatch (with `voxelcraft.agent` gate):
 ```bash

@@ -28,12 +28,17 @@ Pipeline steps:
 4. Apply D1 schema (`cloudflare/d1/schema.sql`)
 5. Deploy Worker + Container (`wrangler deploy --env staging`)
 
-## Required GitHub Secrets
+## Required GitHub Actions config
 
-- `CLOUDFLARE_ACCOUNT_ID`
-- `CLOUDFLARE_API_TOKEN`
-- `CLOUDFLARE_D1_DATABASE_ID`
-- `CLOUDFLARE_R2_BUCKET`
+Repository-level:
+- Secret: `CLOUDFLARE_API_TOKEN`
+- Variable: `CLOUDFLARE_ACCOUNT_ID`
+
+Environment-level (`staging`):
+- Variable: `CLOUDFLARE_D1_DATABASE_ID`
+- Variable: `CLOUDFLARE_R2_BUCKET`
+
+The deploy workflow is bound to `environment: staging`.
 
 ## Staging resource naming
 
@@ -61,7 +66,7 @@ npx wrangler d1 create voxelcraft-ai-staging
 npx wrangler r2 bucket create voxelcraft-ai-staging-state
 ```
 
-Then set the returned D1 `database_id` and R2 bucket name in GitHub secrets.
+Then set the returned D1 `database_id` and R2 bucket name as environment variables in GitHub Actions (`staging`).
 
 ## Runtime diagnostics endpoints
 
