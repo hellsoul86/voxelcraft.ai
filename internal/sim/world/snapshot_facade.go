@@ -2,7 +2,6 @@ package world
 
 import (
 	"fmt"
-	"strings"
 
 	"voxelcraft.ai/internal/persistence/snapshot"
 	snapshotfeaturepkg "voxelcraft.ai/internal/sim/world/feature/persistence/snapshot"
@@ -213,118 +212,100 @@ func (w *World) validateSnapshotImport(s snapshot.SnapshotV1) error {
 }
 
 func (w *World) applySnapshotConfig(s snapshot.SnapshotV1) {
-	if s.BiomeRegionSize > 0 {
-		w.cfg.BiomeRegionSize = s.BiomeRegionSize
+	patch := snapshotfeaturepkg.BuildConfigPatch(s)
+	if patch.BiomeRegionSize > 0 {
+		w.cfg.BiomeRegionSize = patch.BiomeRegionSize
 	}
-	if s.SpawnClearRadius > 0 {
-		w.cfg.SpawnClearRadius = s.SpawnClearRadius
+	if patch.SpawnClearRadius > 0 {
+		w.cfg.SpawnClearRadius = patch.SpawnClearRadius
 	}
-	if s.OreClusterProbScalePermille > 0 {
-		w.cfg.OreClusterProbScalePermille = s.OreClusterProbScalePermille
+	if patch.OreClusterProbScalePermille > 0 {
+		w.cfg.OreClusterProbScalePermille = patch.OreClusterProbScalePermille
 	}
-	if s.TerrainClusterProbScalePermille > 0 {
-		w.cfg.TerrainClusterProbScalePermille = s.TerrainClusterProbScalePermille
+	if patch.TerrainClusterProbScalePermille > 0 {
+		w.cfg.TerrainClusterProbScalePermille = patch.TerrainClusterProbScalePermille
 	}
-	if s.SprinkleStonePermille > 0 {
-		w.cfg.SprinkleStonePermille = s.SprinkleStonePermille
+	if patch.SprinkleStonePermille > 0 {
+		w.cfg.SprinkleStonePermille = patch.SprinkleStonePermille
 	}
-	if s.SprinkleDirtPermille > 0 {
-		w.cfg.SprinkleDirtPermille = s.SprinkleDirtPermille
+	if patch.SprinkleDirtPermille > 0 {
+		w.cfg.SprinkleDirtPermille = patch.SprinkleDirtPermille
 	}
-	if s.SprinkleLogPermille > 0 {
-		w.cfg.SprinkleLogPermille = s.SprinkleLogPermille
-	}
-
-	if s.StarterItems != nil {
-		w.cfg.StarterItems = map[string]int{}
-		for item, n := range s.StarterItems {
-			if strings.TrimSpace(item) == "" || n <= 0 {
-				continue
-			}
-			w.cfg.StarterItems[item] = n
-		}
+	if patch.SprinkleLogPermille > 0 {
+		w.cfg.SprinkleLogPermille = patch.SprinkleLogPermille
 	}
 
-	if s.SnapshotEveryTicks > 0 {
-		w.cfg.SnapshotEveryTicks = s.SnapshotEveryTicks
+	if patch.HasStarterItems {
+		w.cfg.StarterItems = patch.StarterItems
 	}
-	if s.DirectorEveryTicks > 0 {
-		w.cfg.DirectorEveryTicks = s.DirectorEveryTicks
+
+	if patch.SnapshotEveryTicks > 0 {
+		w.cfg.SnapshotEveryTicks = patch.SnapshotEveryTicks
+	}
+	if patch.DirectorEveryTicks > 0 {
+		w.cfg.DirectorEveryTicks = patch.DirectorEveryTicks
 	}
 	if s.SeasonLengthTicks > 0 {
 		w.cfg.SeasonLengthTicks = s.SeasonLengthTicks
 	}
-	if s.RateLimits.SayWindowTicks > 0 ||
-		s.RateLimits.SayMax > 0 ||
-		s.RateLimits.MarketSayWindowTicks > 0 ||
-		s.RateLimits.MarketSayMax > 0 ||
-		s.RateLimits.WhisperWindowTicks > 0 ||
-		s.RateLimits.WhisperMax > 0 ||
-		s.RateLimits.OfferTradeWindowTicks > 0 ||
-		s.RateLimits.OfferTradeMax > 0 ||
-		s.RateLimits.PostBoardWindowTicks > 0 ||
-		s.RateLimits.PostBoardMax > 0 {
+	if patch.HasRateLimits {
 		w.cfg.RateLimits = RateLimitConfig{
-			SayWindowTicks:        s.RateLimits.SayWindowTicks,
-			SayMax:                s.RateLimits.SayMax,
-			MarketSayWindowTicks:  s.RateLimits.MarketSayWindowTicks,
-			MarketSayMax:          s.RateLimits.MarketSayMax,
-			WhisperWindowTicks:    s.RateLimits.WhisperWindowTicks,
-			WhisperMax:            s.RateLimits.WhisperMax,
-			OfferTradeWindowTicks: s.RateLimits.OfferTradeWindowTicks,
-			OfferTradeMax:         s.RateLimits.OfferTradeMax,
-			PostBoardWindowTicks:  s.RateLimits.PostBoardWindowTicks,
-			PostBoardMax:          s.RateLimits.PostBoardMax,
+			SayWindowTicks:        patch.RateLimits.SayWindowTicks,
+			SayMax:                patch.RateLimits.SayMax,
+			MarketSayWindowTicks:  patch.RateLimits.MarketSayWindowTicks,
+			MarketSayMax:          patch.RateLimits.MarketSayMax,
+			WhisperWindowTicks:    patch.RateLimits.WhisperWindowTicks,
+			WhisperMax:            patch.RateLimits.WhisperMax,
+			OfferTradeWindowTicks: patch.RateLimits.OfferTradeWindowTicks,
+			OfferTradeMax:         patch.RateLimits.OfferTradeMax,
+			PostBoardWindowTicks:  patch.RateLimits.PostBoardWindowTicks,
+			PostBoardMax:          patch.RateLimits.PostBoardMax,
 		}
 	}
-	if s.LawNoticeTicks > 0 {
-		w.cfg.LawNoticeTicks = s.LawNoticeTicks
+	if patch.LawNoticeTicks > 0 {
+		w.cfg.LawNoticeTicks = patch.LawNoticeTicks
 	}
-	if s.LawVoteTicks > 0 {
-		w.cfg.LawVoteTicks = s.LawVoteTicks
+	if patch.LawVoteTicks > 0 {
+		w.cfg.LawVoteTicks = patch.LawVoteTicks
 	}
-	if s.BlueprintAutoPullRange > 0 {
-		w.cfg.BlueprintAutoPullRange = s.BlueprintAutoPullRange
+	if patch.BlueprintAutoPullRange > 0 {
+		w.cfg.BlueprintAutoPullRange = patch.BlueprintAutoPullRange
 	}
-	if s.BlueprintBlocksPerTick > 0 {
-		w.cfg.BlueprintBlocksPerTick = s.BlueprintBlocksPerTick
+	if patch.BlueprintBlocksPerTick > 0 {
+		w.cfg.BlueprintBlocksPerTick = patch.BlueprintBlocksPerTick
 	}
-	if s.AccessPassCoreRadius > 0 {
-		w.cfg.AccessPassCoreRadius = s.AccessPassCoreRadius
+	if patch.AccessPassCoreRadius > 0 {
+		w.cfg.AccessPassCoreRadius = patch.AccessPassCoreRadius
 	}
-	if len(s.MaintenanceCost) > 0 {
-		w.cfg.MaintenanceCost = map[string]int{}
-		for item, n := range s.MaintenanceCost {
-			if item != "" && n > 0 {
-				w.cfg.MaintenanceCost[item] = n
-			}
-		}
+	if patch.HasMaintenanceCost {
+		w.cfg.MaintenanceCost = patch.MaintenanceCost
 		if len(w.cfg.MaintenanceCost) == 0 {
 			w.cfg.MaintenanceCost = nil
 		}
 	}
-	if s.FunDecayWindowTicks > 0 {
-		w.cfg.FunDecayWindowTicks = s.FunDecayWindowTicks
+	if patch.FunDecayWindowTicks > 0 {
+		w.cfg.FunDecayWindowTicks = patch.FunDecayWindowTicks
 	}
-	if s.FunDecayBase > 0 {
-		w.cfg.FunDecayBase = s.FunDecayBase
+	if patch.FunDecayBase > 0 {
+		w.cfg.FunDecayBase = patch.FunDecayBase
 	}
-	if s.StructureSurvivalTicks > 0 {
-		w.cfg.StructureSurvivalTicks = s.StructureSurvivalTicks
+	if patch.StructureSurvivalTicks > 0 {
+		w.cfg.StructureSurvivalTicks = patch.StructureSurvivalTicks
 	}
 	w.cfg.applyDefaults()
 }
 
 func (w *World) applySnapshotRuntimeState(s snapshot.SnapshotV1) {
-	w.weather = s.Weather
-	w.weatherUntilTick = s.WeatherUntilTick
-	w.activeEventID = s.ActiveEventID
-	w.activeEventStart = s.ActiveEventStart
-	w.activeEventEnds = s.ActiveEventEnds
+	patch := snapshotfeaturepkg.BuildRuntimePatch(s)
+	w.weather = patch.Weather
+	w.weatherUntilTick = patch.WeatherUntilTick
+	w.activeEventID = patch.ActiveEventID
+	w.activeEventStart = patch.ActiveEventStart
+	w.activeEventEnds = patch.ActiveEventEnds
 	w.activeEventCenter = Vec3i{
-		X: s.ActiveEventCenter[0],
-		Y: s.ActiveEventCenter[1],
-		Z: s.ActiveEventCenter[2],
+		X: patch.ActiveEventCenter[0],
+		Y: patch.ActiveEventCenter[1],
+		Z: patch.ActiveEventCenter[2],
 	}
-	w.activeEventRadius = s.ActiveEventRadius
+	w.activeEventRadius = patch.ActiveEventRadius
 }

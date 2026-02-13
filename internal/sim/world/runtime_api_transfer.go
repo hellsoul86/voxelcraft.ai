@@ -5,11 +5,8 @@ import (
 	"errors"
 
 	"voxelcraft.ai/internal/protocol"
-	transferagentpkg "voxelcraft.ai/internal/sim/world/feature/transfer/agent"
 	transfereventspkg "voxelcraft.ai/internal/sim/world/feature/transfer/events"
-	transferorgpkg "voxelcraft.ai/internal/sim/world/feature/transfer/org"
 	transferruntimepkg "voxelcraft.ai/internal/sim/world/feature/transfer/runtime"
-	idspkg "voxelcraft.ai/internal/sim/world/logic/ids"
 )
 
 type EventCursorItem = transfereventspkg.CursorItem
@@ -84,40 +81,27 @@ func (w *World) handleTransferIn(req transferruntimepkg.TransferInReq) {
 		}
 	}()
 
-	t := req.Transfer
-	if t.ID == "" {
-		resp.Err = "missing agent id"
+	out := transferruntimepkg.HandleTransferIn(transferruntimepkg.TransferInHandleInput{
+		Req:            req,
+		WorldID:        w.cfg.ID,
+		NowTick:        w.tick.Load(),
+		Agents:         w.agents,
+		Orgs:           w.orgs,
+		CurrentNextOrg: w.nextOrgNum.Load(),
+	})
+	if out.Err != "" {
+		resp.Err = out.Err
 		return
 	}
-	if _, ok := w.agents[t.ID]; ok {
-		resp.Err = "agent already present"
+	if out.NextOrg > w.nextOrgNum.Load() {
+		w.nextOrgNum.Store(out.NextOrg)
+	}
+	if out.JoinedAgentID == "" {
+		resp.Err = "transfer in did not produce agent"
 		return
 	}
-
-	a := transferruntimepkg.BuildIncomingAgent(t, w.cfg.ID)
-	if a.OrgID != "" {
-		orgID := a.OrgID
-		if t.Org != nil && t.Org.OrgID != "" {
-			orgID = t.Org.OrgID
-		}
-		_, existed := w.orgs[orgID]
-		org := transferruntimepkg.UpsertIncomingOrg(w.orgs, t.Org, a.OrgID, a.ID)
-		if org != nil {
-			if !existed {
-				if n, ok := idspkg.ParseUintAfterPrefix("ORG", org.OrgID); ok && n > w.nextOrgNum.Load() {
-					w.nextOrgNum.Store(n)
-				}
-			}
-			_ = w.orgTreasury(org)
-		}
-	}
-	if ev, ok := transferagentpkg.BuildWorldSwitchEvent(w.tick.Load(), t.FromWorldID, w.cfg.ID, a.ID, t.FromEntryPointID, t.ToEntryPointID); ok {
-		a.AddEvent(ev)
-	}
-
-	w.agents[a.ID] = a
 	if req.Out != nil {
-		w.clients[a.ID] = &clientState{Out: req.Out, DeltaVoxels: req.DeltaVoxels}
+		w.clients[out.JoinedAgentID] = &clientState{Out: req.Out, DeltaVoxels: req.DeltaVoxels}
 	}
 }
 
@@ -133,35 +117,20 @@ func (w *World) handleTransferOut(req transferruntimepkg.TransferOutReq) {
 		}
 	}()
 
-	a := w.agents[req.AgentID]
-	if a == nil {
-		resp.Err = "agent not found"
+	out := transferruntimepkg.HandleTransferOut(transferruntimepkg.TransferOutHandleInput{
+		Req:     req,
+		WorldID: w.cfg.ID,
+		Agents:  w.agents,
+		Orgs:    w.orgs,
+		Trades:  w.trades,
+	})
+	if out.Err != "" {
+		resp.Err = out.Err
 		return
 	}
-
-	// Cancel tasks on world switch.
-	a.MoveTask = nil
-	a.WorkTask = nil
-
-	var orgTransfer *OrgTransfer
-	if a.OrgID != "" {
-		if org := w.orgByID(a.OrgID); org != nil {
-			orgTransfer = transferruntimepkg.BuildOrgTransferFromOrganization(org)
-		}
-	}
-	resp.Transfer = transferruntimepkg.BuildOutgoingAgent(a, w.cfg.ID, orgTransfer)
-
-	delete(w.clients, a.ID)
-	delete(w.agents, a.ID)
-
-	// Clear open trades involving this agent in this world.
-	for tid, tr := range w.trades {
-		if tr == nil {
-			continue
-		}
-		if tr.From == a.ID || tr.To == a.ID {
-			delete(w.trades, tid)
-		}
+	resp.Transfer = out.Transfer
+	if out.RemovedID != "" {
+		delete(w.clients, out.RemovedID)
 	}
 }
 
@@ -236,8 +205,7 @@ func (w *World) handleOrgMetaReq(req transferruntimepkg.OrgMetaReq) {
 		}
 		return
 	}
-	states := transferorgpkg.StatesFromOrganizations(w.orgs)
-	resp = transferruntimepkg.BuildOrgMetaResp(states)
+	resp = transferruntimepkg.SnapshotOrgMeta(w.orgs)
 	if req.Resp == nil {
 		return
 	}
@@ -273,10 +241,12 @@ func (w *World) handleOrgMetaUpsertReq(req transferruntimepkg.OrgMetaUpsertReq) 
 		return
 	}
 
-	existingStates := transferorgpkg.StatesFromOrganizations(w.orgs)
-	mergedStates, ownerByAgent := transferruntimepkg.BuildOrgMetaMerge(existingStates, req.Orgs)
-	transferorgpkg.ApplyStates(w.orgs, mergedStates, func(org *Organization) {
-		_ = w.orgTreasury(org)
+	transferruntimepkg.ApplyOrgMetaUpsert(transferruntimepkg.ApplyOrgMetaUpsertInput{
+		Orgs:     w.orgs,
+		Agents:   w.agents,
+		Incoming: req.Orgs,
+		OnOrg: func(org *Organization) {
+			_ = w.orgTreasury(org)
+		},
 	})
-	transferorgpkg.ReconcileAgentsOrg(w.agents, w.orgs, ownerByAgent)
 }

@@ -91,15 +91,15 @@ func TestStepObserverChunksForClient_emitsChunkPatch(t *testing.T) {
 		ID:      "O1",
 		TickOut: make(chan []byte, 1),
 		DataOut: dataOut,
-		Config: observerCfg{
+		Config: streamspkg.Config{
 			ChunkRadius: 1,
 			MaxChunks:   1024,
 		},
-		Chunks: map[streamspkg.ChunkKey]*observerChunk{},
+		Chunks: map[streamspkg.ChunkKey]*streamspkg.ChunkState{},
 	}
 
 	key := streamspkg.ChunkKey{CX: 0, CZ: 0}
-	st := &observerChunk{
+	st := &streamspkg.ChunkState{
 		Key:            key,
 		LastWantedTick: 100,
 		SentFull:       true,

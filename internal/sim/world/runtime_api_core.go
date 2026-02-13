@@ -10,6 +10,31 @@ func (w *World) ExportSnapshot(nowTick uint64) snapshot.SnapshotV1 {
 	return w.exportSnapshot(nowTick)
 }
 
+func (w *World) Config() WorldConfig {
+	if w == nil {
+		return WorldConfig{}
+	}
+	cfg := w.cfg
+	if cfg.MaintenanceCost != nil {
+		m := make(map[string]int, len(cfg.MaintenanceCost))
+		for k, v := range cfg.MaintenanceCost {
+			m[k] = v
+		}
+		cfg.MaintenanceCost = m
+	}
+	return cfg
+}
+
+func (w *World) BlockPalette() []string {
+	if w == nil || w.catalogs == nil {
+		return nil
+	}
+	p := w.catalogs.Blocks.Palette
+	out := make([]string, len(p))
+	copy(out, p)
+	return out
+}
+
 // ImportSnapshot replaces the current in-memory world state with the snapshot.
 // It sets the world's tick to snapshotTick+1 (the next tick to simulate).
 //
