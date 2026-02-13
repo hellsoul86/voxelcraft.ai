@@ -195,7 +195,9 @@ func runMultiWorld(rtCfg serverRuntimeConfig, cfg multiworld.Config, tune tuning
 		}
 	}()
 
-	mux := buildMultiWorldMux(mgr, logger)
+	enableAdminHTTP := envBool("VC_ENABLE_ADMIN_HTTP", defaultEnableAdminHTTP())
+	enablePprofHTTP := envBool("VC_ENABLE_PPROF_HTTP", false)
+	mux := buildMultiWorldMux(mgr, logger, r2Mirror, enableAdminHTTP, enablePprofHTTP)
 	srv := &http.Server{
 		Addr:              rtCfg.Addr,
 		Handler:           mux,
@@ -215,7 +217,7 @@ func runMultiWorld(rtCfg serverRuntimeConfig, cfg multiworld.Config, tune tuning
 	}
 }
 
-func buildMultiWorldMux(mgr *multiworld.Manager, logger *log.Logger) *http.ServeMux {
+func buildMultiWorldMux(mgr *multiworld.Manager, logger *log.Logger, r2Mirror *r2MirrorRuntime, enableAdminHTTP bool, enablePprofHTTP bool) *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", func(rw http.ResponseWriter, r *http.Request) {
 		rw.WriteHeader(200)
@@ -247,96 +249,105 @@ func buildMultiWorldMux(mgr *multiworld.Manager, logger *log.Logger) *http.Serve
 		for _, sm := range mgr.SwitchMetrics() {
 			fmt.Fprintf(rw, "voxelcraft_world_switch_total{from=%q,to=%q,result=%q} %d\n", sm.From, sm.To, sm.Result, sm.Count)
 		}
+		writeR2MirrorMetrics(rw, r2Mirror)
 	})
-	mux.HandleFunc("/admin/v1/worlds/state", func(rw http.ResponseWriter, r *http.Request) {
-		if !isLoopbackRemote(r.RemoteAddr) {
-			http.Error(rw, "forbidden", http.StatusForbidden)
-			return
-		}
-		out := map[string]any{}
-		for _, worldID := range mgr.WorldIDs() {
-			rt := mgr.Runtime(worldID)
-			if rt == nil || rt.World == nil {
-				continue
+	if enableAdminHTTP {
+		mux.HandleFunc("/admin/v1/worlds/state", func(rw http.ResponseWriter, r *http.Request) {
+			if !isLoopbackRemote(r.RemoteAddr) {
+				http.Error(rw, "forbidden", http.StatusForbidden)
+				return
 			}
-			out[worldID] = map[string]any{
-				"tick":    rt.World.CurrentTick(),
-				"metrics": rt.World.Metrics(),
+			out := map[string]any{}
+			for _, worldID := range mgr.WorldIDs() {
+				rt := mgr.Runtime(worldID)
+				if rt == nil || rt.World == nil {
+					continue
+				}
+				out[worldID] = map[string]any{
+					"tick":    rt.World.CurrentTick(),
+					"metrics": rt.World.Metrics(),
+				}
 			}
-		}
-		rw.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(rw).Encode(out)
-	})
-	mux.HandleFunc("/admin/v1/worlds/reset", func(rw http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			rw.WriteHeader(http.StatusMethodNotAllowed)
-			return
-		}
-		if !isLoopbackRemote(r.RemoteAddr) {
-			http.Error(rw, "forbidden", http.StatusForbidden)
-			return
-		}
-		worldID := r.URL.Query().Get("world")
-		handleWorldReset(rw, r, mgr, worldID)
-	})
-	mux.HandleFunc("/admin/v1/worlds/", func(rw http.ResponseWriter, r *http.Request) {
-		// Pattern: /admin/v1/worlds/{id}/reset
-		if r.Method != http.MethodPost {
-			rw.WriteHeader(http.StatusMethodNotAllowed)
-			return
-		}
-		if !isLoopbackRemote(r.RemoteAddr) {
-			http.Error(rw, "forbidden", http.StatusForbidden)
-			return
-		}
-		path := strings.TrimPrefix(r.URL.Path, "/admin/v1/worlds/")
-		parts := strings.Split(strings.Trim(path, "/"), "/")
-		if len(parts) != 2 || parts[1] != "reset" {
-			http.NotFound(rw, r)
-			return
-		}
-		worldID := parts[0]
-		handleWorldReset(rw, r, mgr, worldID)
-	})
-	mux.HandleFunc("/admin/v1/agents/", func(rw http.ResponseWriter, r *http.Request) {
-		// Pattern: /admin/v1/agents/{id}/move_world
-		if r.Method != http.MethodPost {
-			rw.WriteHeader(http.StatusMethodNotAllowed)
-			return
-		}
-		if !isLoopbackRemote(r.RemoteAddr) {
-			http.Error(rw, "forbidden", http.StatusForbidden)
-			return
-		}
-		path := strings.TrimPrefix(r.URL.Path, "/admin/v1/agents/")
-		parts := strings.Split(strings.Trim(path, "/"), "/")
-		if len(parts) != 2 || parts[1] != "move_world" {
-			http.NotFound(rw, r)
-			return
-		}
-		agentID := parts[0]
-		targetWorld := strings.TrimSpace(r.URL.Query().Get("target_world"))
-		if targetWorld == "" {
-			http.Error(rw, "missing target_world", http.StatusBadRequest)
-			return
-		}
-		ctx2, cancel2 := context.WithTimeout(r.Context(), 5*time.Second)
-		defer cancel2()
-		err := mgr.MoveAgentWorld(ctx2, agentID, targetWorld)
-		rw.Header().Set("Content-Type", "application/json")
-		if err != nil {
-			rw.WriteHeader(http.StatusBadRequest)
-			_ = json.NewEncoder(rw).Encode(map[string]any{"ok": false, "agent_id": agentID, "target_world": targetWorld, "error": err.Error()})
-			return
-		}
-		_ = json.NewEncoder(rw).Encode(map[string]any{"ok": true, "agent_id": agentID, "target_world": targetWorld})
-	})
+			rw.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(rw).Encode(out)
+		})
+		mux.HandleFunc("/admin/v1/worlds/reset", func(rw http.ResponseWriter, r *http.Request) {
+			if r.Method != http.MethodPost {
+				rw.WriteHeader(http.StatusMethodNotAllowed)
+				return
+			}
+			if !isLoopbackRemote(r.RemoteAddr) {
+				http.Error(rw, "forbidden", http.StatusForbidden)
+				return
+			}
+			worldID := r.URL.Query().Get("world")
+			handleWorldReset(rw, r, mgr, worldID)
+		})
+		mux.HandleFunc("/admin/v1/worlds/", func(rw http.ResponseWriter, r *http.Request) {
+			// Pattern: /admin/v1/worlds/{id}/reset
+			if r.Method != http.MethodPost {
+				rw.WriteHeader(http.StatusMethodNotAllowed)
+				return
+			}
+			if !isLoopbackRemote(r.RemoteAddr) {
+				http.Error(rw, "forbidden", http.StatusForbidden)
+				return
+			}
+			path := strings.TrimPrefix(r.URL.Path, "/admin/v1/worlds/")
+			parts := strings.Split(strings.Trim(path, "/"), "/")
+			if len(parts) != 2 || parts[1] != "reset" {
+				http.NotFound(rw, r)
+				return
+			}
+			worldID := parts[0]
+			handleWorldReset(rw, r, mgr, worldID)
+		})
+		mux.HandleFunc("/admin/v1/agents/", func(rw http.ResponseWriter, r *http.Request) {
+			// Pattern: /admin/v1/agents/{id}/move_world
+			if r.Method != http.MethodPost {
+				rw.WriteHeader(http.StatusMethodNotAllowed)
+				return
+			}
+			if !isLoopbackRemote(r.RemoteAddr) {
+				http.Error(rw, "forbidden", http.StatusForbidden)
+				return
+			}
+			path := strings.TrimPrefix(r.URL.Path, "/admin/v1/agents/")
+			parts := strings.Split(strings.Trim(path, "/"), "/")
+			if len(parts) != 2 || parts[1] != "move_world" {
+				http.NotFound(rw, r)
+				return
+			}
+			agentID := parts[0]
+			targetWorld := strings.TrimSpace(r.URL.Query().Get("target_world"))
+			if targetWorld == "" {
+				http.Error(rw, "missing target_world", http.StatusBadRequest)
+				return
+			}
+			ctx2, cancel2 := context.WithTimeout(r.Context(), 5*time.Second)
+			defer cancel2()
+			err := mgr.MoveAgentWorld(ctx2, agentID, targetWorld)
+			rw.Header().Set("Content-Type", "application/json")
+			if err != nil {
+				rw.WriteHeader(http.StatusBadRequest)
+				_ = json.NewEncoder(rw).Encode(map[string]any{"ok": false, "agent_id": agentID, "target_world": targetWorld, "error": err.Error()})
+				return
+			}
+			_ = json.NewEncoder(rw).Encode(map[string]any{"ok": true, "agent_id": agentID, "target_world": targetWorld})
+		})
+	} else {
+		logger.Printf("admin endpoints disabled (VC_ENABLE_ADMIN_HTTP=false)")
+	}
 
-	mux.HandleFunc("/debug/pprof/", pprof.Index)
-	mux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
-	mux.HandleFunc("/debug/pprof/profile", pprof.Profile)
-	mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
-	mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
+	if enablePprofHTTP {
+		mux.HandleFunc("/debug/pprof/", pprof.Index)
+		mux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
+		mux.HandleFunc("/debug/pprof/profile", pprof.Profile)
+		mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
+		mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
+	} else {
+		logger.Printf("pprof endpoints disabled (VC_ENABLE_PPROF_HTTP=false)")
+	}
 	mux.HandleFunc("/v1/ws", ws.NewManagedServer(mgr, logger).Handler())
 	return mux
 }

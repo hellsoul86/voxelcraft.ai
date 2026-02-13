@@ -349,55 +349,67 @@ func main() {
 		fmt.Fprintf(rw, "# HELP voxelcraft_stats_window_ticks Rolling window size in ticks.\n")
 		fmt.Fprintf(rw, "# TYPE voxelcraft_stats_window_ticks gauge\n")
 		fmt.Fprintf(rw, "voxelcraft_stats_window_ticks{world=%q} %d\n", *worldID, m.StatsWindowTicks)
+
+		writeR2MirrorMetrics(rw, r2Mirror)
 	})
 
-	// Local-only admin endpoints (do not affect simulation determinism).
-	mux.HandleFunc("/admin/v1/state", func(rw http.ResponseWriter, r *http.Request) {
-		if !isLoopbackRemote(r.RemoteAddr) {
-			http.Error(rw, "forbidden", http.StatusForbidden)
-			return
-		}
-		rw.Header().Set("Content-Type", "application/json")
-		resp := struct {
-			WorldID string             `json:"world_id"`
-			Tick    uint64             `json:"tick"`
-			Metrics world.WorldMetrics `json:"metrics"`
-		}{
-			WorldID: *worldID,
-			Tick:    w.CurrentTick(),
-			Metrics: w.Metrics(),
-		}
-		_ = json.NewEncoder(rw).Encode(resp)
-	})
-	mux.HandleFunc("/admin/v1/snapshot", func(rw http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			rw.WriteHeader(http.StatusMethodNotAllowed)
-			return
-		}
-		if !isLoopbackRemote(r.RemoteAddr) {
-			http.Error(rw, "forbidden", http.StatusForbidden)
-			return
-		}
-		ctx2, cancel2 := context.WithTimeout(r.Context(), 5*time.Second)
-		defer cancel2()
-		tick, err := w.RequestSnapshot(ctx2)
-		rw.Header().Set("Content-Type", "application/json")
-		if err != nil {
-			rw.WriteHeader(http.StatusServiceUnavailable)
-			_ = json.NewEncoder(rw).Encode(map[string]any{"ok": false, "tick": tick, "error": err.Error()})
-			return
-		}
-		_ = json.NewEncoder(rw).Encode(map[string]any{"ok": true, "tick": tick})
-	})
+	enableAdminHTTP := envBool("VC_ENABLE_ADMIN_HTTP", defaultEnableAdminHTTP())
+	enablePprofHTTP := envBool("VC_ENABLE_PPROF_HTTP", false)
+	if enableAdminHTTP {
+		// Local-only admin endpoints (do not affect simulation determinism).
+		mux.HandleFunc("/admin/v1/state", func(rw http.ResponseWriter, r *http.Request) {
+			if !isLoopbackRemote(r.RemoteAddr) {
+				http.Error(rw, "forbidden", http.StatusForbidden)
+				return
+			}
+			rw.Header().Set("Content-Type", "application/json")
+			resp := struct {
+				WorldID string             `json:"world_id"`
+				Tick    uint64             `json:"tick"`
+				Metrics world.WorldMetrics `json:"metrics"`
+			}{
+				WorldID: *worldID,
+				Tick:    w.CurrentTick(),
+				Metrics: w.Metrics(),
+			}
+			_ = json.NewEncoder(rw).Encode(resp)
+		})
+		mux.HandleFunc("/admin/v1/snapshot", func(rw http.ResponseWriter, r *http.Request) {
+			if r.Method != http.MethodPost {
+				rw.WriteHeader(http.StatusMethodNotAllowed)
+				return
+			}
+			if !isLoopbackRemote(r.RemoteAddr) {
+				http.Error(rw, "forbidden", http.StatusForbidden)
+				return
+			}
+			ctx2, cancel2 := context.WithTimeout(r.Context(), 5*time.Second)
+			defer cancel2()
+			tick, err := w.RequestSnapshot(ctx2)
+			rw.Header().Set("Content-Type", "application/json")
+			if err != nil {
+				rw.WriteHeader(http.StatusServiceUnavailable)
+				_ = json.NewEncoder(rw).Encode(map[string]any{"ok": false, "tick": tick, "error": err.Error()})
+				return
+			}
+			_ = json.NewEncoder(rw).Encode(map[string]any{"ok": true, "tick": tick})
+		})
 
-	obsSrv := observer.NewServer(w, logger)
-	mux.HandleFunc("/admin/v1/observer/bootstrap", obsSrv.BootstrapHandler())
-	mux.HandleFunc("/admin/v1/observer/ws", obsSrv.WSHandler())
-	mux.HandleFunc("/debug/pprof/", pprof.Index)
-	mux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
-	mux.HandleFunc("/debug/pprof/profile", pprof.Profile)
-	mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
-	mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
+		obsSrv := observer.NewServer(w, logger)
+		mux.HandleFunc("/admin/v1/observer/bootstrap", obsSrv.BootstrapHandler())
+		mux.HandleFunc("/admin/v1/observer/ws", obsSrv.WSHandler())
+	} else {
+		logger.Printf("admin endpoints disabled (VC_ENABLE_ADMIN_HTTP=false)")
+	}
+	if enablePprofHTTP {
+		mux.HandleFunc("/debug/pprof/", pprof.Index)
+		mux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
+		mux.HandleFunc("/debug/pprof/profile", pprof.Profile)
+		mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
+		mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
+	} else {
+		logger.Printf("pprof endpoints disabled (VC_ENABLE_PPROF_HTTP=false)")
+	}
 	mux.HandleFunc("/v1/ws", ws.NewServer(w, logger).Handler())
 
 	srv := &http.Server{
@@ -477,6 +489,60 @@ func enqueueIfExists(m *r2MirrorRuntime, path string) {
 	if _, err := os.Stat(path); err == nil {
 		m.Enqueue(path)
 	}
+}
+
+func defaultEnableAdminHTTP() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("DEPLOY_ENV"))) {
+	case "staging", "production":
+		return false
+	default:
+		return true
+	}
+}
+
+func writeR2MirrorMetrics(rw http.ResponseWriter, mirror *r2MirrorRuntime) {
+	if mirror == nil || !mirror.enabled {
+		return
+	}
+	s := mirror.Stats()
+	if !s.Enabled {
+		return
+	}
+	fmt.Fprintf(rw, "# HELP voxelcraft_r2_mirror_queue_depth Current R2 mirror queue depth.\n")
+	fmt.Fprintf(rw, "# TYPE voxelcraft_r2_mirror_queue_depth gauge\n")
+	fmt.Fprintf(rw, "voxelcraft_r2_mirror_queue_depth %d\n", s.QueueDepth)
+
+	fmt.Fprintf(rw, "# HELP voxelcraft_r2_mirror_queue_capacity R2 mirror queue capacity.\n")
+	fmt.Fprintf(rw, "# TYPE voxelcraft_r2_mirror_queue_capacity gauge\n")
+	fmt.Fprintf(rw, "voxelcraft_r2_mirror_queue_capacity %d\n", s.QueueCapacity)
+
+	fmt.Fprintf(rw, "# HELP voxelcraft_r2_mirror_enqueued_total Total mirror enqueue attempts.\n")
+	fmt.Fprintf(rw, "# TYPE voxelcraft_r2_mirror_enqueued_total counter\n")
+	fmt.Fprintf(rw, "voxelcraft_r2_mirror_enqueued_total %d\n", s.EnqueuedTotal)
+
+	fmt.Fprintf(rw, "# HELP voxelcraft_r2_mirror_queue_saturated_total Total enqueue attempts when queue was saturated.\n")
+	fmt.Fprintf(rw, "# TYPE voxelcraft_r2_mirror_queue_saturated_total counter\n")
+	fmt.Fprintf(rw, "voxelcraft_r2_mirror_queue_saturated_total %d\n", s.QueueSaturatedTotal)
+
+	fmt.Fprintf(rw, "# HELP voxelcraft_r2_mirror_dropped_total Total mirror files dropped because queue remained saturated.\n")
+	fmt.Fprintf(rw, "# TYPE voxelcraft_r2_mirror_dropped_total counter\n")
+	fmt.Fprintf(rw, "voxelcraft_r2_mirror_dropped_total %d\n", s.DroppedTotal)
+
+	fmt.Fprintf(rw, "# HELP voxelcraft_r2_mirror_upload_success_total Total successful mirror uploads.\n")
+	fmt.Fprintf(rw, "# TYPE voxelcraft_r2_mirror_upload_success_total counter\n")
+	fmt.Fprintf(rw, "voxelcraft_r2_mirror_upload_success_total %d\n", s.UploadSuccessTotal)
+
+	fmt.Fprintf(rw, "# HELP voxelcraft_r2_mirror_upload_fail_total Total failed mirror uploads after retry.\n")
+	fmt.Fprintf(rw, "# TYPE voxelcraft_r2_mirror_upload_fail_total counter\n")
+	fmt.Fprintf(rw, "voxelcraft_r2_mirror_upload_fail_total %d\n", s.UploadFailTotal)
+
+	fmt.Fprintf(rw, "# HELP voxelcraft_r2_mirror_last_success_unix Unix timestamp of last successful mirror upload.\n")
+	fmt.Fprintf(rw, "# TYPE voxelcraft_r2_mirror_last_success_unix gauge\n")
+	fmt.Fprintf(rw, "voxelcraft_r2_mirror_last_success_unix %d\n", s.LastSuccessUnix)
+
+	fmt.Fprintf(rw, "# HELP voxelcraft_r2_mirror_last_error_unix Unix timestamp of last failed mirror upload.\n")
+	fmt.Fprintf(rw, "# TYPE voxelcraft_r2_mirror_last_error_unix gauge\n")
+	fmt.Fprintf(rw, "voxelcraft_r2_mirror_last_error_unix %d\n", s.LastErrorUnix)
 }
 
 type multiTickLogger struct {

@@ -29,6 +29,10 @@ export class WorldCoordinator extends Container {
 
   // Pass runtime settings directly into the container runtime.
   envVars = {
+    DEPLOY_ENV: workerEnv.DEPLOY_ENV ?? "",
+    VC_ENABLE_ADMIN_HTTP: workerEnv.VC_ENABLE_ADMIN_HTTP ?? "",
+    VC_ENABLE_PPROF_HTTP: workerEnv.VC_ENABLE_PPROF_HTTP ?? "",
+
     VC_R2_MIRROR: workerEnv.VC_R2_MIRROR ?? "false",
     VC_R2_ENDPOINT: workerEnv.VC_R2_ENDPOINT ?? "",
     VC_R2_BUCKET: workerEnv.VC_R2_BUCKET ?? "",
@@ -54,7 +58,22 @@ function coerceWorldId(raw, fallback = "world_1") {
 
 function resolveWorldId(request, env) {
   const url = new URL(request.url);
-  const fallback = coerceWorldId(env.DEFAULT_WORLD_ID, "world_1");
+  const fallback = coerceWorldId(env.DEFAULT_SHARD_ID || env.DEFAULT_WORLD_ID, "world_1");
+  return coerceWorldId(
+    url.searchParams.get("shard_id") ||
+      request.headers.get("x-voxelcraft-shard") ||
+      url.searchParams.get("instance_id") ||
+      // Legacy aliases (kept for compatibility).
+      url.searchParams.get("world_id") ||
+      url.searchParams.get("world") ||
+      request.headers.get("x-voxelcraft-world"),
+    fallback,
+  );
+}
+
+function resolveIndexWorldId(request, env) {
+  const url = new URL(request.url);
+  const fallback = coerceWorldId(env.DEFAULT_INDEX_WORLD_ID, "OVERWORLD");
   return coerceWorldId(
     url.searchParams.get("world_id") ||
       url.searchParams.get("world") ||
@@ -744,11 +763,11 @@ export default {
     if (url.pathname === "/_cf/persistence/head") {
       const worldId = resolveWorldId(request, env);
       const payload = await readWorldHead(env, worldId);
-      return Response.json({ ok: true, world_id: worldId, ...payload });
+      return Response.json({ ok: true, shard_id: worldId, world_id: worldId, ...payload });
     }
 
     if (url.pathname === "/_cf/indexdb/healthz") {
-      const worldId = resolveWorldId(request, env);
+      const worldId = resolveIndexWorldId(request, env);
       const payload = await indexdbHealth(env, worldId);
       return Response.json(payload);
     }

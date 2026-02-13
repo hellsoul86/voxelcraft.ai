@@ -59,7 +59,11 @@ Endpoints:
   - `POST /admin/v1/agents/{id}/move_world?target_world=<id>` (loopback-only; operator rescue)
 - `GET /admin/v1/observer/bootstrap` (loopback-only; observer bootstrap)
 - `WS /admin/v1/observer/ws` (loopback-only; observer stream)
-- `GET /debug/pprof/` (pprof)
+- `GET /debug/pprof/` (pprof; enabled only when `VC_ENABLE_PPROF_HTTP=true`)
+
+HTTP surface toggles:
+- `VC_ENABLE_ADMIN_HTTP` (default: `true` locally, `false` when `DEPLOY_ENV` is `staging`/`production`)
+- `VC_ENABLE_PPROF_HTTP` (default: `false`)
 
 Default reset guard in `configs/worlds.yaml`:
 - `OVERWORLD`, `CITY_HUB`: reset disabled (`403`)
@@ -164,6 +168,7 @@ Cloudflare index backend (D1 ingest):
   - `VC_INDEX_BACKEND=d1`
   - `VC_INDEX_D1_INGEST_URL` (staging/prod domain endpoint)
   - `VC_INDEX_D1_FLUSH_MS`, `VC_INDEX_D1_BATCH_SIZE`
+- Container shard routing key is `shard_id` (legacy `world_id`/`world` aliases still accepted).
 
 Persistence (defaults under `./data`):
 - tick log: `data/worlds/<world>/events/*.jsonl.zst`
@@ -173,6 +178,11 @@ Persistence (defaults under `./data`):
   - local/dev default: sqlite at `data/worlds/<world>/index/world.sqlite`
   - Cloudflare deployment default: D1 ingest (`VC_INDEX_BACKEND=d1`, endpoint `/_cf/indexdb/ingest`)
   - can be disabled via `-disable_db`
+- R2 mirror runtime metrics are exposed on `/metrics`:
+  - queue depth/capacity
+  - enqueue/dropped counts
+  - upload success/fail counts
+  - last success/error unix timestamps
 
 Admin tools:
 - Rollback a region using audit logs (offline):  
