@@ -126,6 +126,7 @@ Four workflows are wired:
     - repository secret: `CLOUDFLARE_API_TOKEN`
     - repository variable: `CLOUDFLARE_ACCOUNT_ID`
     - `staging` environment variables: `CLOUDFLARE_D1_DATABASE_ID`, `CLOUDFLARE_R2_BUCKET`
+    - `staging` environment secrets: `VC_R2_ACCESS_KEY_ID`, `VC_R2_SECRET_ACCESS_KEY`
 
 - `Deploy Cloudflare Production` (`.github/workflows/deploy-cloudflare-production.yml`)
   - triggers automatically on push to `main` (deploy-relevant paths) and manual dispatch
@@ -135,6 +136,7 @@ Four workflows are wired:
     - repository secret: `CLOUDFLARE_API_TOKEN`
     - repository variable: `CLOUDFLARE_ACCOUNT_ID`
     - `production` environment variables: `CLOUDFLARE_D1_DATABASE_ID`, `CLOUDFLARE_R2_BUCKET`
+    - `production` environment secrets: `VC_R2_ACCESS_KEY_ID`, `VC_R2_SECRET_ACCESS_KEY`
 
 Release flow:
 - Commit to `staging` -> auto deploy `staging-api.voxelcraft.ai`

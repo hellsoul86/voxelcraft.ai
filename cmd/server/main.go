@@ -112,6 +112,12 @@ func main() {
 		}
 	}
 
+	r2Mirror, err := buildR2MirrorRuntime(*dataDir, logger)
+	if err != nil {
+		logger.Fatalf("init r2 mirror: %v", err)
+	}
+	defer r2Mirror.Close()
+
 	if idx != nil {
 		if err := idx.UpsertCatalogs(*configDir, cats, tune); err != nil {
 			logger.Printf("index db: upsert catalogs: %v", err)
@@ -224,8 +230,13 @@ func main() {
 	ctx, cancel := signalContext()
 	defer cancel()
 
-	tickLog := persistlog.NewTickLogger(worldDir)
-	auditLog := persistlog.NewAuditLogger(worldDir)
+	logOpts := persistlog.LoggerOptions{}
+	if r2Mirror != nil && r2Mirror.enabled {
+		logOpts.RotateLayout = r2Mirror.rotateLayout
+		logOpts.OnClose = r2Mirror.Enqueue
+	}
+	tickLog := persistlog.NewTickLoggerWithOptions(worldDir, logOpts)
+	auditLog := persistlog.NewAuditLoggerWithOptions(worldDir, logOpts)
 	defer tickLog.Close()
 	defer auditLog.Close()
 	w.SetTickLogger(multiTickLogger{a: tickLog, b: idx})
@@ -243,19 +254,34 @@ func main() {
 				path := filepath.Join(worldDir, "snapshots", fmt.Sprintf("%d.snap.zst", snap.Header.Tick))
 				if err := snapshot.WriteSnapshot(path, snap); err != nil {
 					logger.Printf("snapshot write: %v", err)
-				} else if idx != nil {
+					continue
+				}
+
+				if r2Mirror != nil && r2Mirror.enabled {
+					r2Mirror.Enqueue(path)
+				}
+
+				if idx != nil {
 					idx.RecordSnapshot(path, snap)
 					idx.RecordSnapshotState(snap)
 					if season, archivedPath, ok, err := archive.ArchiveSeasonSnapshot(worldDir, path, snap); err != nil {
 						logger.Printf("archive season snapshot: %v", err)
 					} else if ok {
 						idx.RecordSeason(season, snap.Header.Tick, archivedPath, snap.Seed)
+						if r2Mirror != nil && r2Mirror.enabled {
+							r2Mirror.Enqueue(archivedPath)
+							enqueueIfExists(r2Mirror, filepath.Join(filepath.Dir(archivedPath), "meta.json"))
+						}
 					}
-				} else {
-					// Archive even when index db is disabled.
-					if _, _, _, err := archive.ArchiveSeasonSnapshot(worldDir, path, snap); err != nil {
-						logger.Printf("archive season snapshot: %v", err)
-					}
+					continue
+				}
+
+				// Archive even when index db is disabled.
+				if _, archivedPath, ok, err := archive.ArchiveSeasonSnapshot(worldDir, path, snap); err != nil {
+					logger.Printf("archive season snapshot: %v", err)
+				} else if ok && r2Mirror != nil && r2Mirror.enabled {
+					r2Mirror.Enqueue(archivedPath)
+					enqueueIfExists(r2Mirror, filepath.Join(filepath.Dir(archivedPath), "meta.json"))
 				}
 			}
 		}
@@ -446,6 +472,15 @@ func isLoopbackRemote(remoteAddr string) bool {
 	host = strings.TrimSuffix(host, "]")
 	ip := net.ParseIP(host)
 	return ip != nil && ip.IsLoopback()
+}
+
+func enqueueIfExists(m *r2MirrorRuntime, path string) {
+	if m == nil || !m.enabled {
+		return
+	}
+	if _, err := os.Stat(path); err == nil {
+		m.Enqueue(path)
+	}
 }
 
 type multiTickLogger struct {

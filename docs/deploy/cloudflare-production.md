@@ -9,6 +9,7 @@ This document describes the production deployment path for `voxelcraft.ai` using
 - **Cloudflare Containers**: run the Go server (`cmd/server`) from `Dockerfile.cloudflare`.
 - **D1**: stores request metadata (`world_heads`) for quick state visibility.
 - **R2**: stores the latest world head JSON (`worlds/<world_id>/head.json`).
+- **Container->R2 mirror (S3 API)**: server snapshots/events/audit files are uploaded from container runtime to R2 asynchronously.
 
 ## GitHub Actions workflow
 
@@ -34,6 +35,8 @@ Repository-level:
 Environment-level (`production`):
 - Variable: `CLOUDFLARE_D1_DATABASE_ID`
 - Variable: `CLOUDFLARE_R2_BUCKET`
+- Secret: `VC_R2_ACCESS_KEY_ID`
+- Secret: `VC_R2_SECRET_ACCESS_KEY`
 
 The deploy workflow is bound to `environment: production`.
 
@@ -52,6 +55,8 @@ Custom domain is configured in `cloudflare/wrangler.toml` via:
 pattern = "api.voxelcraft.ai"
 custom_domain = true
 ```
+
+For `VC_R2_ACCESS_KEY_ID` / `VC_R2_SECRET_ACCESS_KEY`, create an R2 API token pair in Cloudflare (S3-compatible credentials) with read/write access to the production bucket, then store those values as `production` environment secrets in GitHub Actions.
 
 ## Release flow
 
