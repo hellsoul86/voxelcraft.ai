@@ -2,6 +2,7 @@ package world
 
 import (
 	"encoding/json"
+	"errors"
 	"time"
 
 	resourcespkg "voxelcraft.ai/internal/sim/world/feature/director/resources"
@@ -44,11 +45,22 @@ func (w *World) stepInternal(joins []JoinRequest, leaves []string, actions []Act
 		w.handleTransferIn(req)
 	}
 	for _, req := range injectEvents {
-		if req.AgentID == "" || req.Event == nil {
-			continue
+		var err error
+		switch {
+		case req.AgentID == "":
+			err = errors.New("missing agent id")
+		case req.Event == nil:
+			err = errors.New("missing event payload")
+		default:
+			if a := w.agents[req.AgentID]; a != nil {
+				a.AddEvent(req.Event)
+			}
 		}
-		if a := w.agents[req.AgentID]; a != nil {
-			a.AddEvent(req.Event)
+		if req.Resp != nil {
+			select {
+			case req.Resp <- err:
+			default:
+			}
 		}
 	}
 

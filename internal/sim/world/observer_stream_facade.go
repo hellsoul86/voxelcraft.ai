@@ -8,6 +8,7 @@ import (
 	chunkspkg "voxelcraft.ai/internal/sim/world/feature/observer/chunks"
 	observerruntimepkg "voxelcraft.ai/internal/sim/world/feature/observer/runtime"
 	streamspkg "voxelcraft.ai/internal/sim/world/feature/observer/stream"
+	genpkg "voxelcraft.ai/internal/sim/world/terrain/gen"
 )
 
 type observerClient = streamspkg.Client
@@ -211,8 +212,8 @@ func (w *World) stepObservers(nowTick uint64, joins []RecordedJoin, leaves []str
 		}
 		connected := w.clients[a.ID] != nil
 		if connected {
-			cx := floorDiv(a.Pos.X, 16)
-			cz := floorDiv(a.Pos.Z, 16)
+			cx := genpkg.FloorDiv(a.Pos.X, 16)
+			cz := genpkg.FloorDiv(a.Pos.Z, 16)
 			connectedChunks = append(connectedChunks, ChunkKey{CX: cx, CZ: cz})
 		}
 
@@ -298,8 +299,8 @@ func (w *World) stepObserverVoxelChunksForClient(nowTick uint64, c *observerClie
 	if enabled {
 		if a := w.agents[focusID]; a != nil {
 			centers = append(centers, streamspkg.ChunkKey{
-				CX: floorDiv(a.Pos.X, 16),
-				CZ: floorDiv(a.Pos.Z, 16),
+				CX: genpkg.FloorDiv(a.Pos.X, 16),
+				CZ: genpkg.FloorDiv(a.Pos.Z, 16),
 			})
 		}
 	}

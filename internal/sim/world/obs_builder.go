@@ -8,6 +8,7 @@ import (
 	observerruntimepkg "voxelcraft.ai/internal/sim/world/feature/observer/runtime"
 	streamspkg "voxelcraft.ai/internal/sim/world/feature/observer/stream"
 	progresspkg "voxelcraft.ai/internal/sim/world/feature/work/progress"
+	genpkg "voxelcraft.ai/internal/sim/world/terrain/gen"
 )
 
 func (w *World) buildObs(a *Agent, cl *clientState, nowTick uint64) protocol.ObsMsg {
@@ -76,7 +77,7 @@ func (w *World) buildObs(a *Agent, cl *clientState, nowTick uint64) protocol.Obs
 			TimeOfDay:           float64(int(nowTick)%w.cfg.DayTicks) / float64(w.cfg.DayTicks),
 			Weather:             w.weather,
 			SeasonDay:           w.seasonDay(nowTick),
-			Biome:               biomeAt(w.cfg.Seed, a.Pos.X, a.Pos.Z, w.cfg.BiomeRegionSize),
+			Biome:               genpkg.BiomeAt(w.cfg.Seed, a.Pos.X, a.Pos.Z, w.cfg.BiomeRegionSize),
 			ActiveEvent:         w.activeEventID,
 			ActiveEventEndsTick: w.activeEventEnds,
 		},
