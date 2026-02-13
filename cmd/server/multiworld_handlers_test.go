@@ -172,7 +172,7 @@ func waitActionResultForServerTests(t *testing.T, out <-chan []byte, ref string,
 func TestBuildMultiWorldMux_AdminResetAndLoopback(t *testing.T) {
 	mgr, stop := newTestMultiWorldManagerForServer(t)
 	defer stop()
-	mux := buildMultiWorldMux(mgr, log.New(io.Discard, "", 0))
+	mux := buildMultiWorldMux(mgr, log.New(io.Discard, "", 0), nil, true, false)
 
 	req := httptest.NewRequest(http.MethodGet, "/admin/v1/worlds/state", nil)
 	req.RemoteAddr = "8.8.8.8:1234"
@@ -212,7 +212,7 @@ func TestBuildMultiWorldMux_AdminResetAndLoopback(t *testing.T) {
 func TestBuildMultiWorldMux_MetricsIncludesSwitchAndResourceDensity(t *testing.T) {
 	mgr, stop := newTestMultiWorldManagerForServer(t)
 	defer stop()
-	mux := buildMultiWorldMux(mgr, log.New(io.Discard, "", 0))
+	mux := buildMultiWorldMux(mgr, log.New(io.Discard, "", 0), nil, true, false)
 
 	out := make(chan []byte, 256)
 	sess, _, err := mgr.Join("metrics_agent", true, out, "OVERWORLD")

@@ -7,6 +7,9 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/url"
+	"os"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -32,7 +35,7 @@ func NewServer(w *world.World, logger *log.Logger) *Server {
 		upgrader: websocket.Upgrader{
 			ReadBufferSize:  64 * 1024,
 			WriteBufferSize: 64 * 1024,
-			CheckOrigin:     func(r *http.Request) bool { return true }, // dev default
+			CheckOrigin:     buildObserverCheckOrigin(),
 		},
 	}
 }
@@ -241,4 +244,69 @@ func isLoopbackRemote(remoteAddr string) bool {
 	host = strings.TrimSuffix(host, "]")
 	ip := net.ParseIP(host)
 	return ip != nil && ip.IsLoopback()
+}
+
+func buildObserverCheckOrigin() func(r *http.Request) bool {
+	allowAny := envBoolWithDefault("VC_OBSERVER_ALLOW_ANY_ORIGIN", defaultAllowAnyOrigin())
+	if allowAny {
+		return func(r *http.Request) bool { return true }
+	}
+	return strictSameHostOrigin
+}
+
+func defaultAllowAnyOrigin() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("DEPLOY_ENV"))) {
+	case "staging", "production":
+		return false
+	default:
+		return true
+	}
+}
+
+func envBoolWithDefault(key string, def bool) bool {
+	v := strings.TrimSpace(os.Getenv(key))
+	if v == "" {
+		return def
+	}
+	b, err := strconv.ParseBool(v)
+	if err != nil {
+		return def
+	}
+	return b
+}
+
+func strictSameHostOrigin(r *http.Request) bool {
+	origin := strings.TrimSpace(r.Header.Get("Origin"))
+	if origin == "" {
+		return true
+	}
+	u, err := url.Parse(origin)
+	if err != nil {
+		return false
+	}
+	originHost := hostNoPort(u.Host)
+	requestHost := hostNoPort(r.Host)
+	if originHost == "" || requestHost == "" {
+		return false
+	}
+	return strings.EqualFold(originHost, requestHost)
+}
+
+func hostNoPort(hostport string) string {
+	h := strings.TrimSpace(hostport)
+	if h == "" {
+		return ""
+	}
+	if strings.HasPrefix(h, "[") {
+		if end := strings.Index(h, "]"); end > 0 {
+			return strings.ToLower(strings.Trim(h[1:end], " "))
+		}
+	}
+	if host, _, err := net.SplitHostPort(h); err == nil {
+		return strings.ToLower(strings.TrimSpace(host))
+	}
+	if strings.Count(h, ":") > 1 {
+		return strings.ToLower(h)
+	}
+	return strings.ToLower(strings.TrimSpace(h))
 }

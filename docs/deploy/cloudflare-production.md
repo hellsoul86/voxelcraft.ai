@@ -7,7 +7,7 @@ This document describes the production deployment path for `voxelcraft.ai` using
 - **Cloudflare Worker**: public HTTP/WS entrypoint.
 - **Durable Object (Container-backed)**: `WorldCoordinator` routes requests by `shard_id` (legacy `world_id` alias still accepted) to container instances.
 - **Cloudflare Containers**: run the Go server (`cmd/server`) from `Dockerfile.cloudflare`.
-- Runtime hardening defaults in Cloudflare env: admin HTTP and pprof endpoints disabled (`VC_ENABLE_ADMIN_HTTP=false`, `VC_ENABLE_PPROF_HTTP=false`).
+- Runtime hardening defaults in Cloudflare env: admin HTTP/pprof endpoints disabled and strict origin checks enabled (`VC_ENABLE_ADMIN_HTTP=false`, `VC_ENABLE_PPROF_HTTP=false`, `VC_WS_ALLOW_ANY_ORIGIN=false`, `VC_OBSERVER_ALLOW_ANY_ORIGIN=false`).
 - **D1**: stores request metadata (`world_heads`) and Cloud index tables (replacing local sqlite index in Cloudflare runtime).
 - **R2**: stores the latest world head JSON (`worlds/<world_id>/head.json`).
 - **Container->R2 mirror (S3 API)**: server snapshots/events/audit files are uploaded from container runtime to R2 asynchronously.

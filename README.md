@@ -64,6 +64,8 @@ Endpoints:
 HTTP surface toggles:
 - `VC_ENABLE_ADMIN_HTTP` (default: `true` locally, `false` when `DEPLOY_ENV` is `staging`/`production`)
 - `VC_ENABLE_PPROF_HTTP` (default: `false`)
+- `VC_WS_ALLOW_ANY_ORIGIN` (default: `true` locally, `false` in `staging`/`production`)
+- `VC_OBSERVER_ALLOW_ANY_ORIGIN` (default: `true` locally, `false` in `staging`/`production`)
 
 Default reset guard in `configs/worlds.yaml`:
 - `OVERWORLD`, `CITY_HUB`: reset disabled (`403`)
