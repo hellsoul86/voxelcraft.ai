@@ -112,3 +112,12 @@
 - `voxelcraft_world_switch_total{from,to,result}`
 - `voxelcraft_world_reset_total{world}`
 - `voxelcraft_world_resource_density{world,resource}`
+
+## 10. Security Runtime Env Toggles
+
+- `VC_ENABLE_ADMIN_HTTP`：开启/关闭 admin HTTP 面（Cloudflare staging/prod 默认 `false`）
+- `VC_ENABLE_PPROF_HTTP`：开启/关闭 pprof（默认 `false`）
+- `VC_WS_ALLOW_ANY_ORIGIN`：WS 是否允许任意 Origin（staging/prod 默认 `false`）
+- `VC_OBSERVER_ALLOW_ANY_ORIGIN`：observer WS 是否允许任意 Origin（staging/prod 默认 `false`）
+- `VC_MCP_REQUIRE_HMAC`：MCP sidecar 是否强制 HMAC（staging/prod 默认 `true`）
+- `VC_MCP_HMAC_SECRET`：MCP sidecar 的 HMAC 密钥（等价于 `cmd/mcp -hmac-secret`）

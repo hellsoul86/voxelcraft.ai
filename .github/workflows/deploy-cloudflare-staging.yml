@@ -27,7 +27,7 @@ jobs:
   deploy-staging:
     name: Deploy staging (Containers + DO + D1 + R2)
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 90
     environment:
       name: staging
       url: https://staging-api.voxelcraft.ai
@@ -71,8 +71,8 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: Run Fast Release Gate
-        run: scripts/release_gate.sh --skip-race
+      - name: Run Full Release Gate (with race)
+        run: scripts/release_gate.sh
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -109,9 +109,37 @@ jobs:
         working-directory: cloudflare
         run: npx wrangler d1 execute VOXEL_D1 --remote --env staging --config wrangler.generated.toml --file ./d1/schema.sql
 
-      - name: Deploy Worker + Container image
+      - name: Deploy Worker + Container image (retry transient domains API failures)
         working-directory: cloudflare
-        run: npx wrangler deploy --env staging --config wrangler.generated.toml
+        run: |
+          max_attempts=3
+          attempt=1
+          while true; do
+            echo "Deploy attempt ${attempt}/${max_attempts}"
+            set +e
+            output="$(npx wrangler deploy --env staging --config wrangler.generated.toml 2>&1)"
+            status=$?
+            set -e
+
+            printf '%s\n' "$output"
+
+            if [ "$status" -eq 0 ]; then
+              break
+            fi
+
+            if printf '%s\n' "$output" | grep -qE 'domains/records -> 502 Bad Gateway|Received a malformed response from the API'; then
+              if [ "$attempt" -lt "$max_attempts" ]; then
+                sleep_sec=$((attempt * 20))
+                echo "Transient Cloudflare domain API failure detected; retrying in ${sleep_sec}s..."
+                sleep "$sleep_sec"
+                attempt=$((attempt + 1))
+                continue
+              fi
+            fi
+
+            echo "::error title=Wrangler deploy failed::Non-retryable error or max retries reached."
+            exit "$status"
+          done
 
       - name: Post-deploy quick checks
         run: |
