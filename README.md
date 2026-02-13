@@ -105,7 +105,7 @@ Performance sentinel thresholds (optional env overrides):
 
 ## GitHub Actions
 
-Three workflows are wired:
+Four workflows are wired:
 
 - `CI Fast` (`.github/workflows/ci-fast.yml`)
   - triggers on PR and push to `main/master`
@@ -119,14 +119,28 @@ Three workflows are wired:
   - agent repo defaults to `<owner>/voxelcraft.agent` and can be overridden by input
 
 - `Deploy Cloudflare Staging` (`.github/workflows/deploy-cloudflare-staging.yml`)
-  - triggers on push to `main/master` (deploy-relevant paths) and manual dispatch
+  - triggers on push to `staging` (deploy-relevant paths) and manual dispatch
   - runs `scripts/release_gate.sh --skip-race` before deployment
   - deploys Worker + Container image + Durable Object migration + D1 schema
-  - requires GitHub secrets:
-    - `CLOUDFLARE_ACCOUNT_ID`
-    - `CLOUDFLARE_API_TOKEN`
-    - `CLOUDFLARE_D1_DATABASE_ID`
-    - `CLOUDFLARE_R2_BUCKET`
+  - requires GitHub Actions config:
+    - repository secret: `CLOUDFLARE_API_TOKEN`
+    - repository variable: `CLOUDFLARE_ACCOUNT_ID`
+    - `staging` environment variables: `CLOUDFLARE_D1_DATABASE_ID`, `CLOUDFLARE_R2_BUCKET`
+
+- `Deploy Cloudflare Production` (`.github/workflows/deploy-cloudflare-production.yml`)
+  - triggers automatically on push to `main` (deploy-relevant paths) and manual dispatch
+  - runs `scripts/release_gate.sh --skip-race` before deployment
+  - deploys Worker + Container image + Durable Object migration + D1 schema
+  - requires GitHub Actions config:
+    - repository secret: `CLOUDFLARE_API_TOKEN`
+    - repository variable: `CLOUDFLARE_ACCOUNT_ID`
+    - `production` environment variables: `CLOUDFLARE_D1_DATABASE_ID`, `CLOUDFLARE_R2_BUCKET`
+
+Release flow:
+- Commit to `staging` -> auto deploy `staging-api.voxelcraft.ai`
+- Validate on staging
+- Merge `staging` -> `main`
+- `main` push auto deploys `api.voxelcraft.ai`
 
 Manual dispatch (with `voxelcraft.agent` gate):
 ```bash
@@ -138,8 +152,9 @@ gh workflow run "CI Full" -R hellsoul86/voxelcraft.ai \
   -f agent_duration=60
 ```
 
-Cloudflare staging deployment details:
+Cloudflare deployment details:
 - `docs/deploy/cloudflare-staging.md`
+- `docs/deploy/cloudflare-production.md`
 
 Persistence (defaults under `./data`):
 - tick log: `data/worlds/<world>/events/*.jsonl.zst`

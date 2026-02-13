@@ -18,7 +18,7 @@ This document describes the staging deployment path for `voxelcraft.ai` using Cl
 Workflow file: `.github/workflows/deploy-cloudflare-staging.yml`
 
 Trigger:
-- `push` to `main` / `master` (selected paths)
+- `push` to `staging` (selected paths)
 - manual `workflow_dispatch`
 
 Pipeline steps:
@@ -28,12 +28,17 @@ Pipeline steps:
 4. Apply D1 schema (`cloudflare/d1/schema.sql`)
 5. Deploy Worker + Container (`wrangler deploy --env staging`)
 
-## Required GitHub Secrets
+## Required GitHub Actions config
 
-- `CLOUDFLARE_ACCOUNT_ID`
-- `CLOUDFLARE_API_TOKEN`
-- `CLOUDFLARE_D1_DATABASE_ID`
-- `CLOUDFLARE_R2_BUCKET`
+Repository-level:
+- Secret: `CLOUDFLARE_API_TOKEN`
+- Variable: `CLOUDFLARE_ACCOUNT_ID`
+
+Environment-level (`staging`):
+- Variable: `CLOUDFLARE_D1_DATABASE_ID`
+- Variable: `CLOUDFLARE_R2_BUCKET`
+
+The deploy workflow is bound to `environment: staging`.
 
 ## Staging resource naming
 
@@ -41,6 +46,17 @@ Suggested names (prefix `voxelcraft-ai-*`):
 - Worker: `voxelcraft-ai-staging`
 - D1 database: `voxelcraft-ai-staging`
 - R2 bucket: `voxelcraft-ai-staging-state`
+- Custom domain: `staging-api.voxelcraft.ai`
+
+Custom domain is configured in `cloudflare/wrangler.toml` via:
+
+```toml
+[[env.staging.routes]]
+pattern = "staging-api.voxelcraft.ai"
+custom_domain = true
+```
+
+Cloudflare will create DNS records/certificates automatically when the deploy token has the required zone permissions.
 
 ## Optional manual bootstrap commands
 
@@ -50,7 +66,13 @@ npx wrangler d1 create voxelcraft-ai-staging
 npx wrangler r2 bucket create voxelcraft-ai-staging-state
 ```
 
-Then set the returned D1 `database_id` and R2 bucket name in GitHub secrets.
+Then set the returned D1 `database_id` and R2 bucket name as environment variables in GitHub Actions (`staging`).
+
+## Release flow
+
+- Commit to `staging` and validate the deployment at `staging-api.voxelcraft.ai`.
+- After verification, merge `staging` into `main`.
+- Push on `main` triggers automatic production deployment (`api.voxelcraft.ai`).
 
 ## Runtime diagnostics endpoints
 
