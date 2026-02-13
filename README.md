@@ -126,7 +126,7 @@ Four workflows are wired:
     - repository secret: `CLOUDFLARE_API_TOKEN`
     - repository variable: `CLOUDFLARE_ACCOUNT_ID`
     - `staging` environment variables: `CLOUDFLARE_D1_DATABASE_ID`, `CLOUDFLARE_R2_BUCKET`
-    - `staging` environment secrets: `VC_R2_ACCESS_KEY_ID`, `VC_R2_SECRET_ACCESS_KEY`, `VC_INDEX_D1_TOKEN`
+    - `staging` environment secrets: `VC_R2_ACCESS_KEY_ID`, `VC_R2_SECRET_ACCESS_KEY`
 
 - `Deploy Cloudflare Production` (`.github/workflows/deploy-cloudflare-production.yml`)
   - triggers automatically on push to `main` (deploy-relevant paths) and manual dispatch
@@ -136,7 +136,7 @@ Four workflows are wired:
     - repository secret: `CLOUDFLARE_API_TOKEN`
     - repository variable: `CLOUDFLARE_ACCOUNT_ID`
     - `production` environment variables: `CLOUDFLARE_D1_DATABASE_ID`, `CLOUDFLARE_R2_BUCKET`
-    - `production` environment secrets: `VC_R2_ACCESS_KEY_ID`, `VC_R2_SECRET_ACCESS_KEY`, `VC_INDEX_D1_TOKEN`
+    - `production` environment secrets: `VC_R2_ACCESS_KEY_ID`, `VC_R2_SECRET_ACCESS_KEY`
 
 Release flow:
 - Commit to `staging` -> auto deploy `staging-api.voxelcraft.ai`
@@ -159,7 +159,7 @@ Cloudflare deployment details:
 - `docs/deploy/cloudflare-production.md`
 
 Cloudflare index backend (D1 ingest):
-- Worker exposes `POST /_cf/indexdb/ingest` (token-protected via `VC_INDEX_D1_TOKEN`)
+- Worker exposes `POST /_cf/indexdb/ingest` (token-protected via `VC_INDEX_D1_TOKEN`; auto-derived during deploy from existing `CLOUDFLARE_API_TOKEN`, no extra GitHub secret needed)
 - Container uses env vars from wrangler:
   - `VC_INDEX_BACKEND=d1`
   - `VC_INDEX_D1_INGEST_URL` (staging/prod domain endpoint)

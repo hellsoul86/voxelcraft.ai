@@ -37,7 +37,6 @@ Environment-level (`production`):
 - Variable: `CLOUDFLARE_R2_BUCKET`
 - Secret: `VC_R2_ACCESS_KEY_ID`
 - Secret: `VC_R2_SECRET_ACCESS_KEY`
-- Secret: `VC_INDEX_D1_TOKEN`
 
 The deploy workflow is bound to `environment: production`.
 
@@ -59,7 +58,7 @@ custom_domain = true
 
 For `VC_R2_ACCESS_KEY_ID` / `VC_R2_SECRET_ACCESS_KEY`, create an R2 API token pair in Cloudflare (S3-compatible credentials) with read/write access to the production bucket, then store those values as `production` environment secrets in GitHub Actions.
 
-For `VC_INDEX_D1_TOKEN`, generate a random secret used by container -> Worker index ingest (`/_cf/indexdb/ingest`) and store it as a `production` environment secret.
+`VC_INDEX_D1_TOKEN` is derived automatically in workflow from existing `CLOUDFLARE_API_TOKEN` and written as Worker secret (no extra GitHub secret required).
 
 ## Release flow
 

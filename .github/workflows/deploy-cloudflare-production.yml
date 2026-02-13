@@ -38,7 +38,6 @@ jobs:
       CLOUDFLARE_R2_BUCKET: ${{ vars.CLOUDFLARE_R2_BUCKET }}
       VC_R2_ACCESS_KEY_ID: ${{ secrets.VC_R2_ACCESS_KEY_ID }}
       VC_R2_SECRET_ACCESS_KEY: ${{ secrets.VC_R2_SECRET_ACCESS_KEY }}
-      VC_INDEX_D1_TOKEN: ${{ secrets.VC_INDEX_D1_TOKEN }}
 
     steps:
       - name: Checkout
@@ -53,7 +52,6 @@ jobs:
             CLOUDFLARE_R2_BUCKET
             VC_R2_ACCESS_KEY_ID
             VC_R2_SECRET_ACCESS_KEY
-            VC_INDEX_D1_TOKEN
           )
           missing=0
           for key in "${required[@]}"; do
@@ -100,7 +98,12 @@ jobs:
         run: |
           printf '%s' "$VC_R2_ACCESS_KEY_ID" | npx wrangler secret put VC_R2_ACCESS_KEY_ID --env production --config wrangler.generated.toml
           printf '%s' "$VC_R2_SECRET_ACCESS_KEY" | npx wrangler secret put VC_R2_SECRET_ACCESS_KEY --env production --config wrangler.generated.toml
-          printf '%s' "$VC_INDEX_D1_TOKEN" | npx wrangler secret put VC_INDEX_D1_TOKEN --env production --config wrangler.generated.toml
+
+          # Reuse existing repo secret (no extra GitHub secret required):
+          # derive a dedicated ingest token from CLOUDFLARE_API_TOKEN, so the raw API token
+          # is not exposed to container runtime.
+          VC_INDEX_D1_TOKEN_DERIVED="$(printf '%s' "$CLOUDFLARE_API_TOKEN" | sha256sum | awk '{print $1}')"
+          printf '%s' "$VC_INDEX_D1_TOKEN_DERIVED" | npx wrangler secret put VC_INDEX_D1_TOKEN --env production --config wrangler.generated.toml
 
       - name: Apply D1 schema (idempotent)
         working-directory: cloudflare
