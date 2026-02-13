@@ -15,7 +15,7 @@
 - `runtime_step.go`：单 tick 调度主流程
 - `runtime_api_core.go`：核心运行时 API
 - `runtime_api_admin.go`：admin 请求 API（snapshot/reset）
-- `runtime_api_transfer.go`：跨 world 迁移与查询 API
+- `runtime_api_transfer*.go`：跨 world 迁移与查询 API（transfer / agent_pos / events / org_meta）
 - `debug_api.go`：仅测试/调试辅助 API
 
 ## 2. Authoritative Tick Order
@@ -51,11 +51,19 @@
 - 对外暴露 `World` API
 - 仅保留“编排壳 + 适配器壳”：
   - `*_facade.go`：系统调度与状态落点
-    - 例如：`session_facade.go`、`contracts_facade.go`、`conveyor_facade.go`、`survival_facade.go`、`entities_items_facade.go`
+    - 例如：`session_facade.go`、`contracts_facade.go`、`conveyor_facade.go`、`survival_facade.go`、`entities_runtime_facade.go`、`entities_items_runtime_facade.go`
     - director/fun/season 已按域拆分：`director_runtime_facade.go`、`director_events_facade.go`、`season_facade.go`、`fun_facade.go`
   - `instants_adapter_factory.go`：instant env 的 world->featurectx 构造入口
-  - `tasks_adapter_*.go`：任务执行环境适配器（work/claim/movement 分域）
+  - `tasks_adapter_factory.go`：任务执行环境适配器（work/claim/movement 分域）
   - `runtime_api_*.go`：核心/admin/transfer 三类 API 面
+  - `movement_tasks_facade.go` / `work_tasks_facade.go`：任务系统 façade（movement/work）
+  - `tasks_dispatch.go`：task req 分发表（handler 映射）
+  - `terrain_runtime_facade.go`：2D 地形/方块运行时语义 helper
+
+实现约束说明（第一性原则）：
+- 需要直接操作 `World` 私有状态或定义 `World` 方法的代码必须留在根包（Go 语言限制：不能在外包为非本包类型定义方法）
+- 因此根包保留少量 `*_facade.go`/`*_dispatch.go`/`*_adapter_factory.go` 作为编排壳
+- 可纯化的算法、规则、编解码与业务流程已下沉到 `feature/*`、`logic/*`、`io/*`、`policy/*`
 
 ### 3.2 Kernel（`internal/sim/world/kernel/model`）
 
@@ -104,7 +112,7 @@
 - `io/*`：纯编解码
 - `policy/rules`：纯规则判定
 - `featurectx/*`：feature 调用 world façade 的小接口适配层
-  - 例如：`featurectx/workexec`、`featurectx/workrequest`、`featurectx/claimrequest`
+  - 例如：`featurectx/workexec`、`featurectx/workrequest`、`featurectx/claimrequest`、`featurectx/movement`
   - instant 分域适配：`featurectx/instants/{session,economy,contracts,conveyor,governance,observerposting}`
 
 ## 4. Dependency Rules

@@ -2,35 +2,11 @@ package world
 
 import (
 	"voxelcraft.ai/internal/protocol"
+	"voxelcraft.ai/internal/sim/catalogs"
 	"voxelcraft.ai/internal/sim/tasks"
 	claimspkg "voxelcraft.ai/internal/sim/world/feature/governance/claims"
-	runtimepkg "voxelcraft.ai/internal/sim/world/feature/movement/runtime"
 	workruntimepkg "voxelcraft.ai/internal/sim/world/feature/work/runtime"
 )
-
-func (w *World) systemMovementImpl(nowTick uint64) {
-	runtimepkg.RunMovementSystem(movementTaskReqWorldEnv{w: w}, runtimepkg.SystemInput{
-		NowTick:           nowTick,
-		Weather:           w.weather,
-		ActiveEventID:     w.activeEventID,
-		ActiveEventRadius: w.activeEventRadius,
-		ActiveEventEnds:   w.activeEventEnds,
-		ActiveEventCenter: w.activeEventCenter,
-	})
-}
-
-func handleTaskStop(_ *World, a *Agent, tr protocol.TaskReq, nowTick uint64) {
-	a.MoveTask = nil
-	a.AddEvent(actionResult(nowTick, tr.ID, true, "", "stopped"))
-}
-
-func handleTaskMoveTo(w *World, a *Agent, tr protocol.TaskReq, nowTick uint64) {
-	runtimepkg.HandleTaskMoveTo(movementTaskReqWorldEnv{w: w}, actionResult, a, tr, nowTick)
-}
-
-func handleTaskFollow(w *World, a *Agent, tr protocol.TaskReq, nowTick uint64) {
-	runtimepkg.HandleTaskFollow(movementTaskReqWorldEnv{w: w}, actionResult, a, tr, nowTick)
-}
 
 func handleTaskMine(w *World, a *Agent, tr protocol.TaskReq, nowTick uint64) {
 	workruntimepkg.HandleTaskMine(newWorkTaskReqEnv(w), actionResult, a, tr, nowTick, w.cfg.AllowMine)
@@ -87,6 +63,7 @@ func (w *World) systemWorkImpl(nowTick uint64) {
 		}
 	}
 }
+
 func (w *World) tickMine(a *Agent, wt *tasks.WorkTask, nowTick uint64) {
 	workruntimepkg.TickMine(newWorkTaskExecEnv(w), a, wt, nowTick)
 }
@@ -146,4 +123,40 @@ func handleTaskClaimLand(w *World, a *Agent, tr protocol.TaskReq, nowTick uint64
 
 func handleTaskBuildBlueprint(w *World, a *Agent, tr protocol.TaskReq, nowTick uint64) {
 	workruntimepkg.HandleTaskBuildBlueprint(newWorkTaskReqEnv(w), actionResult, a, tr, nowTick, w.cfg.AllowBuild)
+}
+
+type containerCand = workruntimepkg.StorageCandidate
+
+func (w *World) blueprintStorageCandidates(agentID string, anchor Vec3i) []containerCand {
+	var anchorLandID string
+	if land := w.landAt(anchor); land != nil {
+		anchorLandID = land.LandID
+	}
+	return workruntimepkg.BuildStorageCandidates(workruntimepkg.StorageCandidateInput{
+		Anchor:        anchor,
+		AnchorLandID:  anchorLandID,
+		AgentID:       agentID,
+		Containers:    w.containers,
+		AutoPullRange: w.cfg.BlueprintAutoPullRange,
+		LandIDAt: func(pos Vec3i) (string, bool) {
+			land := w.landAt(pos)
+			if land == nil {
+				return "", false
+			}
+			return land.LandID, true
+		},
+		CanWithdraw: func(agentID string, pos Vec3i) bool {
+			return w.canWithdrawFromContainer(agentID, pos)
+		},
+		Manhattan: Manhattan,
+	})
+}
+
+func (w *World) blueprintEnsureMaterials(a *Agent, anchor Vec3i, cost []catalogs.ItemCount, nowTick uint64) (ok bool, errMsg string) {
+	if a == nil || len(cost) == 0 {
+		return true, ""
+	}
+
+	cands := w.blueprintStorageCandidates(a.ID, anchor)
+	return workruntimepkg.EnsureBlueprintMaterials(a.Inventory, cands, cost)
 }

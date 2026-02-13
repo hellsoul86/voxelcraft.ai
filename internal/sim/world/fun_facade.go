@@ -7,13 +7,14 @@ import (
 	"voxelcraft.ai/internal/sim/catalogs"
 	statspkg "voxelcraft.ai/internal/sim/world/feature/director/stats"
 	"voxelcraft.ai/internal/sim/world/logic/blueprint"
+	genpkg "voxelcraft.ai/internal/sim/world/terrain/gen"
 )
 
 func (w *World) funOnBiome(a *Agent, nowTick uint64) {
 	if a == nil {
 		return
 	}
-	b := biomeAt(w.cfg.Seed, a.Pos.X, a.Pos.Z, w.cfg.BiomeRegionSize)
+	b := genpkg.BiomeAt(w.cfg.Seed, a.Pos.X, a.Pos.Z, w.cfg.BiomeRegionSize)
 	if b == "" {
 		return
 	}

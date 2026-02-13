@@ -3,8 +3,33 @@ package world
 import (
 	"voxelcraft.ai/internal/sim/catalogs"
 	conveyruntimepkg "voxelcraft.ai/internal/sim/world/feature/conveyor/runtime"
+	claimrequestctxpkg "voxelcraft.ai/internal/sim/world/featurectx/claimrequest"
+	movementctxpkg "voxelcraft.ai/internal/sim/world/featurectx/movement"
 	workexecctxpkg "voxelcraft.ai/internal/sim/world/featurectx/workexec"
+	workrequestctxpkg "voxelcraft.ai/internal/sim/world/featurectx/workrequest"
+	modelpkg "voxelcraft.ai/internal/sim/world/kernel/model"
 )
+
+func newWorkTaskReqEnv(w *World) workrequestctxpkg.Env {
+	return workrequestctxpkg.Env{
+		NewTaskIDFn: w.newTaskID,
+		ItemEntityExistsFn: func(entityID string) bool {
+			return w.items[entityID] != nil
+		},
+		RecipeExistsFn: func(recipeID string) bool {
+			_, ok := w.catalogs.Recipes.ByID[recipeID]
+			return ok
+		},
+		SmeltExistsFn: func(itemID string) bool {
+			_, ok := w.smeltByInput[itemID]
+			return ok
+		},
+		BlueprintExistsFn: func(blueprintID string) bool {
+			_, ok := w.catalogs.Blueprints.ByID[blueprintID]
+			return ok
+		},
+	}
+}
 
 func newWorkTaskExecEnv(w *World) workexecctxpkg.Env {
 	return workexecctxpkg.Env{
@@ -99,6 +124,79 @@ func newWorkTaskExecEnv(w *World) workexecctxpkg.Env {
 		OnMinedBlockDuringEventFn: func(a *Agent, pos Vec3i, blockName string, nowTick uint64) {
 			w.onMinedBlockDuringEvent(a, pos, blockName, nowTick)
 		},
+	}
+}
+
+func newClaimTaskEnv(w *World) claimrequestctxpkg.Env {
+	return claimrequestctxpkg.Env{
+		InBoundsFn:   w.chunks.inBounds,
+		CanBuildAtFn: w.canBuildAt,
+		ClaimsFn: func() []*LandClaim {
+			out := make([]*LandClaim, 0, len(w.claims))
+			for _, c := range w.claims {
+				out = append(out, c)
+			}
+			return out
+		},
+		BlockAtFn:           w.chunks.GetBlock,
+		AirBlockIDFn:        func() uint16 { return w.chunks.gen.Air },
+		ClaimTotemBlockIDFn: claimTotemBlockID(w.catalogs.Blocks.Index),
+		SetBlockFn:          w.chunks.SetBlock,
+		AuditSetBlockFn:     w.auditSetBlock,
+		NewLandIDFn:         w.newLandID,
+		WorldTypeFn:         func() string { return w.cfg.WorldType },
+		DayTicksFn:          func() int { return w.cfg.DayTicks },
+		PutClaimFn: func(c *LandClaim) {
+			if c != nil {
+				w.claims[c.LandID] = c
+			}
+		},
+	}
+}
+
+func newMovementTaskEnv(w *World) movementctxpkg.Env {
+	if w == nil {
+		return movementctxpkg.Env{}
+	}
+	return movementctxpkg.Env{
+		NewTaskIDFn:       w.newTaskID,
+		InBoundsFn:        w.chunks.inBounds,
+		FollowTargetPosFn: w.followTargetPos,
+		SortedAgentsFn:    w.sortedAgents,
+		SurfaceYFn:        w.surfaceY,
+		BlockSolidAtFn: func(pos modelpkg.Vec3i) bool {
+			return w.blockSolid(w.chunks.GetBlock(pos))
+		},
+		LandAtFn:           w.landAt,
+		LandCoreContainsFn: w.landCoreContains,
+		IsLandMemberFn:     w.isLandMember,
+		OrgByIDFn:          w.orgByID,
+		TransferAccessTicketFn: func(ownerID string, item string, count int) {
+			if ownerID == "" || item == "" || count <= 0 {
+				return
+			}
+			if owner := w.agents[ownerID]; owner != nil {
+				owner.Inventory[item] += count
+				return
+			}
+			if org := w.orgByID(ownerID); org != nil {
+				w.orgTreasury(org)[item] += count
+			}
+		},
+		RecordDeniedFn: func(nowTick uint64) {
+			if w.stats != nil {
+				w.stats.RecordDenied(nowTick)
+			}
+		},
+		RecordStructureUsageFn: w.recordStructureUsage,
+		OnBiomeFn:              w.funOnBiome,
+	}
+}
+
+func claimTotemBlockID(index map[string]uint16) func() (uint16, bool) {
+	return func() (uint16, bool) {
+		id, ok := index["CLAIM_TOTEM"]
+		return id, ok
 	}
 }
 

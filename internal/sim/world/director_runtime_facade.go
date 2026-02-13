@@ -9,6 +9,7 @@ import (
 	metricspkg "voxelcraft.ai/internal/sim/world/feature/director/metrics"
 	runtimepkg "voxelcraft.ai/internal/sim/world/feature/director/runtime"
 	"voxelcraft.ai/internal/sim/world/logic/directorcenter"
+	genpkg "voxelcraft.ai/internal/sim/world/terrain/gen"
 )
 
 func (w *World) systemDirector(nowTick uint64) {
@@ -59,7 +60,7 @@ func (w *World) systemDirector(nowTick uint64) {
 	})
 
 	// Sample deterministically using world seed + tick.
-	ev := directorcenter.SampleWeighted(weights, hash2(w.cfg.Seed, int(nowTick), 1337))
+	ev := directorcenter.SampleWeighted(weights, genpkg.Hash2(w.cfg.Seed, int(nowTick), 1337))
 	if ev == "" {
 		return
 	}
