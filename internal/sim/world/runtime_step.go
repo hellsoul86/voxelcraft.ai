@@ -5,9 +5,10 @@ import (
 	"time"
 
 	resourcespkg "voxelcraft.ai/internal/sim/world/feature/director/resources"
+	transferruntimepkg "voxelcraft.ai/internal/sim/world/feature/transfer/runtime"
 )
 
-func (w *World) stepInternal(joins []JoinRequest, leaves []string, actions []ActionEnvelope, transferOutReqs []transferOutReq, transferInReqs []transferInReq, injectEvents []injectEventReq) {
+func (w *World) stepInternal(joins []JoinRequest, leaves []string, actions []ActionEnvelope, transferOutReqs []transferruntimepkg.TransferOutReq, transferInReqs []transferruntimepkg.TransferInReq, injectEvents []injectEventReq) {
 	stepStart := time.Now()
 	nowTick := w.tick.Load()
 

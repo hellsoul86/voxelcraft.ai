@@ -97,3 +97,37 @@ func SensorNeighborOffsets() []Pos {
 		{X: 0, Y: 0, Z: -1},
 	}
 }
+
+func DirectionTag(dx, dz int) string {
+	switch {
+	case dx == 1 && dz == 0:
+		return "+X"
+	case dx == -1 && dz == 0:
+		return "-X"
+	case dx == 0 && dz == 1:
+		return "+Z"
+	case dx == 0 && dz == -1:
+		return "-Z"
+	default:
+		return "?"
+	}
+}
+
+func YawToDir(yaw int) (dx, dz int) {
+	y := yaw % 360
+	if y < 0 {
+		y += 360
+	}
+	// Nearest 90 degrees.
+	dir := ((y + 45) / 90) % 4
+	switch dir {
+	case 0:
+		return 0, 1 // +Z
+	case 1:
+		return 1, 0 // +X
+	case 2:
+		return 0, -1 // -Z
+	default:
+		return -1, 0 // -X
+	}
+}

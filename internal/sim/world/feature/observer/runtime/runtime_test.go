@@ -23,3 +23,27 @@ func TestBuildPublicBoards(t *testing.T) {
 		t.Fatalf("unexpected boards output: %+v", boards)
 	}
 }
+
+func TestBuildLocalRules(t *testing.T) {
+	out := BuildLocalRules(LocalRulesInput{
+		Permissions: map[string]bool{"can_build": true},
+		HasLand:     false,
+	})
+	if out.Role != "WILD" || out.Tax["market"] != 0 {
+		t.Fatalf("unexpected wild rules: %+v", out)
+	}
+
+	out = BuildLocalRules(LocalRulesInput{
+		Permissions:        map[string]bool{"can_build": false},
+		HasLand:            true,
+		LandID:             "L1",
+		Owner:              "A1",
+		IsOwner:            true,
+		MarketTax:          0.05,
+		MaintenanceDueTick: 123,
+		MaintenanceStage:   2,
+	})
+	if out.Role != "OWNER" || out.LandID != "L1" || out.Tax["market"] != 0.05 {
+		t.Fatalf("unexpected claimed rules: %+v", out)
+	}
+}

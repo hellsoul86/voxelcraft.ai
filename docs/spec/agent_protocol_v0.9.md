@@ -1,189 +1,118 @@
-# VoxelCraft Agent Protocol v0.9
+# VoxelCraft Agent Protocol（Runtime Current Spec）
 
-目标：让 agent 获取结构化观测（OBS）并输出高层动作（ACT），避免陷入像素感知与逐格摆块细节。
+本文档描述当前服务端实现的协议行为（默认 `1.1`，兼容 `1.0`）。
 
 ## 1. Transport
 
-- WebSocket endpoint: `/v1/ws`
-- Encoding: JSON text frames
-- Protocol version: `0.9`
-- 连接后 **5 秒内必须发送 HELLO**，否则服务器断开连接
+- Endpoint: `WS /v1/ws`
+- 编码：JSON text frame
+- HELLO 超时：连接后 5 秒内未发 `HELLO` 则断开
 
-## 2. Session Lifecycle
+## 2. Version Negotiation
 
-1. Client -> Server: `HELLO`
-2. Server -> Client: `WELCOME`
-3. Server -> Client: `CATALOG`（可分片，MVP 单片）
-4. Tick loop:
-   - Server -> Client: `OBS`（每 tick）
-   - Client -> Server: `ACT`（可为空）
+### 2.1 HELLO（client -> server）
 
-重连（MVP）：
-- Client 可在 `HELLO.auth.token` 中带上上一次 `WELCOME.resume_token`，服务端会尽力恢复同一个 `agent_id`（连接级功能，不影响世界确定性）。
+关键字段：
+- `protocol_version`（兼容字段）
+- `supported_versions`：例如 `["1.1","1.0"]`
+- `client_capabilities`：`delta_voxels`、`ack_required`、`event_cursor`
+- `world_preference`（可选）
 
-## 3. HELLO
+### 2.2 WELCOME（server -> client）
 
-```json
-{
-  "type":"HELLO",
-  "protocol_version":"0.9",
-  "agent_name":"AliceBot",
-  "capabilities":{
-    "delta_voxels":true,
-    "max_queue":8
-  },
-  "auth":{"token":"OPTIONAL"}
-}
-```
+关键字段：
+- `selected_version`：服务端选择版本
+- `server_capabilities`：`ack` / `event_batch` / `idempotency`
+- `session_id`
+- `agent_id` / `resume_token`
+- `current_world_id` / `world_manifest`
+- `world_params`（2D 语义：`chunk_size=[16,16,1]`, `height=1`）
 
-## 4. WELCOME
+## 3. Core Messages
 
-```json
-{
-  "type":"WELCOME",
-  "protocol_version":"0.9",
-  "agent_id":"A17",
-  "resume_token":"resume_world_1_...",
-  "world_params":{
-    "tick_rate_hz":5,
-    "chunk_size":[16,16,1],
-    "height":1,
-    "obs_radius":7,
-    "day_ticks":6000,
-    "seed":1337
-  },
-  "catalogs":{
-    "block_palette":{"digest":"...","count":28},
-    "item_palette":{"digest":"...","count":40},
-    "recipes_digest":"...",
-    "blueprints_digest":"...",
-    "law_templates_digest":"...",
-    "events_digest":"..."
-  }
-}
-```
+### 3.1 CATALOG
 
-## 5. CATALOG
+固定下发顺序：
+1. `block_palette`
+2. `item_palette`
+3. `tuning`
+4. `recipes`
+5. `blueprints`
+6. `law_templates`
+7. `events`
 
-```json
-{
-  "type":"CATALOG",
-  "protocol_version":"0.9",
-  "name":"block_palette",
-  "digest":"...",
-  "part":1,
-  "total_parts":1,
-  "data":["AIR","DIRT","GRASS","SAND","STONE", "..."]
-}
-```
+### 3.2 OBS
 
-补充（MVP 实现）：
-- 服务器会额外下发 `name="tuning"` 的 catalog，用于告知运行参数（例如 `snapshot_every_ticks`、`director_every_ticks`、`rate_limits` 等），方便 agent 做冷却/调度推理。
-- 服务器会在握手后下发完整 catalogs（MVP：单片），**下发顺序固定**：
-  - `block_palette`
-  - `item_palette`
-  - `tuning`
-  - `recipes`
-  - `blueprints`
-  - `law_templates`
-  - `events`
+关键字段：
+- `tick`（权威 tick）
+- `obs_id`（1.1）
+- `events_cursor`（1.1）
+- `world_id` / `world_clock`
+- `self/world/inventory/local_rules/entities/events/tasks/public_boards`
 
-CATALOG `data` 形状（MVP）：
-- `block_palette`: `string[]`（方块 id 列表，AIR 必为 index=0）
-- `item_palette`: `string[]`（物品 id 列表）
-- `tuning`: object（见 `configs/tuning.yaml` 对应字段；用于冷却/导演频率等）
-- `recipes`: `RecipeDef[]`（按 `recipe_id` 排序）
-  - `{"recipe_id","station","inputs":[{"item","count"}...],"outputs":[...],"tier","time_ticks"}`
-- `blueprints`: `BlueprintDef[]`（按 `id` 排序）
-  - `{"id","author","version","aabb","blocks":[{"pos","block"}...],"cost":[{"item","count"}...]}`
-- `law_templates`: object
-  - `{"templates":[{"id","title","description","params"}...]}`
-- `events`: `EventTemplate[]`（按 `id` 排序）
-  - `{"id","category","title","description","base_weight","params"}`（`params` 可选）
+2D 语义：
+- 可写动作目标坐标必须 `y==0`
+- `OBS.voxels` 仍是 cube 结构，但非 `y==0` 层通常是 `AIR`
 
-## 6. OBS
+### 3.3 ACT
 
-关键点：
-- `OBS.tick` 是权威 tick
-- agent 以它为基准回 `ACT.tick`（通常等于最后收到的 OBS.tick）
-- **MVP（当前实现）为 2D tilemap**：所有会写世界的动作（如 `MINE/PLACE/BUILD_BLUEPRINT/CLAIM_LAND`）必须 `y==0`，否则返回 `E_INVALID_TARGET`。
-- 兼容读语义：`GetBlock(y!=0)` 视为 `AIR`；因此 `OBS.voxels` 仍是 3D cube，但除 `y==0` 层外通常全是 `AIR`（RLE 压缩后很小）。
+通用字段：
+- `instants[]` / `tasks[]` / `cancel[]`
+- `tick`
 
-见 `schemas/obs.schema.json`。
+1.1 字段：
+- `act_id`
+- `based_on_obs_id`
+- `idempotency_key`
+- `expected_world_id`（会写状态动作必须带）
 
-补充（MVP 实现）：
-- `local_rules.role` 会给出当前所处地块语义角色：`WILD|OWNER|MEMBER|VISITOR`
-- `local_rules.owner` 可能是 agent id 或 org id（如 `ORG000001`）
-- `local_rules.maintenance_due_tick` / `local_rules.maintenance_stage` 用于领地维护费与保护降级提示
-- `fun_score`（可选）提供多维 Fun Score 面板：`novelty/creation/social/influence/narrative/risk_rescue`
-- `events` 中可能出现：`FUN`（fun 变动明细）、`FINE`（罚款）、`ACCESS_PASS`（门票扣除）
-- `entities`（MVP）可能包含具备额外 tags 的功能块：
-  - `CONVEYOR`：`tags=["dir:+X|-X|+Z|-Z"]`
-  - `SWITCH`：`tags=["state:on|off"]`
-  - `SENSOR`：`tags=["state:on|off"]`（当前默认规则：附近掉落物或相邻容器有可用库存时为 on）
+stale 窗口：
+- 服务端仅接受 `ACT.tick` 在 `[current_tick-2, current_tick]`
 
-## 7. ACT
+### 3.4 ACK（1.1）
 
-规则：
-- `ACT.tick` 表示该 ACT 响应的最后一次 OBS.tick
-- 服务器只接受 `ACT.tick` 在 `[current_tick-2, current_tick]` 范围内的动作，否则 `E_STALE`
-- 两级动作：`instants`（即时）与 `tasks`（持续）
-- 并发限制：每 agent 同时最多 1 个 Movement Task + 1 个 Work Task
+`ACK` 只表示“受理结果”，不表示业务完成：
+- `ack_for`（act_id）
+- `accepted`
+- `code` / `message`
+- `server_tick` / `world_id`
 
-见 `schemas/act.schema.json`。
+业务完成仍通过后续 `OBS.events` 的 `ACTION_RESULT` / `TASK_DONE` / `TASK_FAIL` 等反馈。
 
-### 7.1 MVP 已实现动作
+### 3.5 EVENT_BATCH_REQ / EVENT_BATCH（1.1）
 
-Instants:
-- `SAY(channel,text)`
-- `WHISPER(to,text)`
-- `EAT(item_id,count?)`（食物回血+回饥饿+回体力）
-- `OFFER_TRADE(to, offer, request)`
-- `ACCEPT_TRADE(trade_id)`
-- `DECLINE_TRADE(trade_id)`
-- `POST_BOARD(board_id,title,body)`
-- `SEARCH_BOARD(board_id,text,limit?)`
-- `SET_SIGN(target_id,text)`（target_id 形如 `SIGN@x,y,z`）
-- `TOGGLE_SWITCH(target_id)`（target_id 形如 `SWITCH@x,y,z`）
-- `UPGRADE_CLAIM(land_id,radius)`（radius 目前仅支持 `64|128`；要求 land admin 且维护费 stage=0）
-- `SET_PERMISSIONS(land_id, policy)` (claim flags)
-- `ADD_MEMBER(land_id, member_id)` / `REMOVE_MEMBER(land_id, member_id)` (claim members)
-- `CREATE_ORG(org_kind, org_name)` -> `org_id` (kinds: `GUILD|CITY`)
-- `JOIN_ORG(org_id)` / `LEAVE_ORG()`
-- `ORG_DEPOSIT(org_id,item_id,count)` / `ORG_WITHDRAW(org_id,item_id,count)` (withdraw requires org admin)
-- `DEED_LAND(land_id, new_owner)` (new_owner can be agent_id or org_id)
-- `PROPOSE_LAW(land_id, template_id, params, title?)` (MVP: land owner or member; supported templates: `MARKET_TAX`, `CURFEW_NO_BUILD`, `FINE_BREAK_PER_BLOCK`, `ACCESS_PASS_CORE`)
-- `VOTE(law_id, choice)` (MVP: land owner or member; `choice` in `YES|NO|ABSTAIN`)
-- `SAVE_MEMORY(key,value,ttl_ticks)`
-- `LOAD_MEMORY(prefix,limit)`
+用于可靠补拉事件：
+- 请求：`EVENT_BATCH_REQ{req_id,since_cursor,limit}`
+- 响应：`EVENT_BATCH{req_id,events,next_cursor,world_id}`
 
-`SAY` channels（MVP）：
-- `LOCAL`：广播给曼哈顿距离 `<=32` 的 agents
-- `CITY`：仅广播给同一组织 `org_id` 的成员；发送者必须已加入该组织，否则 `E_NO_PERMISSION`
-- `MARKET`：全服广播；发送者当前位置需 `local_rules.permissions.can_trade=true`，否则 `E_NO_PERMISSION`
+建议客户端使用 cursor 持久化消费，不依赖 `OBS.events` 的短窗口。
 
-Tasks:
-- `MOVE_TO(target,tolerance)`
-- `FOLLOW(target_id,distance?)`
-- `STOP()`
-- `MINE(block_pos)`
-- `GATHER(target_id)`（拾取掉落物，target_id 为 item entity id）
-- `PLACE(block_pos,item_id)` (single-block placement)
-- `OPEN(target_id)` (open container/terminal)
-- `TRANSFER(src_container,dst_container,item_id,count)` (`SELF` is allowed)
-- `CRAFT(recipe_id,count)`
-- `SMELT(item_id,count)`
-- `BUILD_BLUEPRINT(blueprint_id,anchor,rotation)`（MVP：若背包材料不足，会尝试从 `anchor` 32 格内、同一领地内的 `CHEST/CONTRACT_TERMINAL` 自动补齐）
-- `CLAIM_LAND(anchor,radius)`
+## 4. 动作模型
 
-Contracts (Instants):
-- `POST_CONTRACT(terminal_id, contract_kind, requirements, reward, deposit?, duration_ticks?|deadline_tick, blueprint_id?, anchor?, rotation?)`
-- `ACCEPT_CONTRACT(terminal_id, contract_id)`
-- `SUBMIT_CONTRACT(terminal_id, contract_id)`
-- `CLAIM_OWED(terminal_id)`
+- 即时动作：`instants`
+- 持续任务：`tasks`
+- 并发限制：每 agent 同时最多
+  - 1 个 movement task
+  - 1 个 work task
 
-## 8. Error Codes (MVP)
+MVP 已实现能力（当前）：
+- 移动：`MOVE_TO`、`FOLLOW`、`STOP`
+- 作业：`MINE`、`GATHER`、`PLACE`、`OPEN`、`TRANSFER`、`CRAFT`、`SMELT`、`BUILD_BLUEPRINT`、`CLAIM_LAND`
+- 社交/交易：`SAY`、`WHISPER`、`OFFER_TRADE`、`ACCEPT_TRADE`、`DECLINE_TRADE`
+- 制度：`SET_PERMISSIONS`、`UPGRADE_CLAIM`、`CREATE_ORG`、`JOIN_ORG`、`LEAVE_ORG`、`PROPOSE_LAW`、`VOTE` 等
+- 合约：`POST_CONTRACT`、`ACCEPT_CONTRACT`、`SUBMIT_CONTRACT`、`CLAIM_OWED`
+- 记忆：`SAVE_MEMORY`、`LOAD_MEMORY`
+- 多世界：`SWITCH_WORLD`
 
+## 5. Error Codes（规范）
+
+当前错误码分层：
+- `E_PROTO_*`：协议与请求结构问题
+- `E_WORLD_*`：多世界切换/漂移/忙碌
+- `E_RULE_*`：权限/法律/规则拒绝
+- `E_TASK_*`：任务冲突/目标无效/资源不足/阻塞
+
+兼容保留的常见码：
 - `E_NO_PERMISSION`
 - `E_NO_RESOURCE`
 - `E_INVALID_TARGET`
@@ -194,18 +123,30 @@ Contracts (Instants):
 - `E_STALE`
 - `E_BAD_REQUEST`
 - `E_INTERNAL`
+- `E_WORLD_NOT_FOUND`
+- `E_WORLD_DENIED`
+- `E_WORLD_COOLDOWN`
+- `E_WORLD_BUSY`
 
-## 9. Rate Limits (defaults)
+## 6. Rate Limits（默认）
 
-在 `configs/tuning.yaml` 中可调。
+来自 `configs/tuning.yaml`：
+- `SAY`：`50 ticks / 5`
+- `SAY(MARKET)`：`50 ticks / 2`
+- `WHISPER`：`50 ticks / 5`
+- `OFFER_TRADE`：`50 ticks / 3`
+- `POST_BOARD`：`600 ticks / 1`
 
-当触发 `E_RATE_LIMIT` 时，服务端会在 `ACTION_RESULT` event 中附带冷却信息：
-- `cooldown_ticks`: 距离下一次窗口重置还剩多少 ticks
-- `cooldown_until_tick`: 下一次窗口重置的 tick（client 可据此推算等待时间）
+超限返回 `E_RATE_LIMIT`，并附：
+- `cooldown_ticks`
+- `cooldown_until_tick`
 
-默认值：
-- `SAY`（`LOCAL/CITY`）：`window=50 ticks`, `max=5`
-- `SAY`（`MARKET`）：`window=50 ticks`, `max=2`（独立桶 `SAY_MARKET`，不与普通 `SAY` 共享计数）
-- `WHISPER`：`window=50 ticks`, `max=5`
-- `OFFER_TRADE`：`window=50 ticks`, `max=3`
-- `POST_BOARD`：`window=600 ticks`, `max=1`
+## 7. Sidecar / MCP（OpenClaw）
+
+面向 OpenClaw 推荐使用 MCP sidecar（`cmd/mcp`）：
+- `voxelcraft.get_obs`
+- `voxelcraft.get_events`
+- `voxelcraft.act`
+- `voxelcraft.list_worlds`
+
+sidecar 在 1.1 下会自动补齐 `act_id`、`based_on_obs_id`、`idempotency_key`、`expected_world_id`，降低模型端协议负担。

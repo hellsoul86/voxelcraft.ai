@@ -26,3 +26,18 @@ func TestForLand(t *testing.T) {
 		t.Fatalf("unexpected degraded perms: %#v", late)
 	}
 }
+
+func TestCanWithdrawContainer(t *testing.T) {
+	if !CanWithdrawContainer(false, false, 0) {
+		t.Fatalf("wild container should allow withdraw")
+	}
+	if CanWithdrawContainer(true, false, 0) {
+		t.Fatalf("visitor should not withdraw in protected land")
+	}
+	if !CanWithdrawContainer(true, true, 0) {
+		t.Fatalf("member should withdraw")
+	}
+	if !CanWithdrawContainer(true, false, 2) {
+		t.Fatalf("visitor should withdraw after protection downgrade")
+	}
+}

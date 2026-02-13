@@ -1,75 +1,78 @@
-# World Director & Fun Score v0.9
+# World Director & Fun（Runtime Current）
 
-目标：让世界长期“有故事”，同时避免 agent 只会刷一个指标。
+## 1. Director 目标
 
-## 1. Fun Score（多维回馈信号）
+Director 用于维持世界节奏，避免长期单一最优策略。
 
-推荐 6 维：
-- Novelty（新奇）
-- Creation（创造）
-- Social（社交）
-- Influence（影响力）
-- Narrative（叙事参与）
-- Risk & Rescue（冒险与救援）
+输入信号（滚动窗口）：
+- Trade 活跃度
+- 冲突/拒绝率
+- 探索度
+- 资源不均衡
+- 公共基础设施占比
 
-MVP 协议落点：
-- `OBS.fun_score`：累计分面板（整数）
-- `events[].type == "FUN"`：每次加分的明细（dim/delta/total/reason）
+输出：
+- 事件选择
+- 事件实例化位置
+- 事件窗口与公告
 
-通用规则：
-- 同类行为短时间重复，收益衰减（diminishing returns）
-- 高分尽量来自外部性：他人使用/参与/认可，而非自循环
+## 2. 事件调度策略
 
-反刷要点（Checklist）：
-- 必须有外部性：建筑分看使用量，不看摆块数
-- 重复衰减：滑动窗口内指数衰减
-- 结构需要存活：建筑分需在 N ticks 内未被拆毁
-- 风险必须有成果：只冒险不给分，救援/交付才给分
-- 信誉联动：低信誉社交分打折
+当前策略是“脚本节奏 + 反馈权重”混合：
+- 赛季前 7 天优先脚本化节奏
+- 其后按 `director_every_ticks` 周期评估并采样
 
-MVP 简化说明：
-- 事件类 Novelty/Narrative 更偏向“在事件窗口内完成正向结果”触发（而不是仅收到事件广播就给分）
+权重修正方向：
+- 交易低 -> 提高市场/协作类事件概率
+- 探索低 -> 提高远征/遗迹类事件概率
+- 冲突高 -> 提高治理/修复类事件概率
+- 贫富差距高 -> 提高公共工程/治理窗口概率
 
-## 2. 世界事件生成器（Director）
+## 3. 事件实例化
 
-核心思路：用世界状态做反馈控制，补短板。
+实例化流程：
+1. 选中心点
+2. 应用 spawn plan（资源簇、营地、公告板等）
+3. 向 agent 投递 `WORLD_EVENT`
+4. 事件窗口内收集行为信号
 
-指标（示例）：
-- exploration
-- trade volume
-- conflict
-- inequality
-- guild dominance
-- public infra ratio
+常见事件类别（由配置模板驱动）：
+- 资源：`CRYSTAL_RIFT`, `DEEP_VEIN`
+- 探索：`RUINS_GATE`
+- 公共工程：`FLOOD_WARNING`, `BLIGHT_ZONE`
+- 社会：`MARKET_WEEK`, `BLUEPRINT_FAIR`, `BUILDER_EXPO`
+- 治安/治理：`BANDIT_CAMP`, `CIVIC_VOTE`
 
-调度：
-- 每天（现实时间）至少 1 个轻量事件
-- 每 2–6 小时 1 个中型事件
-- 每 1–2 天 1 个大型事件
+## 4. Fun Score 维度
 
-事件模板库（MVP 12 个）：
-见 `configs/events/*.json`
+当前保留 6 维：
+- `NOVELTY`
+- `CREATION`
+- `SOCIAL`
+- `INFLUENCE`
+- `NARRATIVE`
+- `RISK_RESCUE`
 
-伪代码（实现参考）：
-```python
-def director_tick(world_state):
-    metrics = compute_metrics(world_state)
-    weights = base_event_weights()
-    if metrics.trade < 0.4:
-        weights["MARKET_WEEK"] += 0.25
-        weights["BLUEPRINT_FAIR"] += 0.15
-    if metrics.exploration < 0.3:
-        weights["CRYSTAL_RIFT"] += 0.20
-        weights["RUINS_GATE"] += 0.20
-    if metrics.conflict < 0.1:
-        weights["DEEP_VEIN"] += 0.15
-        weights["BANDIT_CAMP"] += 0.10
-    elif metrics.conflict > 0.25:
-        weights["CIVIC_VOTE"] += 0.25
-        weights["MARKET_WEEK"] += 0.10
-        weights["BUILDER_EXPO"] += 0.10
-    if metrics.inequality > 0.5:
-        weights["CIVIC_VOTE"] += 0.20
-        weights["FLOOD_WARNING"] += 0.10
-    return sample_event(weights)
-```
+输出位置：
+- `OBS.fun_score`（累计）
+- `OBS.events` 中 `type="FUN"`（增量）
+
+## 5. 反刷规则
+
+- 同类行为有递减收益（窗口衰减）
+- 结构相关得分要求存活与被使用
+- 风险分依赖正向结果（救援/交付/事件目标）
+- 社交收益受信誉影响（低信誉打折）
+
+## 6. 结构与影响力
+
+系统会跟踪 blueprint 结构：
+- 延迟发放 creation 分（存活窗口后）
+- 按 unique users/day 结算 influence 分
+- 结构失效（被拆/不匹配）会剔除统计
+
+## 7. 赛季联动
+
+- 赛季切换会重置资源分布与部分运行态
+- 保留组织身份等“文化资产”
+- 事件系统在新赛季重启节奏

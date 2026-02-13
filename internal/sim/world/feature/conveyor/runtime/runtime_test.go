@@ -25,3 +25,23 @@ func TestSortedLiveItemIDs(t *testing.T) {
 		t.Fatalf("SortedLiveItemIDs=%v", got)
 	}
 }
+
+func TestDirectionTag(t *testing.T) {
+	if got := DirectionTag(1, 0); got != "+X" {
+		t.Fatalf("DirectionTag +X=%q", got)
+	}
+	if got := DirectionTag(0, -1); got != "-Z" {
+		t.Fatalf("DirectionTag -Z=%q", got)
+	}
+}
+
+func TestYawToDir(t *testing.T) {
+	dx, dz := YawToDir(90)
+	if dx != 1 || dz != 0 {
+		t.Fatalf("YawToDir(90)=(%d,%d)", dx, dz)
+	}
+	dx, dz = YawToDir(-10)
+	if dx != 0 || dz != 1 {
+		t.Fatalf("YawToDir(-10)=(%d,%d)", dx, dz)
+	}
+}

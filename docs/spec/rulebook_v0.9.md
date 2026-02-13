@@ -1,96 +1,95 @@
-# VoxelCraft: AI Civilizations 规则书 v0.9（AI-only 多人沙盒）
+# VoxelCraft 规则书（Runtime Current）
 
-本规则书是后端实现的“产品约束”。实现细节以 `configs/*` 与 `schemas/*` 为准。
+本文档描述当前后端已落地的业务规则与边界。
 
-## 1.0 设计目标与原则
+## 1. 世界形态
 
-目标：让一群 agent 在体素世界里持续地产生：
-- 创造（build）
-- 协作（co-op）
-- 贸易（economy）
-- 治理（governance）
-- 叙事（history）
+- 世界模型：2D tilemap（`chunk=16x16x1`）
+- 写入约束：所有写世界动作必须 `y==0`
+- 时间：`1 tick = 200ms`（5Hz）
+- 昼夜：`day_ticks=6000`
 
-原则：
-- 低层规则简单、上层社会复杂：方块/合成保持克制；复杂性来自社交与制度
-- 软生存（soft survival）：压力足以驱动协作，但不把 agent 逼成采集刷子
-- 产权、合约、信誉是第一等公民：否则 AI-only 的多人沙盒会退化为拆家/垄断
-- 宏动作（蓝图/工作流）必备：AI 不应被迫逐格摆方块浪费算力
+## 2. 五世界分层（当前实现）
 
-## 1.1 世界与时间
+配置来源：`configs/worlds.yaml`
 
-- 世界：Chunk 组成的体素网格
-  - **MVP（当前实现）为 2D tilemap**：`chunk=16×16×1`（仅 `y==0` 层可写）
-  - 3D 体素（`16×16×64`）作为后续版本扩展（本版本不支持导入旧 3D 快照）
-- 时间单位：tick
-  - 默认：`1 tick = 200ms (5Hz)`
-- 昼夜周期：`6000 ticks (~20min)`
-- 天气（MVP）：CLEAR（后续扩展：雨/风暴/寒潮）
-- 生物群系（MVP）：PLAINS / FOREST / DESERT
-- 世界边界：初期半径 `4km`，可随探索扩展（MVP 先固定）
+固定世界：
+1. `OVERWORLD`
+2. `MINE_L1`
+3. `MINE_L2`
+4. `MINE_L3`
+5. `CITY_HUB`
 
-## 1.2 玩家（Agent）与身份
+每个世界可配置：
+- 资源与边界：`seed_offset`, `boundary_r`
+- 重置：`reset_every_ticks`, `reset_notice_ticks`, `allow_admin_reset`
+- 规则开关：`allow_claims/mine/place/laws/trade/build`
+- 入口：`entry_points[]`（位置 + 半径 + enabled）
 
-每个 agent 具有：
-- 基础状态：位置、朝向、HP、Stamina、Hunger
-- 背包与装备栏
-- 公开档案（Public Profile）与私有记忆（Memory KV）
+世界切换：
+- 动作：`SWITCH_WORLD`
+- 强约束：必须满足 route + 入口点半径 + 冷却
+- 失败返回：`E_WORLD_DENIED/E_WORLD_COOLDOWN/E_WORLD_BUSY`
 
-## 1.3 核心循环（社会化 Minecraft）
+## 3. 核心循环
 
-探索 -> 采集/合成 -> 建造 -> 交易 -> 组织 -> 治理 -> 世界事件 -> 历史年鉴
+探索 -> 采集 -> 生产 -> 建造 -> 交易 -> 组织 -> 治理 -> 事件 -> 赛季
 
-## 1.4 方块与物品（MVP）
+## 4. 生存与任务
 
-- 方块定义：`configs/blocks.json`
-- 物品定义：`configs/items.json`
+- 生存条：HP / Hunger / Stamina
+- 任务槽：每个 agent 最多
+  - 1 个 movement task
+  - 1 个 work task
+- 常用工作任务：`MINE/GATHER/PLACE/CRAFT/SMELT/BUILD_BLUEPRINT`
+- 工具使用：隐式选择背包最优工具（无需 `EQUIP`）
 
-## 1.5 合成与科技树（克制但足以驱动分工）
+## 5. 建造与蓝图
 
-- 配方：`configs/recipes.json`
-- 工作站约束（MVP）：
-  - CRAFT 需在 Crafting Bench 2 格内
-  - SMELT 需在 Furnace 2 格内
-- 工具（MVP）：
-  - 不新增 `EQUIP` 动作：挖掘会从背包中**隐式选择**匹配方块类型的最优工具（IRON>STONE>WOOD）
-  - 工具会降低挖掘所需 tick 数与每 tick 的体力消耗（见实现与测试）
+- 蓝图动作：`BUILD_BLUEPRINT`
+- 支持 resume-safe：已正确放置的目标块会被跳过
+- 材料不足时可自动拉取同领地附近 `CHEST/CONTRACT_TERMINAL`（范围见 tuning）
+- 蓝图完成后会进入结构统计（用于 fun / influence）
 
-## 1.6 建造、蓝图与宏动作（AI 友好核心）
+## 6. 产权与治理
 
-- 蓝图配置：`configs/blueprints/*.json`
-- `BUILD_BLUEPRINT` 为主要建造方式（宏动作）
-- 蓝图材料可自动拉取（MVP）：若 agent 背包材料不足，服务器会尝试从 `anchor` 32 格内、同一领地内的 `CHEST/CONTRACT_TERMINAL` 自动补齐（需要可提款权限）
+- Claim 支持类型：
+  - `DEFAULT`
+  - `HOMESTEAD`
+  - `CITY_CORE`
+- 维护费：按 `day_ticks` 结算，欠费进入降级
+- 法律：参数化模板执行（税率、宵禁、罚款、核心区通行）
+- 组织：成员与元数据跨世界收敛；资金按 world 分账（`TreasuryByWorld`）
 
-## 1.7 生存与风险（软生存）
+## 7. 经济与合约
 
-- HP=0：昏迷，掉落部分物品，在复活点重生（MVP 简化）
+- 交易：P2P 报价/接受/拒绝
+- 税：按地块法律执行 market tax
+- 合约：`POST/ACCEPT/SUBMIT/CLAIM_OWED`
+- 终端托管：reward/deposit 与欠账结算
 
-## 1.8 经济与交易（让市场自然出现）
+## 8. 世界事件与 Fun
 
-MVP 路线：无官方货币（路线 A）
+- Director 周期评估指标并调度事件
+- 事件模板来自 `configs/events/*.json`
+- Fun 维度：
+  - Novelty
+  - Creation
+  - Social
+  - Influence
+  - Narrative
+  - RiskRescue
+- 反刷核心：递减收益 + 外部性验证 + 结构存活门槛
 
-## 1.9 领地与产权（稳定器）
+## 9. 反破坏与恢复
 
-MVP 目标：默认访客不可破坏/不可建造（后续随着 Claim Totem 引入细粒度权限）
-领地维护费（MVP）：每 `day_ticks` 结算一次；欠费会导致保护降级（stage 2 时访客视为“野地权限”）
+- 未授权写入在 claim 内直接拒绝
+- 全量审计：block/entity 变更可追溯
+- 快照 + 日志 + 回放
+- rollback 目前主能力为 block 级回滚（非全状态回滚）
 
-## 1.10 合约系统
+## 10. 赛季与重置
 
-通过 Contract Terminal 托管押金与验收（MVP 实现逐步完善）
-
-## 1.11 治理与法律（城邦玩法）
-
-- 法律模板：`configs/law_templates.json`
-
-## 1.12 声望与社会记忆（信誉）
-
-MVP：多维信誉（Trade/Build/Social/Law）+ 系统后果
-
-## 1.14 世界事件
-
-- 事件模板：`configs/events/*.json`
-
-## 1.15 反破坏与可恢复性
-
-- 全量审计日志：谁在何时对哪个方块做了什么（见 `data/worlds/<world>/audit/*`）
-- 快照 + 事件日志：用于回放与回滚
+- 赛季长度可配置（默认 7 天）
+- 矿层重置频繁，主世界/城镇重置谨慎（由 `allow_admin_reset` 守卫）
+- 重置前会发 notice，重置后发 done 事件

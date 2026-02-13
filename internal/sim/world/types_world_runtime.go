@@ -56,8 +56,8 @@ type World struct {
 	orgMetaUpsert chan transferruntimepkg.OrgMetaUpsertReq
 	leave         chan string
 	stop          chan struct{}
-	transferOut   chan transferOutReq
-	transferIn    chan transferInReq
+	transferOut   chan transferruntimepkg.TransferOutReq
+	transferIn    chan transferruntimepkg.TransferInReq
 	injectEvent   chan injectEventReq
 
 	// Observer (admin-only, read-only)

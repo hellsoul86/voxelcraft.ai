@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"voxelcraft.ai/internal/observerproto"
+	streamspkg "voxelcraft.ai/internal/sim/world/feature/observer/stream"
 )
 
 func TestComputeSurfaceCellAt_surfaceUpdateCases(t *testing.T) {
@@ -36,25 +37,25 @@ func TestComputeSurfaceCellAt_surfaceUpdateCases(t *testing.T) {
 	lx, lz := wx, wz
 
 	// Baseline: empty cell => AIR@0.
-	if got := w.computeSurfaceCellAt(wx, wz); got != (surfaceCell{b: air, y: 0}) {
+	if got := w.computeSurfaceCellAt(wx, wz); got != (surfaceCell{B: air, Y: 0}) {
 		t.Fatalf("baseline surface = %+v, want air@0", got)
 	}
 
 	// Place a block: surface becomes STONE@0.
 	ch.Set(lx, lz, stone)
-	if got := w.computeSurfaceCellAt(wx, wz); got != (surfaceCell{b: stone, y: 0}) {
+	if got := w.computeSurfaceCellAt(wx, wz); got != (surfaceCell{B: stone, Y: 0}) {
 		t.Fatalf("place surface = %+v, want stone@0", got)
 	}
 
 	// Replace the surface: surface becomes WOOD@0.
 	ch.Set(lx, lz, wood)
-	if got := w.computeSurfaceCellAt(wx, wz); got != (surfaceCell{b: wood, y: 0}) {
+	if got := w.computeSurfaceCellAt(wx, wz); got != (surfaceCell{B: wood, Y: 0}) {
 		t.Fatalf("replace surface = %+v, want wood@0", got)
 	}
 
 	// Mine the surface: remove block => AIR@0.
 	ch.Set(lx, lz, air)
-	if got := w.computeSurfaceCellAt(wx, wz); got != (surfaceCell{b: air, y: 0}) {
+	if got := w.computeSurfaceCellAt(wx, wz); got != (surfaceCell{B: air, Y: 0}) {
 		t.Fatalf("mine surface = %+v, want air@0", got)
 	}
 }
@@ -87,25 +88,25 @@ func TestStepObserverChunksForClient_emitsChunkPatch(t *testing.T) {
 
 	dataOut := make(chan []byte, 8)
 	c := &observerClient{
-		id:      "O1",
-		tickOut: make(chan []byte, 1),
-		dataOut: dataOut,
-		cfg: observerCfg{
-			chunkRadius: 1,
-			maxChunks:   1024,
+		ID:      "O1",
+		TickOut: make(chan []byte, 1),
+		DataOut: dataOut,
+		Config: observerCfg{
+			ChunkRadius: 1,
+			MaxChunks:   1024,
 		},
-		chunks: map[ChunkKey]*observerChunk{},
+		Chunks: map[streamspkg.ChunkKey]*observerChunk{},
 	}
 
-	key := ChunkKey{CX: 0, CZ: 0}
+	key := streamspkg.ChunkKey{CX: 0, CZ: 0}
 	st := &observerChunk{
-		key:            key,
-		lastWantedTick: 100,
-		sentFull:       true,
-		needsFull:      false,
-		surface:        w.computeChunkSurface(0, 0),
+		Key:            key,
+		LastWantedTick: 100,
+		SentFull:       true,
+		NeedsFull:      false,
+		Surface:        w.computeChunkSurface(0, 0),
 	}
-	c.chunks[key] = st
+	c.Chunks[key] = st
 
 	// Apply the world change first (audit is recorded after mutation).
 	ch.Set(wx, wz, wood)

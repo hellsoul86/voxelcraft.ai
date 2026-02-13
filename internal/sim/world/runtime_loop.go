@@ -7,6 +7,7 @@ import (
 
 	"voxelcraft.ai/internal/protocol"
 	"voxelcraft.ai/internal/sim/tasks"
+	transferruntimepkg "voxelcraft.ai/internal/sim/world/feature/transfer/runtime"
 )
 
 func (w *World) Run(ctx context.Context) error {
@@ -19,8 +20,8 @@ func (w *World) Run(ctx context.Context) error {
 	var pendingLeaves []string
 	var pendingAdmin []adminSnapshotReq
 	var pendingAdminReset []adminResetReq
-	var pendingTransferOut []transferOutReq
-	var pendingTransferIn []transferInReq
+	var pendingTransferOut []transferruntimepkg.TransferOutReq
+	var pendingTransferIn []transferruntimepkg.TransferInReq
 	var pendingInjectEvents []injectEventReq
 
 	for {
