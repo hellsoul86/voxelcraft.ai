@@ -1,17 +1,22 @@
 import { Container, getContainer } from "@cloudflare/containers";
 
 const WORLD_ID_RE = /^[a-zA-Z0-9_-]{1,64}$/;
-const D1_SCHEMA_SQL = `
-CREATE TABLE IF NOT EXISTS world_heads (
-  world_id TEXT PRIMARY KEY,
-  last_path TEXT NOT NULL,
-  last_status INTEGER NOT NULL,
-  request_count INTEGER NOT NULL DEFAULT 0,
-  last_request_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_world_heads_updated_at ON world_heads(updated_at DESC);
-`;
+const D1_SCHEMA_STATEMENTS = [
+  `
+    CREATE TABLE IF NOT EXISTS world_heads (
+      world_id TEXT PRIMARY KEY,
+      last_path TEXT NOT NULL,
+      last_status INTEGER NOT NULL,
+      request_count INTEGER NOT NULL DEFAULT 0,
+      last_request_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    )
+  `,
+  `
+    CREATE INDEX IF NOT EXISTS idx_world_heads_updated_at
+      ON world_heads(updated_at DESC)
+  `,
+];
 
 let schemaReadyPromise;
 
@@ -40,7 +45,11 @@ function resolveWorldId(request, env) {
 
 async function ensureSchema(env) {
   if (!schemaReadyPromise) {
-    schemaReadyPromise = env.VOXEL_D1.exec(D1_SCHEMA_SQL).catch((err) => {
+    schemaReadyPromise = (async () => {
+      for (const statement of D1_SCHEMA_STATEMENTS) {
+        await env.VOXEL_D1.prepare(statement).run();
+      }
+    })().catch((err) => {
       schemaReadyPromise = undefined;
       throw err;
     });
