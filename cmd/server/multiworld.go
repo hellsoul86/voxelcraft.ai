@@ -36,6 +36,12 @@ func runMultiWorld(rtCfg serverRuntimeConfig, cfg multiworld.Config, tune tuning
 	ctx, cancel := signalContext()
 	defer cancel()
 
+	r2Mirror, err := buildR2MirrorRuntime(rtCfg.DataDir, logger)
+	if err != nil {
+		logger.Fatalf("init r2 mirror: %v", err)
+	}
+	defer r2Mirror.Close()
+
 	runtimes := map[string]*multiworld.Runtime{}
 
 	for _, spec := range cfg.Worlds {
@@ -111,8 +117,13 @@ func runMultiWorld(rtCfg serverRuntimeConfig, cfg multiworld.Config, tune tuning
 			logger.Fatalf("create world (%s): %v", spec.ID, err)
 		}
 
-		tickLog := persistlog.NewTickLogger(worldDir)
-		auditLog := persistlog.NewAuditLogger(worldDir)
+		logOpts := persistlog.LoggerOptions{}
+		if r2Mirror != nil && r2Mirror.enabled {
+			logOpts.RotateLayout = r2Mirror.rotateLayout
+			logOpts.OnClose = r2Mirror.Enqueue
+		}
+		tickLog := persistlog.NewTickLoggerWithOptions(worldDir, logOpts)
+		auditLog := persistlog.NewAuditLoggerWithOptions(worldDir, logOpts)
 		defer tickLog.Close()
 		defer auditLog.Close()
 		w.SetTickLogger(multiTickLogger{a: tickLog, b: idx})
@@ -131,6 +142,9 @@ func runMultiWorld(rtCfg serverRuntimeConfig, cfg multiworld.Config, tune tuning
 						logger.Printf("snapshot write (%s): %v", worldID, err)
 						continue
 					}
+					if r2Mirror != nil && r2Mirror.enabled {
+						r2Mirror.Enqueue(path)
+					}
 					if db != nil {
 						db.RecordSnapshot(path, snap)
 						db.RecordSnapshotState(snap)
@@ -138,10 +152,17 @@ func runMultiWorld(rtCfg serverRuntimeConfig, cfg multiworld.Config, tune tuning
 							logger.Printf("archive season snapshot (%s): %v", worldID, err)
 						} else if ok {
 							db.RecordSeason(season, snap.Header.Tick, archivedPath, snap.Seed)
+							if r2Mirror != nil && r2Mirror.enabled {
+								r2Mirror.Enqueue(archivedPath)
+								enqueueIfExists(r2Mirror, filepath.Join(filepath.Dir(archivedPath), "meta.json"))
+							}
 						}
 					} else {
-						if _, _, _, err := archive.ArchiveSeasonSnapshot(dir, path, snap); err != nil {
+						if _, archivedPath, ok, err := archive.ArchiveSeasonSnapshot(dir, path, snap); err != nil {
 							logger.Printf("archive season snapshot (%s): %v", worldID, err)
+						} else if ok && r2Mirror != nil && r2Mirror.enabled {
+							r2Mirror.Enqueue(archivedPath)
+							enqueueIfExists(r2Mirror, filepath.Join(filepath.Dir(archivedPath), "meta.json"))
 						}
 					}
 				}

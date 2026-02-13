@@ -1,4 +1,5 @@
 import { Container, getContainer } from "@cloudflare/containers";
+import { env as workerEnv } from "cloudflare:workers";
 
 const WORLD_ID_RE = /^[a-zA-Z0-9_-]{1,64}$/;
 const D1_SCHEMA_STATEMENTS = [
@@ -23,6 +24,17 @@ let schemaReadyPromise;
 export class WorldCoordinator extends Container {
   defaultPort = 8080;
   sleepAfter = "10m";
+
+  // Pass R2 mirror settings directly into the container runtime.
+  envVars = {
+    VC_R2_MIRROR: workerEnv.VC_R2_MIRROR ?? "false",
+    VC_R2_ENDPOINT: workerEnv.VC_R2_ENDPOINT ?? "",
+    VC_R2_BUCKET: workerEnv.VC_R2_BUCKET ?? "",
+    VC_R2_PREFIX: workerEnv.VC_R2_PREFIX ?? "voxelcraft-ai",
+    VC_R2_UPLOAD_WORKERS: workerEnv.VC_R2_UPLOAD_WORKERS ?? "2",
+    VC_R2_ACCESS_KEY_ID: workerEnv.VC_R2_ACCESS_KEY_ID ?? "",
+    VC_R2_SECRET_ACCESS_KEY: workerEnv.VC_R2_SECRET_ACCESS_KEY ?? "",
+  };
 }
 
 function coerceWorldId(raw, fallback = "world_1") {

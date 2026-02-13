@@ -9,9 +9,9 @@ This document describes the staging deployment path for `voxelcraft.ai` using Cl
 - **Cloudflare Containers**: run the Go server (`cmd/server`) from `Dockerfile.cloudflare`.
 - **D1**: stores request metadata (`world_heads`) for quick state visibility.
 - **R2**: stores the latest world head JSON (`worlds/<world_id>/head.json`).
+- **Container->R2 mirror (S3 API)**: server snapshots/events/audit files are uploaded from container runtime to R2 asynchronously.
 
-> Note: this is staging-first infrastructure. It gives durable coordination + persistent metadata/object storage,
-> while the game server runtime itself still keeps local runtime data inside the container filesystem.
+> Note: this phase hardens persistence by mirroring runtime artifacts to R2, while preserving local writes for compatibility.
 
 ## GitHub Actions workflow
 
@@ -37,6 +37,8 @@ Repository-level:
 Environment-level (`staging`):
 - Variable: `CLOUDFLARE_D1_DATABASE_ID`
 - Variable: `CLOUDFLARE_R2_BUCKET`
+- Secret: `VC_R2_ACCESS_KEY_ID`
+- Secret: `VC_R2_SECRET_ACCESS_KEY`
 
 The deploy workflow is bound to `environment: staging`.
 
@@ -67,6 +69,8 @@ npx wrangler r2 bucket create voxelcraft-ai-staging-state
 ```
 
 Then set the returned D1 `database_id` and R2 bucket name as environment variables in GitHub Actions (`staging`).
+
+For `VC_R2_ACCESS_KEY_ID` / `VC_R2_SECRET_ACCESS_KEY`, create an R2 API token pair in Cloudflare (S3-compatible credentials) with read/write access to the staging bucket, then store those values as `staging` environment secrets in GitHub Actions.
 
 ## Release flow
 
