@@ -31,6 +31,7 @@ func main() {
 		*hmacSecret = strings.TrimSpace(os.Getenv("VC_MCP_HMAC_SECRET"))
 	}
 	requireHMAC := envBoolWithDefault("VC_MCP_REQUIRE_HMAC", defaultRequireMCPHMAC())
+	allowLegacyHMAC := envBoolWithDefault("VC_MCP_HMAC_ALLOW_LEGACY", defaultAllowLegacyHMAC())
 	if requireHMAC && strings.TrimSpace(*hmacSecret) == "" {
 		log.Fatalf("[mcp] hmac secret required (set -hmac-secret or VC_MCP_HMAC_SECRET)")
 	}
@@ -45,7 +46,7 @@ func main() {
 	} else {
 		authMode = "hmac"
 	}
-	logger.Printf("auth_mode=%s require_hmac=%t", authMode, requireHMAC)
+	logger.Printf("auth_mode=%s require_hmac=%t allow_legacy_hmac=%t", authMode, requireHMAC, allowLegacyHMAC)
 
 	br, err := bridge.NewManager(bridge.Config{
 		WorldWSURL:  *worldWSURL,
@@ -104,6 +105,15 @@ func defaultRequireMCPHMAC() bool {
 		return true
 	default:
 		return false
+	}
+}
+
+func defaultAllowLegacyHMAC() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("DEPLOY_ENV"))) {
+	case "staging", "production":
+		return false
+	default:
+		return true
 	}
 }
 

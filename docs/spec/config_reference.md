@@ -121,3 +121,4 @@
 - `VC_OBSERVER_ALLOW_ANY_ORIGIN`：observer WS 是否允许任意 Origin（staging/prod 默认 `false`）
 - `VC_MCP_REQUIRE_HMAC`：MCP sidecar 是否强制 HMAC（staging/prod 默认 `true`）
 - `VC_MCP_HMAC_SECRET`：MCP sidecar 的 HMAC 密钥（等价于 `cmd/mcp -hmac-secret`）
+- `VC_MCP_HMAC_ALLOW_LEGACY`：是否允许旧版签名串（无 `x-nonce`，默认本地 `true`、staging/prod `false`）
