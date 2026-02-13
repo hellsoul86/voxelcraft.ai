@@ -105,7 +105,7 @@ Performance sentinel thresholds (optional env overrides):
 
 ## GitHub Actions
 
-Two workflows are wired:
+Three workflows are wired:
 
 - `CI Fast` (`.github/workflows/ci-fast.yml`)
   - triggers on PR and push to `main/master`
@@ -118,6 +118,16 @@ Two workflows are wired:
   - manual dispatch can enable optional `voxelcraft.agent` e2e + swarm
   - agent repo defaults to `<owner>/voxelcraft.agent` and can be overridden by input
 
+- `Deploy Cloudflare Staging` (`.github/workflows/deploy-cloudflare-staging.yml`)
+  - triggers on push to `main/master` (deploy-relevant paths) and manual dispatch
+  - runs `scripts/release_gate.sh --skip-race` before deployment
+  - deploys Worker + Container image + Durable Object migration + D1 schema
+  - requires GitHub secrets:
+    - `CLOUDFLARE_ACCOUNT_ID`
+    - `CLOUDFLARE_API_TOKEN`
+    - `CLOUDFLARE_D1_DATABASE_ID`
+    - `CLOUDFLARE_R2_BUCKET`
+
 Manual dispatch (with `voxelcraft.agent` gate):
 ```bash
 gh workflow run "CI Full" -R hellsoul86/voxelcraft.ai \
@@ -127,6 +137,9 @@ gh workflow run "CI Full" -R hellsoul86/voxelcraft.ai \
   -f agent_count=50 \
   -f agent_duration=60
 ```
+
+Cloudflare staging deployment details:
+- `docs/deploy/cloudflare-staging.md`
 
 Persistence (defaults under `./data`):
 - tick log: `data/worlds/<world>/events/*.jsonl.zst`

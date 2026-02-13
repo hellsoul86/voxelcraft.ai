@@ -1,0 +1,14 @@
+{
+  "name": "voxelcraft-ai-cloudflare",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "deploy:staging": "wrangler deploy --config wrangler.toml --env staging",
+    "tail:staging": "wrangler tail --config wrangler.toml --env staging",
+    "check:staging": "wrangler deploy --config wrangler.toml --env staging --dry-run"
+  },
+  "devDependencies": {
+    "@cloudflare/containers": "^0.1.0",
+    "wrangler": "^4.65.0"
+  }
+}

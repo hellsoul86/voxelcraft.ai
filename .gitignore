@@ -27,3 +27,7 @@ bin/
 .env
 .env.*
 !.env.example
+
+# Cloudflare worker tooling
+cloudflare/node_modules/
+cloudflare/wrangler.generated.toml

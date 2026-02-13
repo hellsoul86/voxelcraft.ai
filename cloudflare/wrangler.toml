@@ -1,0 +1,33 @@
+name = "voxelcraft-ai"
+main = "src/index.js"
+compatibility_date = "2026-02-13"
+workers_dev = true
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["WorldCoordinator"]
+
+[env.staging]
+name = "voxelcraft-ai-staging"
+
+[[env.staging.containers]]
+class_name = "WorldCoordinator"
+image = "../Dockerfile.cloudflare"
+max_instances = 6
+
+[[env.staging.durable_objects.bindings]]
+name = "VOXEL_WORLD"
+class_name = "WorldCoordinator"
+
+[env.staging.vars]
+DEPLOY_ENV = "staging"
+DEFAULT_WORLD_ID = "world_1"
+
+[[env.staging.d1_databases]]
+binding = "VOXEL_D1"
+database_name = "voxelcraft-ai-staging"
+database_id = "__D1_DATABASE_ID__"
+
+[[env.staging.r2_buckets]]
+binding = "VOXEL_R2"
+bucket_name = "__R2_BUCKET_NAME__"

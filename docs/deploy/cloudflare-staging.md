@@ -1,0 +1,59 @@
+# Cloudflare Staging Deployment (Containers + Durable Objects + D1 + R2)
+
+This document describes the staging deployment path for `voxelcraft.ai` using Cloudflare.
+
+## Architecture
+
+- **Cloudflare Worker**: public HTTP/WS entrypoint.
+- **Durable Object (Container-backed)**: `WorldCoordinator` routes requests by `world_id` to container instances.
+- **Cloudflare Containers**: run the Go server (`cmd/server`) from `Dockerfile.cloudflare`.
+- **D1**: stores request metadata (`world_heads`) for quick state visibility.
+- **R2**: stores the latest world head JSON (`worlds/<world_id>/head.json`).
+
+> Note: this is staging-first infrastructure. It gives durable coordination + persistent metadata/object storage,
+> while the game server runtime itself still keeps local runtime data inside the container filesystem.
+
+## GitHub Actions workflow
+
+Workflow file: `.github/workflows/deploy-cloudflare-staging.yml`
+
+Trigger:
+- `push` to `main` / `master` (selected paths)
+- manual `workflow_dispatch`
+
+Pipeline steps:
+1. Run `scripts/release_gate.sh --skip-race`
+2. Install Cloudflare deployment dependencies (`cloudflare/package.json`)
+3. Render `cloudflare/wrangler.generated.toml` from placeholders
+4. Apply D1 schema (`cloudflare/d1/schema.sql`)
+5. Deploy Worker + Container (`wrangler deploy --env staging`)
+
+## Required GitHub Secrets
+
+- `CLOUDFLARE_ACCOUNT_ID`
+- `CLOUDFLARE_API_TOKEN`
+- `CLOUDFLARE_D1_DATABASE_ID`
+- `CLOUDFLARE_R2_BUCKET`
+
+## Staging resource naming
+
+Suggested names (prefix `voxelcraft-ai-*`):
+- Worker: `voxelcraft-ai-staging`
+- D1 database: `voxelcraft-ai-staging`
+- R2 bucket: `voxelcraft-ai-staging-state`
+
+## Optional manual bootstrap commands
+
+```bash
+# from cloudflare/ directory
+npx wrangler d1 create voxelcraft-ai-staging
+npx wrangler r2 bucket create voxelcraft-ai-staging-state
+```
+
+Then set the returned D1 `database_id` and R2 bucket name in GitHub secrets.
+
+## Runtime diagnostics endpoints
+
+- `GET /healthz` (from Go server)
+- `GET /_cf/persistence/healthz` (Worker checks D1 + R2)
+- `GET /_cf/persistence/head?world_id=world_1` (latest head from D1/R2)

@@ -1,0 +1,9 @@
+.git
+.gitignore
+.github
+.vscode
+cloudflare/node_modules
+cloudflare/wrangler.generated.toml
+data
+dist
+*.log

@@ -1,0 +1,22 @@
+# syntax=docker/dockerfile:1.7
+
+FROM --platform=linux/amd64 golang:1.26-bookworm AS build
+WORKDIR /src
+
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY . .
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+  go build -trimpath -ldflags='-s -w' -o /out/server ./cmd/server
+
+FROM gcr.io/distroless/static-debian12:nonroot
+WORKDIR /app
+
+COPY --from=build /out/server /app/server
+COPY configs /app/configs
+
+EXPOSE 8080
+
+ENTRYPOINT ["/app/server"]
+CMD ["-addr",":8080","-world","world_1","-seed","1337","-configs","/app/configs","-data","/tmp/data","-load_latest_snapshot=false"]
