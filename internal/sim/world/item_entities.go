@@ -6,7 +6,7 @@ import (
 	itemspkg "voxelcraft.ai/internal/sim/world/feature/entities/items"
 )
 
-const itemEntityTTLTicksDefault = 6000 // ~1 in-game day at 5Hz/6000 day ticks
+const itemEntityTTLTicksDefault = itemspkg.EntityTTLTicksDefault
 
 func (w *World) newItemEntityID() string {
 	n := w.nextItemNum.Add(1)
@@ -26,134 +26,28 @@ func (w *World) canPickupItemEntity(agentID string, pos Vec3i) bool {
 }
 
 func (w *World) spawnItemEntity(nowTick uint64, actor string, pos Vec3i, item string, count int, reason string) string {
-	if item == "" || count <= 0 {
-		return ""
-	}
-
-	// Merge into an existing entity at the same position when possible.
-	if ids := w.itemsAt[pos]; len(ids) > 0 {
-		mergeID, ok := itemspkg.FindMergeTarget(ids, item, func(id string) (itemspkg.Entry, bool) {
-			e := w.items[id]
-			if e == nil {
-				return itemspkg.Entry{}, false
-			}
-			return itemspkg.Entry{
-				ID:          e.EntityID,
-				Item:        e.Item,
-				Count:       e.Count,
-				ExpiresTick: e.ExpiresTick,
-			}, true
-		})
-		if ok {
-			e := w.items[mergeID]
-			e.Count += count
-			exp := nowTick + itemEntityTTLTicksDefault
-			if exp > e.ExpiresTick {
-				e.ExpiresTick = exp
-			}
-			w.auditEvent(nowTick, actor, "ITEM_SPAWN", pos, reason, map[string]any{
-				"entity_id": e.EntityID,
-				"item":      item,
-				"count":     count,
-				"merged":    true,
-			})
-			return e.EntityID
-		}
-	}
-
-	id := w.newItemEntityID()
-	e := &ItemEntity{
-		EntityID:    id,
-		Pos:         pos,
-		Item:        item,
-		Count:       count,
-		CreatedTick: nowTick,
-		ExpiresTick: nowTick + itemEntityTTLTicksDefault,
-	}
-	w.items[id] = e
-	w.itemsAt[pos] = append(w.itemsAt[pos], id)
-	w.auditEvent(nowTick, actor, "ITEM_SPAWN", pos, reason, map[string]any{
-		"entity_id": id,
-		"item":      item,
-		"count":     count,
-		"merged":    false,
-	})
-	return id
+	return itemspkg.Spawn(
+		nowTick,
+		actor,
+		pos,
+		item,
+		count,
+		reason,
+		w.items,
+		w.itemsAt,
+		w.newItemEntityID,
+		w.auditEvent,
+	)
 }
 
 func (w *World) removeItemEntity(nowTick uint64, actor string, id string, reason string) {
-	e := w.items[id]
-	if e == nil {
-		return
-	}
-	delete(w.items, id)
-	ids := itemspkg.RemoveID(w.itemsAt[e.Pos], id)
-	if len(ids) == 0 {
-		delete(w.itemsAt, e.Pos)
-	} else {
-		w.itemsAt[e.Pos] = ids
-	}
-	w.auditEvent(nowTick, actor, "ITEM_DESPAWN", e.Pos, reason, map[string]any{
-		"entity_id": id,
-		"item":      e.Item,
-		"count":     e.Count,
-	})
+	itemspkg.Remove(nowTick, actor, id, reason, w.items, w.itemsAt, w.auditEvent)
 }
 
 func (w *World) moveItemEntity(nowTick uint64, actor string, id string, to Vec3i, reason string) {
-	e := w.items[id]
-	if e == nil {
-		return
-	}
-	from := e.Pos
-	if from == to {
-		return
-	}
-
-	// Remove from old position list.
-	ids := itemspkg.RemoveID(w.itemsAt[from], id)
-	if len(ids) == 0 {
-		delete(w.itemsAt, from)
-	} else {
-		w.itemsAt[from] = ids
-	}
-
-	// Add to new position list.
-	w.itemsAt[to] = append(w.itemsAt[to], id)
-	e.Pos = to
-
-	w.auditEvent(nowTick, actor, "ITEM_MOVE", from, reason, map[string]any{
-		"entity_id": id,
-		"to":        to.ToArray(),
-		"item":      e.Item,
-		"count":     e.Count,
-	})
+	itemspkg.Move(nowTick, actor, id, to, reason, w.items, w.itemsAt, w.auditEvent)
 }
 
 func (w *World) cleanupExpiredItemEntities(nowTick uint64) {
-	if len(w.items) == 0 {
-		return
-	}
-	ids := make([]string, 0, len(w.items))
-	for id := range w.items {
-		ids = append(ids, id)
-	}
-	expired := itemspkg.SortedExpired(ids, func(id string) (itemspkg.Entry, bool) {
-		e := w.items[id]
-		if e == nil {
-			return itemspkg.Entry{}, false
-		}
-		return itemspkg.Entry{
-			ID:          e.EntityID,
-			Item:        e.Item,
-			Count:       e.Count,
-			ExpiresTick: e.ExpiresTick,
-		}, true
-	}, nowTick)
-	if len(expired) == 0 {
-		return
-	}
-	for _, id := range expired {
-		w.removeItemEntity(nowTick, "WORLD", id, "EXPIRE")
-	}
+	itemspkg.CleanupExpired(nowTick, w.items, w.itemsAt, w.removeItemEntity)
 }

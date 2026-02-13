@@ -3,6 +3,7 @@ package world
 import "voxelcraft.ai/internal/protocol"
 
 import modelpkg "voxelcraft.ai/internal/sim/world/kernel/model"
+import transferruntimepkg "voxelcraft.ai/internal/sim/world/feature/transfer/runtime"
 
 type Vec3i = modelpkg.Vec3i
 type Sign = modelpkg.Sign
@@ -23,6 +24,8 @@ type Structure = modelpkg.Structure
 type MemoryEntry = modelpkg.MemoryEntry
 type RateWindowSnapshot = modelpkg.RateWindowSnapshot
 type FunDecaySnapshot = modelpkg.FunDecaySnapshot
+type AgentTransfer = transferruntimepkg.AgentTransfer
+type OrgTransfer = transferruntimepkg.OrgTransfer
 
 const (
 	ClaimTypeDefault   = modelpkg.ClaimTypeDefault

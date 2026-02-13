@@ -2,48 +2,9 @@ package world
 
 import (
 	transferagentpkg "voxelcraft.ai/internal/sim/world/feature/transfer/agent"
-	transfermapspkg "voxelcraft.ai/internal/sim/world/feature/transfer/maps"
+	transferruntimepkg "voxelcraft.ai/internal/sim/world/feature/transfer/runtime"
 	idspkg "voxelcraft.ai/internal/sim/world/logic/ids"
 )
-
-type AgentTransfer struct {
-	ID    string
-	Name  string
-	OrgID string
-	Org   *OrgTransfer
-
-	FromWorldID                  string
-	CurrentWorldID               string
-	FromEntryPointID             string
-	ToEntryPointID               string
-	WorldSwitchCooldownUntilTick uint64
-
-	Pos Vec3i
-	Yaw int
-
-	HP           int
-	Hunger       int
-	StaminaMilli int
-
-	RepTrade  int
-	RepBuild  int
-	RepSocial int
-	RepLaw    int
-
-	Fun       FunScore
-	Inventory map[string]int
-	Equipment Equipment
-	Memory    map[string]MemoryEntry
-}
-
-type OrgTransfer struct {
-	OrgID       string
-	Kind        OrgKind
-	Name        string
-	CreatedTick uint64
-	MetaVersion uint64
-	Members     map[string]OrgRole
-}
 
 type transferOutReq struct {
 	AgentID string
@@ -88,35 +49,7 @@ func (w *World) handleTransferIn(req transferInReq) {
 		return
 	}
 
-	a := &Agent{
-		ID:                           t.ID,
-		Name:                         t.Name,
-		OrgID:                        t.OrgID,
-		CurrentWorldID:               w.cfg.ID,
-		WorldSwitchCooldownUntilTick: t.WorldSwitchCooldownUntilTick,
-		Pos:                          t.Pos,
-		Yaw:                          t.Yaw,
-		HP:                           t.HP,
-		Hunger:                       t.Hunger,
-		StaminaMilli:                 t.StaminaMilli,
-		RepTrade:                     t.RepTrade,
-		RepBuild:                     t.RepBuild,
-		RepSocial:                    t.RepSocial,
-		RepLaw:                       t.RepLaw,
-		Fun:                          t.Fun,
-		Inventory:                    transfermapspkg.CopyPositiveIntMap(t.Inventory),
-		Equipment:                    t.Equipment,
-		Memory:                       transfermapspkg.CopyMap(t.Memory, func(k string, _ MemoryEntry) bool { return k != "" }),
-	}
-	if a.Pos.Y != 0 {
-		a.Pos.Y = 0
-	}
-	if a.OrgID == "" && t.Org != nil && t.Org.OrgID != "" {
-		a.OrgID = t.Org.OrgID
-	}
-	a.MoveTask = nil
-	a.WorkTask = nil
-	a.InitDefaults()
+	a := transferruntimepkg.BuildIncomingAgent(t, w.cfg.ID)
 	if a.OrgID != "" {
 		var org *Organization
 		if t.Org != nil && t.Org.OrgID != "" {
@@ -133,10 +66,10 @@ func (w *World) handleTransferIn(req transferInReq) {
 					TreasuryByWorld: map[string]map[string]int{},
 				}
 				w.orgs[org.OrgID] = org
-					if n, ok := idspkg.ParseUintAfterPrefix("ORG", org.OrgID); ok && n > w.nextOrgNum.Load() {
-						w.nextOrgNum.Store(n)
-					}
+				if n, ok := idspkg.ParseUintAfterPrefix("ORG", org.OrgID); ok && n > w.nextOrgNum.Load() {
+					w.nextOrgNum.Store(n)
 				}
+			}
 			if org.Kind == "" {
 				org.Kind = t.Org.Kind
 			}
