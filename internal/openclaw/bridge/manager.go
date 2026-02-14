@@ -79,6 +79,7 @@ func (m *Manager) GetObs(ctx context.Context, sessionKey string, opts GetObsOpts
 	if err != nil {
 		return ObsResult{}, err
 	}
+	s.ResumeReconnect()
 	return s.GetObs(ctx, opts)
 }
 
@@ -87,6 +88,7 @@ func (m *Manager) GetCatalog(ctx context.Context, sessionKey, name string) (Cata
 	if err != nil {
 		return CatalogResult{}, err
 	}
+	s.ResumeReconnect()
 	return s.GetCatalog(ctx, name)
 }
 
@@ -95,6 +97,7 @@ func (m *Manager) GetEvents(ctx context.Context, sessionKey string, sinceCursor 
 	if err != nil {
 		return GetEventsResult{}, err
 	}
+	s.ResumeReconnect()
 	return s.GetEvents(ctx, sinceCursor, limit)
 }
 
@@ -103,6 +106,7 @@ func (m *Manager) Act(ctx context.Context, sessionKey string, args ActArgs) (Act
 	if err != nil {
 		return ActResult{}, err
 	}
+	s.ResumeReconnect()
 	return s.Act(ctx, args)
 }
 
@@ -112,7 +116,7 @@ func (m *Manager) Disconnect(ctx context.Context, sessionKey string) error {
 		return err
 	}
 	_ = ctx
-	s.Disconnect()
+	s.DisconnectAndPause()
 	return nil
 }
 
@@ -121,6 +125,7 @@ func (m *Manager) ListWorlds(ctx context.Context, sessionKey string) ([]WorldInf
 	if err != nil {
 		return nil, err
 	}
+	s.ResumeReconnect()
 	_ = ctx
 	return s.ListWorlds(), nil
 }

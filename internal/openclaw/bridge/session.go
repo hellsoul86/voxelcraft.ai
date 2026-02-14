@@ -42,6 +42,7 @@ type Session struct {
 	stop      chan struct{}
 	done      chan struct{}
 
+	paused          bool
 	connected       bool
 	lastConnectedAt time.Time
 	lastErr         string
@@ -62,6 +63,7 @@ type Session struct {
 	lastEventsCursor uint64
 	lastObsRaw       json.RawMessage
 
+	resumeNotify      chan struct{}
 	obsNotify         chan struct{}
 	ackNotify         chan struct{}
 	acksByActID       map[string]protocol.AckMsg
@@ -104,6 +106,7 @@ func NewSession(cfg SessionConfig, onUpdate onUpdateFn) *Session {
 		agentID:           cfg.AgentIDHint,
 		resumeToken:       cfg.ResumeToken,
 		catalogs:          map[string]catalogEntry{},
+		resumeNotify:      make(chan struct{}, 1),
 		obsNotify:         make(chan struct{}, 1),
 		ackNotify:         make(chan struct{}, 1),
 		acksByActID:       map[string]protocol.AckMsg{},
@@ -130,10 +133,34 @@ func (s *Session) Close() {
 }
 
 func (s *Session) Disconnect() {
+	s.disconnect(false)
+}
+
+func (s *Session) DisconnectAndPause() {
+	s.disconnect(true)
+}
+
+func (s *Session) ResumeReconnect() {
+	s.mu.Lock()
+	wasPaused := s.paused
+	s.paused = false
+	s.mu.Unlock()
+	if wasPaused {
+		select {
+		case s.resumeNotify <- struct{}{}:
+		default:
+		}
+	}
+}
+
+func (s *Session) disconnect(pause bool) {
 	s.mu.Lock()
 	c := s.conn
 	s.conn = nil
 	s.connected = false
+	if pause {
+		s.paused = true
+	}
 	s.mu.Unlock()
 	if c != nil {
 		_ = c.Close()
@@ -558,6 +585,22 @@ func (s *Session) run() {
 			s.Disconnect()
 			return
 		default:
+		}
+
+		s.mu.RLock()
+		paused := s.paused
+		s.mu.RUnlock()
+		if paused {
+			select {
+			case <-s.stop:
+				s.Disconnect()
+				return
+			case <-s.resumeNotify:
+				backoff = 200 * time.Millisecond
+				continue
+			case <-time.After(2 * time.Second):
+				continue
+			}
 		}
 
 		if err := s.connectAndReadLoop(); err != nil {

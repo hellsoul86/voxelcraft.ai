@@ -31,9 +31,24 @@ type serverRuntimeConfig struct {
 	ConfigDir string
 }
 
-func runMultiWorld(rtCfg serverRuntimeConfig, cfg multiworld.Config, tune tuning.Tuning, cats *catalogs.Catalogs, logger *log.Logger) {
+func runMultiWorld(rtCfg serverRuntimeConfig, cfg multiworld.Config, tune tuning.Tuning, cats *catalogs.Catalogs, mcpCfg embeddedMCPCfg, logger *log.Logger) {
 	ctx, cancel := signalContext()
 	defer cancel()
+
+	// Start embedded MCP (sidecar) in the same process (loopback-only by default).
+	mcpCfg.WorldHTTPAddr = rtCfg.Addr
+	if strings.TrimSpace(mcpCfg.StateFile) == "" {
+		mcpCfg.StateFile = filepath.Join(rtCfg.DataDir, "mcp", "sessions.json")
+	}
+	embeddedMCP, err := startEmbeddedMCP(ctx, mcpCfg, logger)
+	if err != nil {
+		logger.Fatalf("embedded mcp: %v", err)
+	}
+	defer func() {
+		if embeddedMCP != nil {
+			embeddedMCP.Close()
+		}
+	}()
 
 	r2Mirror, err := buildR2MirrorRuntime(rtCfg.DataDir, logger)
 	if err != nil {

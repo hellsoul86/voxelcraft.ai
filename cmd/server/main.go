@@ -41,10 +41,29 @@ func main() {
 
 		snapPath   = flag.String("snapshot", "", "path to snapshot to load (optional)")
 		loadLatest = flag.Bool("load_latest_snapshot", true, "load latest snapshot from data dir if present (when -snapshot is empty)")
+
+		mcpListen     = flag.String("mcp_listen", "127.0.0.1:8090", "embedded MCP http listen address (empty to disable)")
+		mcpWorldWSURL = flag.String("mcp_world_ws_url", "", "world ws url for embedded MCP (default: ws://127.0.0.1:<server-port>/v1/ws)")
+		mcpHMACSecret = flag.String("mcp_hmac_secret", "", "embedded MCP hmac secret (or set VC_MCP_HMAC_SECRET)")
+		mcpStateFile  = flag.String("mcp_state_file", "", "embedded MCP persisted session state file (default: <data>/mcp/sessions.json)")
+		mcpMaxSessions = flag.Int("mcp_max_sessions", 256, "embedded MCP max concurrent sessions")
 	)
 	flag.Parse()
 
 	logger := log.New(os.Stdout, "[server] ", log.LstdFlags|log.Lmicroseconds)
+
+	mcpStatePath := strings.TrimSpace(*mcpStateFile)
+	if mcpStatePath == "" {
+		mcpStatePath = filepath.Join(*dataDir, "mcp", "sessions.json")
+	}
+	mcpCfg := embeddedMCPCfg{
+		Listen:        strings.TrimSpace(*mcpListen),
+		WorldHTTPAddr: strings.TrimSpace(*addr),
+		WorldWSURL:    strings.TrimSpace(*mcpWorldWSURL),
+		StateFile:     mcpStatePath,
+		MaxSessions:   *mcpMaxSessions,
+		HMACSecret:    strings.TrimSpace(*mcpHMACSecret),
+	}
 
 	cats, err := catalogs.Load(*configDir)
 	if err != nil {
@@ -103,7 +122,7 @@ func main() {
 				DisableDB: *disableDB,
 				Seed:      *seed,
 				ConfigDir: *configDir,
-			}, mcfg, tune, cats, logger)
+			}, mcfg, tune, cats, mcpCfg, logger)
 			return
 		}
 	}
@@ -225,6 +244,16 @@ func main() {
 
 	ctx, cancel := signalContext()
 	defer cancel()
+
+	embeddedMCP, err := startEmbeddedMCP(ctx, mcpCfg, logger)
+	if err != nil {
+		logger.Fatalf("embedded mcp: %v", err)
+	}
+	defer func() {
+		if embeddedMCP != nil {
+			embeddedMCP.Close()
+		}
+	}()
 
 	logOpts := persistlog.LoggerOptions{}
 	if r2Mirror != nil && r2Mirror.enabled {
