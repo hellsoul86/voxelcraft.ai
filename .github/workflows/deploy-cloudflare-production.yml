@@ -38,6 +38,7 @@ jobs:
       CLOUDFLARE_R2_BUCKET: ${{ vars.CLOUDFLARE_R2_BUCKET }}
       VC_R2_ACCESS_KEY_ID: ${{ secrets.VC_R2_ACCESS_KEY_ID }}
       VC_R2_SECRET_ACCESS_KEY: ${{ secrets.VC_R2_SECRET_ACCESS_KEY }}
+      VC_MCP_HMAC_SECRET: ${{ secrets.VC_MCP_HMAC_SECRET }}
 
     steps:
       - name: Checkout
@@ -52,6 +53,7 @@ jobs:
             CLOUDFLARE_R2_BUCKET
             VC_R2_ACCESS_KEY_ID
             VC_R2_SECRET_ACCESS_KEY
+            VC_MCP_HMAC_SECRET
           )
           missing=0
           for key in "${required[@]}"; do
@@ -105,10 +107,8 @@ jobs:
           VC_INDEX_D1_TOKEN_DERIVED="$(printf '%s' "$CLOUDFLARE_API_TOKEN" | sha256sum | awk '{print $1}')"
           printf '%s' "$VC_INDEX_D1_TOKEN_DERIVED" | npx wrangler secret put VC_INDEX_D1_TOKEN --env production --config wrangler.generated.toml
 
-          # MCP HMAC secret (reusing CLOUDFLARE_API_TOKEN; avoids introducing a new GitHub secret).
-          # Agent-side should use the same derivation: sha256("vc_mcp:production:" + CLOUDFLARE_API_TOKEN)
-          VC_MCP_HMAC_SECRET_DERIVED="$(printf '%s' "vc_mcp:production:$CLOUDFLARE_API_TOKEN" | sha256sum | awk '{print $1}')"
-          printf '%s' "$VC_MCP_HMAC_SECRET_DERIVED" | npx wrangler secret put VC_MCP_HMAC_SECRET --env production --config wrangler.generated.toml
+          # MCP HMAC secret (required in staging/production).
+          printf '%s' "$VC_MCP_HMAC_SECRET" | npx wrangler secret put VC_MCP_HMAC_SECRET --env production --config wrangler.generated.toml
 
       - name: Apply D1 schema (idempotent)
         working-directory: cloudflare
