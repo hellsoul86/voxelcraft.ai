@@ -105,6 +105,11 @@ jobs:
           VC_INDEX_D1_TOKEN_DERIVED="$(printf '%s' "$CLOUDFLARE_API_TOKEN" | sha256sum | awk '{print $1}')"
           printf '%s' "$VC_INDEX_D1_TOKEN_DERIVED" | npx wrangler secret put VC_INDEX_D1_TOKEN --env production --config wrangler.generated.toml
 
+          # MCP HMAC secret (reusing CLOUDFLARE_API_TOKEN; avoids introducing a new GitHub secret).
+          # Agent-side should use the same derivation: sha256("vc_mcp:production:" + CLOUDFLARE_API_TOKEN)
+          VC_MCP_HMAC_SECRET_DERIVED="$(printf '%s' "vc_mcp:production:$CLOUDFLARE_API_TOKEN" | sha256sum | awk '{print $1}')"
+          printf '%s' "$VC_MCP_HMAC_SECRET_DERIVED" | npx wrangler secret put VC_MCP_HMAC_SECRET --env production --config wrangler.generated.toml
+
       - name: Apply D1 schema (idempotent)
         working-directory: cloudflare
         run: npx wrangler d1 execute VOXEL_D1 --remote --env production --config wrangler.generated.toml --file ./d1/schema.sql

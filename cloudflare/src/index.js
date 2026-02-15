@@ -1,4 +1,4 @@
-import { Container, getContainer } from "@cloudflare/containers";
+import { Container, getContainer, switchPort } from "@cloudflare/containers";
 import { env as workerEnv } from "cloudflare:workers";
 
 const WORLD_ID_RE = /^[a-zA-Z0-9_-]{1,64}$/;
@@ -46,6 +46,9 @@ export class WorldCoordinator extends Container {
     VC_INDEX_D1_FLUSH_MS: workerEnv.VC_INDEX_D1_FLUSH_MS ?? "500",
     VC_INDEX_D1_BATCH_SIZE: workerEnv.VC_INDEX_D1_BATCH_SIZE ?? "128",
     VC_INDEX_D1_TOKEN: workerEnv.VC_INDEX_D1_TOKEN ?? "",
+
+    // MCP (agent protocol bridge). Required in staging/production.
+    VC_MCP_HMAC_SECRET: workerEnv.VC_MCP_HMAC_SECRET ?? "",
   };
 }
 
@@ -774,6 +777,14 @@ export default {
 
     if (url.pathname === "/_cf/indexdb/ingest") {
       return handleIndexIngest(request, env);
+    }
+
+    // MCP endpoint (JSON-RPC). Proxy to the embedded MCP server running inside the container on port 8090.
+    // Note: we intentionally do NOT persist "world head" for /mcp traffic (to avoid D1/R2 spam).
+    if (url.pathname === "/mcp") {
+      const worldId = resolveWorldId(request, env);
+      const coordinator = getContainer(env.VOXEL_WORLD, worldId);
+      return coordinator.fetch(switchPort(request, 8090));
     }
 
     const worldId = resolveWorldId(request, env);

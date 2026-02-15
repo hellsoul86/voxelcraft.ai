@@ -17,6 +17,7 @@ COPY --from=build /out/server /app/server
 COPY configs /app/configs
 
 EXPOSE 8080
+EXPOSE 8090
 
 ENTRYPOINT ["/app/server"]
-CMD ["-addr",":8080","-world","world_1","-seed","1337","-configs","/app/configs","-data","/tmp/data","-load_latest_snapshot=false","-mcp_listen="]
+CMD ["-addr",":8080","-world","world_1","-seed","1337","-configs","/app/configs","-data","/tmp/data","-load_latest_snapshot=false","-mcp_listen=:8090"]
