@@ -38,6 +38,10 @@ VC_INDEX_D1_INGEST_URL = "https://staging-api.voxelcraft.ai/_cf/indexdb/ingest"
 VC_INDEX_D1_FLUSH_MS = "500"
 VC_INDEX_D1_BATCH_SIZE = "128"
 
+# MCP bootstrap mode: when true, the Worker will sign /mcp requests that have no client signature.
+# (Option C: public validation). Keep this OFF in production.
+VC_MCP_PUBLIC = "true"
+
 [[env.staging.d1_databases]]
 binding = "VOXEL_D1"
 database_name = "voxelcraft-ai-staging"
@@ -81,6 +85,10 @@ VC_INDEX_BACKEND = "d1"
 VC_INDEX_D1_INGEST_URL = "https://api.voxelcraft.ai/_cf/indexdb/ingest"
 VC_INDEX_D1_FLUSH_MS = "500"
 VC_INDEX_D1_BATCH_SIZE = "128"
+
+# MCP bootstrap mode: when true, the Worker will sign /mcp requests that have no client signature.
+# Keep OFF in production.
+VC_MCP_PUBLIC = "false"
 
 [[env.production.d1_databases]]
 binding = "VOXEL_D1"

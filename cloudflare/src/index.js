@@ -23,6 +23,81 @@ const D1_SCHEMA_STATEMENTS = [
 
 let schemaReadyPromise;
 
+const textEncoder = new TextEncoder();
+
+function isTrue(value) {
+  return String(value || "").trim().toLowerCase() === "true";
+}
+
+function bytesToHex(bytes) {
+  let out = "";
+  for (const b of bytes) out += b.toString(16).padStart(2, "0");
+  return out;
+}
+
+function randomHex(bytes = 16) {
+  const buf = new Uint8Array(bytes);
+  crypto.getRandomValues(buf);
+  return bytesToHex(buf);
+}
+
+let mcpHmacSecretCached = "";
+let mcpHmacKeyPromise;
+
+async function hmacSha256Hex(secret, data) {
+  const s = String(secret || "").trim();
+  if (!s) throw new Error("missing hmac secret");
+
+  if (!mcpHmacKeyPromise || mcpHmacSecretCached !== s) {
+    mcpHmacSecretCached = s;
+    mcpHmacKeyPromise = crypto.subtle.importKey(
+      "raw",
+      textEncoder.encode(s),
+      { name: "HMAC", hash: "SHA-256" },
+      false,
+      ["sign"],
+    );
+  }
+
+  const key = await mcpHmacKeyPromise;
+  const sig = await crypto.subtle.sign("HMAC", key, textEncoder.encode(data));
+  return bytesToHex(new Uint8Array(sig));
+}
+
+async function signMcpRequestIfNeeded(request, env) {
+  if (!isTrue(env.VC_MCP_PUBLIC)) {
+    return request;
+  }
+  if (request.method !== "POST") {
+    return request;
+  }
+
+  const secret = String(env.VC_MCP_HMAC_SECRET || "").trim();
+  if (!secret) {
+    throw new Error("VC_MCP_PUBLIC=true but VC_MCP_HMAC_SECRET is empty");
+  }
+
+  const agentId = (request.headers.get("x-agent-id") || "").trim() || "default";
+  const ts = String(Date.now());
+  const nonce = randomHex(16);
+  const rawBody = await request.clone().text();
+
+  const canonical = `${ts}\n${request.method.toUpperCase()}\n/mcp\n${agentId}\n${nonce}\n${rawBody}`;
+  const signature = await hmacSha256Hex(secret, canonical);
+
+  const headers = new Headers(request.headers);
+  headers.set("x-agent-id", agentId);
+  headers.set("x-ts", ts);
+  headers.set("x-nonce", nonce);
+  headers.set("x-signature", signature);
+
+  return new Request(request.url, {
+    method: request.method,
+    headers,
+    body: rawBody,
+  });
+}
+
 export class WorldCoordinator extends Container {
   defaultPort = 8080;
   sleepAfter = "10m";
@@ -781,10 +856,19 @@ export default {
 
     // MCP endpoint (JSON-RPC). Proxy to the embedded MCP server running inside the container on port 8090.
     // Note: we intentionally do NOT persist "world head" for /mcp traffic (to avoid D1/R2 spam).
+    //
+    // Option C (public validation): when VC_MCP_PUBLIC=true, we will *server-side sign* the request
+    // if needed, so OpenClaw can connect without provisioning a secret yet.
     if (url.pathname === "/mcp") {
       const worldId = resolveWorldId(request, env);
       const coordinator = getContainer(env.VOXEL_WORLD, worldId);
-      return coordinator.fetch(switchPort(request, 8090));
+      try {
+        const signed = await signMcpRequestIfNeeded(request, env);
+        return coordinator.fetch(switchPort(signed, 8090));
+      } catch (err) {
+        console.error("mcp proxy sign failed", err);
+        return new Response("mcp proxy error", { status: 500 });
+      }
     }
 
     const worldId = resolveWorldId(request, env);
