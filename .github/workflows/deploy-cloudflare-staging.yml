@@ -147,6 +147,113 @@ jobs:
           done
 
       - name: Post-deploy quick checks
+        env:
+          BASE_URL: https://staging-api.voxelcraft.ai
         run: |
-          echo "Deployment finished."
-          echo "Check /healthz, /_cf/persistence/healthz, and /_cf/indexdb/healthz on the staging URL."
+          set -euo pipefail
+
+          BASE_URL="${BASE_URL%/}"
+          echo "Running post-deploy quick checks against: ${BASE_URL}"
+
+          retry() {
+            local max_attempts="$1"; shift
+            local sleep_seconds="$1"; shift
+            local attempt=1
+
+            while true; do
+              if "$@"; then
+                return 0
+              fi
+
+              if [ "$attempt" -ge "$max_attempts" ]; then
+                echo "::error title=Quick check failed::Command failed after ${attempt}/${max_attempts} attempts: $*"
+                return 1
+              fi
+
+              echo "Retry ${attempt}/${max_attempts} failed; sleeping ${sleep_seconds}s..."
+              sleep "$sleep_seconds"
+              attempt=$((attempt + 1))
+              sleep_seconds=$((sleep_seconds * 2))
+              if [ "$sleep_seconds" -gt 30 ]; then
+                sleep_seconds=30
+              fi
+            done
+          }
+
+          get_to_file() {
+            local url="$1"
+            local out="$2"
+            curl -fsS --max-time 20 "$url" -o "$out"
+          }
+
+          post_mcp_to_file() {
+            local body="$1"
+            local out="$2"
+            curl -fsS --max-time 30 -X POST "${BASE_URL}/mcp" \
+              -H "content-type: application/json" \
+              -H "x-agent-id: gha-smoke" \
+              --data "$body" \
+              -o "$out"
+          }
+
+          echo "[check] GET /healthz"
+          retry 12 2 get_to_file "${BASE_URL}/healthz" /tmp/healthz.txt
+          grep -qi "ok" /tmp/healthz.txt
+
+          echo "[check] GET /_cf/persistence/healthz"
+          retry 12 2 get_to_file "${BASE_URL}/_cf/persistence/healthz" /tmp/persistence.json
+          python3 - <<'PY'
+          import json
+
+          with open('/tmp/persistence.json', 'r', encoding='utf-8') as f:
+              obj = json.load(f)
+
+          assert obj.get('ok') is True, obj
+          storage = obj.get('storage') or {}
+          assert storage.get('d1') == 'ok', obj
+          assert storage.get('r2') == 'ok', obj
+          print('persistence ok:', storage)
+          PY
+
+          echo "[check] GET /_cf/indexdb/healthz?world_id=OVERWORLD"
+          retry 12 2 get_to_file "${BASE_URL}/_cf/indexdb/healthz?world_id=OVERWORLD" /tmp/indexdb.json
+          python3 - <<'PY'
+          import json
+
+          with open('/tmp/indexdb.json', 'r', encoding='utf-8') as f:
+              obj = json.load(f)
+
+          assert obj.get('ok') is True, obj
+          print('indexdb ok:', {k: obj.get(k) for k in ('world_id', 'index') if k in obj})
+          PY
+
+          echo "[check] POST /mcp initialize (unsigned; Worker signs in staging when VC_MCP_PUBLIC=true)"
+          retry 12 2 post_mcp_to_file '{"jsonrpc":"2.0","id":1,"method":"initialize"}' /tmp/mcp_init.json
+          python3 - <<'PY'
+          import json
+
+          with open('/tmp/mcp_init.json', 'r', encoding='utf-8') as f:
+              obj = json.load(f)
+
+          assert obj.get('error') is None, obj
+          result = obj.get('result') or {}
+          assert result.get('protocolVersion'), obj
+          print('mcp initialize ok: protocolVersion=', result.get('protocolVersion'))
+          PY
+
+          echo "[check] POST /mcp call_tool voxelcraft.get_obs (wait_new_tick=true)"
+          retry 12 2 post_mcp_to_file '{"jsonrpc":"2.0","id":2,"method":"call_tool","params":{"name":"voxelcraft.get_obs","arguments":{"mode":"summary","wait_new_tick":true,"timeout_ms":5000}}}' /tmp/mcp_obs.json
+          python3 - <<'PY'
+          import json
+
+          with open('/tmp/mcp_obs.json', 'r', encoding='utf-8') as f:
+              obj = json.load(f)
+
+          assert obj.get('error') is None, obj
+          result = obj.get('result') or {}
+          tick = result.get('tick')
+          assert isinstance(tick, int) and tick > 0, obj
+          print('mcp get_obs ok: tick=', tick)
+          PY
+
+          echo "All post-deploy quick checks passed."
