@@ -9,6 +9,9 @@ bin/
 # Runtime data
 /data/
 
+# Local temp/cache scratch
+/.tmp/
+
 # Logs / snapshots (in case user changes data path)
 *.jsonl
 *.jsonl.zst
