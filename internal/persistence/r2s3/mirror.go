@@ -31,8 +31,9 @@ type Mirror struct {
 	prefix  string
 	logger  *log.Logger
 
-	jobs chan string
-	wg   sync.WaitGroup
+	jobs        chan string
+	enqueueWait time.Duration
+	wg          sync.WaitGroup
 
 	enqueuedTotal       atomic.Uint64
 	queueSaturatedTotal atomic.Uint64
@@ -43,16 +44,23 @@ type Mirror struct {
 	lastErrorUnix       atomic.Int64
 }
 
-func NewMirror(client *Client, dataDir, prefix string, workers int, logger *log.Logger) *Mirror {
+func NewMirror(client *Client, dataDir, prefix string, workers, queueCapacity int, enqueueWait time.Duration, logger *log.Logger) *Mirror {
 	if workers <= 0 {
 		workers = 1
 	}
+	if queueCapacity <= 0 {
+		queueCapacity = 2048
+	}
+	if enqueueWait <= 0 {
+		enqueueWait = 25 * time.Millisecond
+	}
 	m := &Mirror{
-		client:  client,
-		dataDir: dataDir,
-		prefix:  strings.Trim(strings.ReplaceAll(prefix, "\\", "/"), "/"),
-		logger:  logger,
-		jobs:    make(chan string, 2048),
+		client:      client,
+		dataDir:     dataDir,
+		prefix:      strings.Trim(strings.ReplaceAll(prefix, "\\", "/"), "/"),
+		logger:      logger,
+		jobs:        make(chan string, queueCapacity),
+		enqueueWait: enqueueWait,
 	}
 	for i := 0; i < workers; i++ {
 		m.wg.Add(1)
@@ -79,16 +87,16 @@ func (m *Mirror) Enqueue(localPath string) {
 	}
 
 	m.queueSaturatedTotal.Add(1)
-	// Keep enqueue non-blocking for world-tick call sites, but avoid spawning
-	// unbounded goroutines under sustained pressure.
-	timer := time.NewTimer(25 * time.Millisecond)
+	// Keep enqueue bounded to avoid stalling world-tick call sites, but allow
+	// a short configurable wait to reduce drop risk under brief bursts.
+	timer := time.NewTimer(m.enqueueWait)
 	defer timer.Stop()
 	select {
 	case m.jobs <- localPath:
 		return
 	case <-timer.C:
-		m.droppedTotal.Add(1)
-		m.printf("r2 mirror drop local=%s reason=queue_saturated", localPath)
+		dropped := m.droppedTotal.Add(1)
+		m.printf("r2 mirror drop local=%s reason=queue_saturated wait_ms=%d dropped_total=%d", localPath, m.enqueueWait.Milliseconds(), dropped)
 	}
 }
 

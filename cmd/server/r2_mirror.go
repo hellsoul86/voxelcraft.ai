@@ -6,6 +6,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"voxelcraft.ai/internal/persistence/r2s3"
 )
@@ -51,7 +52,9 @@ func buildR2MirrorRuntime(dataDir string, logger *log.Logger) (*r2MirrorRuntime,
 	}
 
 	workers := envInt("VC_R2_UPLOAD_WORKERS", 2)
-	mirror := r2s3.NewMirror(client, dataDir, prefix, workers, logger)
+	queueCapacity := envInt("VC_R2_QUEUE_CAPACITY", 8192)
+	enqueueWaitMS := envInt("VC_R2_ENQUEUE_WAIT_MS", 100)
+	mirror := r2s3.NewMirror(client, dataDir, prefix, workers, queueCapacity, time.Duration(enqueueWaitMS)*time.Millisecond, logger)
 
 	return &r2MirrorRuntime{
 		enabled:      true,

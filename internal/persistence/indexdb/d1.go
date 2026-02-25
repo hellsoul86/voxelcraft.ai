@@ -46,6 +46,18 @@ type D1Index struct {
 	auditMu       sync.Mutex
 	lastAuditTick uint64
 	auditSeq      int
+
+	enqueuedTotal     atomic.Uint64
+	queueDroppedTotal atomic.Uint64
+	flushFailTotal    atomic.Uint64
+}
+
+type D1Stats struct {
+	QueueDepth        int
+	QueueCapacity     int
+	EnqueuedTotal     uint64
+	QueueDroppedTotal uint64
+	FlushFailTotal    uint64
 }
 
 type d1Event struct {
@@ -55,22 +67,22 @@ type d1Event struct {
 }
 
 type d1TickPayload struct {
-	Tick    uint64               `json:"tick"`
-	Digest  string               `json:"digest"`
-	Joins   []world.RecordedJoin `json:"joins,omitempty"`
-	Leaves  []string             `json:"leaves,omitempty"`
+	Tick    uint64                 `json:"tick"`
+	Digest  string                 `json:"digest"`
+	Joins   []world.RecordedJoin   `json:"joins,omitempty"`
+	Leaves  []string               `json:"leaves,omitempty"`
 	Actions []world.RecordedAction `json:"actions,omitempty"`
 }
 
 type d1AuditPayload struct {
-	Tick   uint64         `json:"tick"`
-	Seq    int            `json:"seq"`
-	Actor  string         `json:"actor"`
-	Action string         `json:"action"`
-	Pos    [3]int         `json:"pos"`
-	From   uint16         `json:"from"`
-	To     uint16         `json:"to"`
-	Reason string         `json:"reason,omitempty"`
+	Tick   uint64           `json:"tick"`
+	Seq    int              `json:"seq"`
+	Actor  string           `json:"actor"`
+	Action string           `json:"action"`
+	Pos    [3]int           `json:"pos"`
+	From   uint16           `json:"from"`
+	To     uint16           `json:"to"`
+	Reason string           `json:"reason,omitempty"`
 	Raw    world.AuditEntry `json:"raw"`
 }
 
@@ -164,6 +176,19 @@ func (d *D1Index) Close() error {
 		d.wg.Wait()
 	})
 	return nil
+}
+
+func (d *D1Index) Stats() D1Stats {
+	if d == nil {
+		return D1Stats{}
+	}
+	return D1Stats{
+		QueueDepth:        len(d.ch),
+		QueueCapacity:     cap(d.ch),
+		EnqueuedTotal:     d.enqueuedTotal.Load(),
+		QueueDroppedTotal: d.queueDroppedTotal.Load(),
+		FlushFailTotal:    d.flushFailTotal.Load(),
+	}
 }
 
 func (d *D1Index) WriteTick(entry world.TickLogEntry) error {
@@ -361,10 +386,14 @@ func (d *D1Index) enqueue(ev d1Event) {
 	if d == nil || d.closed.Load() {
 		return
 	}
+	d.enqueuedTotal.Add(1)
 	select {
 	case d.ch <- ev:
 	default:
-		d.printf("d1 index queue full; drop kind=%s world=%s", ev.Kind, ev.WorldID)
+		dropped := d.queueDroppedTotal.Add(1)
+		if dropped == 1 || dropped%100 == 0 {
+			d.printf("d1 index queue full; drop kind=%s world=%s dropped_total=%d queue_depth=%d queue_capacity=%d", ev.Kind, ev.WorldID, dropped, len(d.ch), cap(d.ch))
+		}
 	}
 }
 
@@ -378,7 +407,11 @@ func (d *D1Index) loop() {
 			return
 		}
 		if err := d.sendBatch(batch); err != nil {
-			d.printf("d1 index flush failed batch=%d err=%v", len(batch), err)
+			fails := d.flushFailTotal.Add(1)
+			if fails == 1 || fails%10 == 0 {
+				d.printf("d1 index flush failed batch=%d err=%v flush_fail_total=%d queue_depth=%d", len(batch), err, fails, len(d.ch))
+			}
+			return
 		}
 		batch = batch[:0]
 	}

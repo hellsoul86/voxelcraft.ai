@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"sort"
@@ -33,7 +34,23 @@ type SQLiteIndex struct {
 
 	closed atomic.Bool
 
+	dropTickTotal          atomic.Uint64
+	dropAuditTotal         atomic.Uint64
+	dropSnapshotTotal      atomic.Uint64
+	dropSnapshotStateTotal atomic.Uint64
+	dropSeasonTotal        atomic.Uint64
+
 	// audit sequencing (assigned in the writer goroutine)
+}
+
+type SQLiteStats struct {
+	QueueDepth             int
+	QueueCapacity          int
+	DropTickTotal          uint64
+	DropAuditTotal         uint64
+	DropSnapshotTotal      uint64
+	DropSnapshotStateTotal uint64
+	DropSeasonTotal        uint64
 }
 
 type reqKind int
@@ -401,6 +418,30 @@ func (s *SQLiteIndex) Close() error {
 	return err
 }
 
+func (s *SQLiteIndex) Stats() SQLiteStats {
+	if s == nil {
+		return SQLiteStats{}
+	}
+	return SQLiteStats{
+		QueueDepth:             len(s.ch),
+		QueueCapacity:          cap(s.ch),
+		DropTickTotal:          s.dropTickTotal.Load(),
+		DropAuditTotal:         s.dropAuditTotal.Load(),
+		DropSnapshotTotal:      s.dropSnapshotTotal.Load(),
+		DropSnapshotStateTotal: s.dropSnapshotStateTotal.Load(),
+		DropSeasonTotal:        s.dropSeasonTotal.Load(),
+	}
+}
+
+func (s *SQLiteIndex) logDrop(kind string, total uint64) {
+	if s == nil {
+		return
+	}
+	if total == 1 || total%100 == 0 {
+		log.Printf("[indexdb sqlite] queue full; drop kind=%s dropped_total=%d queue_depth=%d queue_capacity=%d", kind, total, len(s.ch), cap(s.ch))
+	}
+}
+
 func (s *SQLiteIndex) WriteTick(entry world.TickLogEntry) error {
 	if s == nil || s.closed.Load() {
 		return nil
@@ -409,6 +450,8 @@ func (s *SQLiteIndex) WriteTick(entry world.TickLogEntry) error {
 	case s.ch <- req{kind: reqTick, tick: entry}:
 	default:
 		// Drop if the indexer falls behind; JSONL logs remain the source of truth.
+		drops := s.dropTickTotal.Add(1)
+		s.logDrop("tick", drops)
 	}
 	return nil
 }
@@ -420,6 +463,8 @@ func (s *SQLiteIndex) WriteAudit(entry world.AuditEntry) error {
 	select {
 	case s.ch <- req{kind: reqAudit, audit: entry}:
 	default:
+		drops := s.dropAuditTotal.Add(1)
+		s.logDrop("audit", drops)
 	}
 	return nil
 }
@@ -444,6 +489,8 @@ func (s *SQLiteIndex) RecordSnapshot(path string, snap snapshot.SnapshotV1) {
 	select {
 	case s.ch <- req{kind: reqSnapshot, snapshot: r}:
 	default:
+		drops := s.dropSnapshotTotal.Add(1)
+		s.logDrop("snapshot", drops)
 	}
 }
 
@@ -472,6 +519,8 @@ func (s *SQLiteIndex) RecordSnapshotState(snap snapshot.SnapshotV1) {
 	select {
 	case s.ch <- req{kind: reqSnapshotState, state: st}:
 	default:
+		drops := s.dropSnapshotStateTotal.Add(1)
+		s.logDrop("snapshot_state", drops)
 	}
 }
 
@@ -492,6 +541,8 @@ func (s *SQLiteIndex) RecordSeason(season int, endTick uint64, archivedSnapshotP
 	select {
 	case s.ch <- req{kind: reqSeason, season: r}:
 	default:
+		drops := s.dropSeasonTotal.Add(1)
+		s.logDrop("season", drops)
 	}
 }
 

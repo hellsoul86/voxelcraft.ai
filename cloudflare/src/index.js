@@ -77,7 +77,10 @@ async function signMcpRequestIfNeeded(request, env) {
     throw new Error("VC_MCP_PUBLIC=true but VC_MCP_HMAC_SECRET is empty");
   }
 
-  const agentId = (request.headers.get("x-agent-id") || "").trim() || "default";
+  const agentId = (request.headers.get("x-agent-id") || "").trim();
+  if (!agentId) {
+    throw new Error("VC_MCP_PUBLIC=true requires x-agent-id header");
+  }
   const ts = String(Date.now());
   const nonce = randomHex(16);
   const rawBody = await request.clone().text();
@@ -867,6 +870,10 @@ export default {
         return coordinator.fetch(switchPort(signed, 8090));
       } catch (err) {
         console.error("mcp proxy sign failed", err);
+        const msg = String(err?.message || "").toLowerCase();
+        if (msg.includes("requires x-agent-id header")) {
+          return new Response("missing x-agent-id", { status: 400 });
+        }
         return new Response("mcp proxy error", { status: 500 });
       }
     }
